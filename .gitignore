@@ -1,0 +1,17 @@
+data/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.claude/
+plan.md
+decisions.md
+implementation-plan-v0.1.md
+2026-03-05-*.md

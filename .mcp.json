@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "smart-search": {
+      "command": "C:\\Users\\ekmun\\PythonEnvs\\nanobot\\Scripts\\python.exe",
+      "args": ["-m", "smart_search.server"],
+      "cwd": "C:\\Users\\ekmun\\Dev\\smart-search"
+    }
+  }
+}

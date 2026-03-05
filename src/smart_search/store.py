@@ -1,0 +1,322 @@
+# LanceDB vector storage + SQLite metadata for chunk persistence and search.
+
+import os
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List
+
+import lancedb
+import pyarrow as pa
+
+from smart_search.config import SmartSearchConfig
+from smart_search.models import Chunk, IndexStats, SearchResult
+
+
+class ChunkStore:
+    """Stores and retrieves document chunks using LanceDB (vectors) and SQLite (metadata).
+
+    LanceDB handles vector storage and similarity search.
+    SQLite tracks which files have been indexed and their content hashes.
+    """
+
+    def __init__(self, config: SmartSearchConfig) -> None:
+        """Initialize store with paths from config.
+
+        Args:
+            config: SmartSearchConfig with lancedb_path, sqlite_path, table name.
+        """
+        self._config = config
+        self._db = None
+        self._table = None
+        self._sqlite_conn = None
+
+    def initialize(self) -> None:
+        """Create LanceDB database/table and SQLite schema.
+
+        Safe to call multiple times (idempotent).
+        """
+        # LanceDB setup
+        Path(self._config.lancedb_path).mkdir(parents=True, exist_ok=True)
+        self._db = lancedb.connect(self._config.lancedb_path)
+
+        existing_tables = self._db.list_tables().tables
+        if self._config.lancedb_table_name in existing_tables:
+            self._table = self._db.open_table(self._config.lancedb_table_name)
+        else:
+            schema = pa.schema([
+                pa.field("id", pa.string()),
+                pa.field("source_path", pa.string()),
+                pa.field("source_type", pa.string()),
+                pa.field("content_type", pa.string()),
+                pa.field("text", pa.string()),
+                pa.field("page_number", pa.int32()),
+                pa.field("section_path", pa.string()),
+                pa.field("embedding", pa.list_(pa.float32(), 768)),
+                pa.field("has_image", pa.bool_()),
+                pa.field("image_path", pa.string()),
+                pa.field("entity_tags", pa.string()),
+                pa.field("source_title", pa.string()),
+                pa.field("source_date", pa.string()),
+                pa.field("indexed_at", pa.string()),
+                pa.field("model_name", pa.string()),
+            ])
+            self._table = self._db.create_table(
+                self._config.lancedb_table_name, schema=schema
+            )
+
+        # SQLite setup
+        Path(self._config.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+        self._sqlite_conn = sqlite3.connect(self._config.sqlite_path)
+        self._sqlite_conn.execute(
+            """CREATE TABLE IF NOT EXISTS indexed_files (
+                source_path TEXT PRIMARY KEY,
+                file_hash   TEXT NOT NULL,
+                chunk_count INTEGER NOT NULL,
+                indexed_at  TEXT NOT NULL
+            )"""
+        )
+        self._sqlite_conn.commit()
+
+    def upsert_chunks(self, chunks: List[Chunk]) -> None:
+        """Insert or replace chunks in LanceDB.
+
+        Deletes existing chunks with matching IDs before inserting,
+        ensuring idempotent upsert behavior.
+
+        Args:
+            chunks: List of Chunk objects with populated embeddings.
+        """
+        if not chunks:
+            return
+
+        # Delete existing chunks with same IDs
+        chunk_ids = [c.id for c in chunks]
+        for cid in chunk_ids:
+            try:
+                self._table.delete(f'id = "{cid}"')
+            except Exception:
+                pass  # Row may not exist
+
+        # Insert new chunks
+        records = [self._chunk_to_record(c) for c in chunks]
+        self._table.add(records)
+
+    def delete_chunks_for_file(self, source_path: str) -> int:
+        """Remove all chunks for a given source file.
+
+        Args:
+            source_path: The source_path value stored in chunks.
+
+        Returns:
+            Number of chunks deleted.
+        """
+        existing = self.get_chunks_for_file(source_path)
+        count = len(existing)
+        if count > 0:
+            # Escape single quotes in path
+            escaped = source_path.replace("'", "''")
+            self._table.delete(f"source_path = '{escaped}'")
+        return count
+
+    def get_chunks_for_file(self, source_path: str) -> List[Chunk]:
+        """Retrieve all chunks for a specific source file.
+
+        Args:
+            source_path: Path to the source document.
+
+        Returns:
+            List of Chunk objects for that file.
+        """
+        try:
+            escaped = source_path.replace("'", "''")
+            results = (
+                self._table.search()
+                .where(f"source_path = '{escaped}'")
+                .limit(10000)
+                .to_list()
+            )
+            return [self._record_to_chunk(r) for r in results]
+        except Exception:
+            return []
+
+    def vector_search(
+        self, query_embedding: List[float], limit: int = 10
+    ) -> List[SearchResult]:
+        """Search for chunks most similar to the query embedding.
+
+        Args:
+            query_embedding: 768-dim query vector.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of SearchResult objects ranked by similarity (highest first).
+        """
+        results = (
+            self._table.search(query_embedding)
+            .metric("cosine")
+            .limit(limit)
+            .to_list()
+        )
+
+        search_results = []
+        for rank, row in enumerate(results, start=1):
+            chunk = self._record_to_chunk(row)
+            # LanceDB returns _distance (lower = more similar for cosine)
+            distance = row.get("_distance", 0.0)
+            score = 1.0 - distance
+            search_results.append(
+                SearchResult(rank=rank, score=score, chunk=chunk)
+            )
+
+        return search_results
+
+    def get_stats(self) -> IndexStats:
+        """Get statistics about the indexed knowledge base.
+
+        Returns:
+            IndexStats with document count, chunk count, size, formats.
+        """
+        try:
+            all_data = self._table.search().limit(100000).to_list()
+            chunk_count = len(all_data)
+        except Exception:
+            all_data = []
+            chunk_count = 0
+
+        # Count unique source paths and formats
+        source_paths = set()
+        formats = set()
+        for row in all_data:
+            source_paths.add(row.get("source_path", ""))
+            formats.add(row.get("source_type", ""))
+
+        # Calculate index size on disk
+        index_size = self._calculate_index_size()
+
+        # Get last indexed timestamp from SQLite
+        last_indexed = None
+        if self._sqlite_conn:
+            cursor = self._sqlite_conn.execute(
+                "SELECT MAX(indexed_at) FROM indexed_files"
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                last_indexed = row[0]
+
+        return IndexStats(
+            document_count=len(source_paths),
+            chunk_count=chunk_count,
+            index_size_bytes=index_size,
+            last_indexed_at=last_indexed,
+            formats_indexed=sorted(formats - {""}),
+        )
+
+    def is_file_indexed(self, source_path: str, file_hash: str) -> bool:
+        """Check if a file is already indexed with the given hash.
+
+        Args:
+            source_path: Path to the document file.
+            file_hash: SHA-256 hash of the file contents.
+
+        Returns:
+            True if the file is indexed at exactly this hash.
+        """
+        cursor = self._sqlite_conn.execute(
+            "SELECT file_hash FROM indexed_files WHERE source_path = ?",
+            (source_path,),
+        )
+        row = cursor.fetchone()
+        return row is not None and row[0] == file_hash
+
+    def record_file_indexed(
+        self, source_path: str, file_hash: str, chunk_count: int
+    ) -> None:
+        """Record that a file has been indexed.
+
+        Args:
+            source_path: Path to the document file.
+            file_hash: SHA-256 hash of the file contents.
+            chunk_count: Number of chunks produced from this file.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        self._sqlite_conn.execute(
+            """INSERT OR REPLACE INTO indexed_files
+               (source_path, file_hash, chunk_count, indexed_at)
+               VALUES (?, ?, ?, ?)""",
+            (source_path, file_hash, chunk_count, now),
+        )
+        self._sqlite_conn.commit()
+
+    def _chunk_to_record(self, chunk: Chunk) -> dict:
+        """Convert a Chunk to a dict suitable for LanceDB insertion.
+
+        Args:
+            chunk: Chunk Pydantic model.
+
+        Returns:
+            Dictionary with all chunk fields.
+        """
+        return {
+            "id": chunk.id,
+            "source_path": chunk.source_path,
+            "source_type": chunk.source_type,
+            "content_type": chunk.content_type,
+            "text": chunk.text,
+            "page_number": chunk.page_number if chunk.page_number is not None else 0,
+            "section_path": chunk.section_path,
+            "embedding": chunk.embedding,
+            "has_image": chunk.has_image,
+            "image_path": chunk.image_path or "",
+            "entity_tags": chunk.entity_tags or "",
+            "source_title": chunk.source_title or "",
+            "source_date": chunk.source_date or "",
+            "indexed_at": chunk.indexed_at,
+            "model_name": chunk.model_name,
+        }
+
+    def _record_to_chunk(self, record: dict) -> Chunk:
+        """Convert a LanceDB record back to a Chunk model.
+
+        Args:
+            record: Dictionary from LanceDB query result.
+
+        Returns:
+            Chunk Pydantic model.
+        """
+        return Chunk(
+            id=record["id"],
+            source_path=record["source_path"],
+            source_type=record["source_type"],
+            content_type=record["content_type"],
+            text=record["text"],
+            page_number=record.get("page_number") or None,
+            section_path=record["section_path"],
+            embedding=list(record["embedding"]),
+            has_image=record.get("has_image", False),
+            image_path=record.get("image_path") or None,
+            entity_tags=record.get("entity_tags") or None,
+            source_title=record.get("source_title") or None,
+            source_date=record.get("source_date") or None,
+            indexed_at=record["indexed_at"],
+            model_name=record["model_name"],
+        )
+
+    def _calculate_index_size(self) -> int:
+        """Calculate total size of LanceDB and SQLite files on disk.
+
+        Returns:
+            Total size in bytes.
+        """
+        total = 0
+        lance_path = Path(self._config.lancedb_path)
+        if lance_path.exists():
+            for f in lance_path.rglob("*"):
+                if f.is_file():
+                    total += f.stat().st_size
+
+        sqlite_path = Path(self._config.sqlite_path)
+        if sqlite_path.exists():
+            total += sqlite_path.stat().st_size
+
+        return total
