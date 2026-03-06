@@ -103,7 +103,7 @@ Files already indexed at the same content hash are skipped automatically. Pass `
 
 ### Configure Claude Code
 
-Add an entry to your `.mcp.json` pointing to the Python interpreter in your virtual environment:
+Copy `.mcp.json.example` to `.mcp.json` and update the paths to match your environment:
 
 ```json
 {

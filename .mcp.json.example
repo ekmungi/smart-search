@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "smart-search": {
+      "command": "/path/to/your/venv/bin/python",
+      "args": ["-m", "smart_search.server"],
+      "cwd": "/path/to/smart-search"
+    }
+  }
+}
