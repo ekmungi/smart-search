@@ -1,10 +1,12 @@
-# FastMCP server entry point: exposes knowledge_search and knowledge_stats tools.
+# FastMCP server entry point: exposes knowledge tools and file watcher.
 
+from pathlib import Path
 from typing import List, Optional
 
 from fastmcp import FastMCP
 
 from smart_search.config import SmartSearchConfig, get_config
+from smart_search.indexer import DocumentIndexer, IndexFileResult, IndexFolderResult
 from smart_search.models import IndexStats
 from smart_search.search import SearchEngine
 from smart_search.store import ChunkStore
@@ -14,6 +16,7 @@ def create_server(
     search_engine: Optional[SearchEngine] = None,
     store: Optional[ChunkStore] = None,
     config: Optional[SmartSearchConfig] = None,
+    indexer: Optional[DocumentIndexer] = None,
 ) -> FastMCP:
     """Create and configure the FastMCP server with tools.
 
@@ -24,6 +27,7 @@ def create_server(
         search_engine: Optional SearchEngine (for testing).
         store: Optional ChunkStore (for testing).
         config: Optional SmartSearchConfig override.
+        indexer: Optional DocumentIndexer (for testing).
 
     Returns:
         Configured FastMCP server instance.
@@ -36,12 +40,12 @@ def create_server(
     # Lazy-init real components only when tools are first called
     _engine = search_engine
     _store = store
+    _indexer = indexer
 
     def _get_engine() -> SearchEngine:
         """Get or create the search engine singleton."""
         nonlocal _engine, _store
         if _engine is None:
-            from smart_search.chunker import DocumentChunker
             from smart_search.embedder import Embedder
 
             if _store is None:
@@ -59,6 +63,27 @@ def create_server(
             _store = ChunkStore(config)
             _store.initialize()
         return _store
+
+    def _get_indexer() -> DocumentIndexer:
+        """Get or create the document indexer singleton."""
+        nonlocal _indexer, _store
+        if _indexer is None:
+            from smart_search.chunker import DocumentChunker
+            from smart_search.embedder import Embedder
+            from smart_search.markdown_chunker import MarkdownChunker
+
+            if _store is None:
+                _store = ChunkStore(config)
+                _store.initialize()
+
+            _indexer = DocumentIndexer(
+                config=config,
+                chunker=DocumentChunker(config),
+                embedder=Embedder(config),
+                store=_store,
+                markdown_chunker=MarkdownChunker(config),
+            )
+        return _indexer
 
     @mcp.tool()
     def knowledge_search(
@@ -99,7 +124,82 @@ def create_server(
         stats = s.get_stats()
         return _format_stats(stats)
 
+    @mcp.tool()
+    def knowledge_ingest(
+        path: str,
+        force: bool = False,
+    ) -> str:
+        """Ingest a file or folder into the knowledge base.
+
+        Indexes documents by extracting text, generating embeddings,
+        and storing chunks. Supports .md, .pdf, and .docx files.
+        Uses hash-based change detection to skip unchanged files.
+
+        Args:
+            path: Absolute path to a file or folder to ingest.
+            force: If True, re-index even if file hash is unchanged.
+
+        Returns:
+            Formatted ingestion result summary.
+        """
+        idx = _get_indexer()
+        target = Path(path)
+
+        if target.is_file():
+            result = idx.index_file(str(target), force=force)
+            return _format_file_result(result)
+        elif target.is_dir():
+            result = idx.index_folder(str(target), force=force)
+            return _format_folder_result(result)
+        else:
+            return f"INGEST ERROR\nPath not found: {path}"
+
     return mcp
+
+
+def _format_file_result(result: IndexFileResult) -> str:
+    """Format a single-file indexing result as a human-readable string.
+
+    Args:
+        result: IndexFileResult from the indexer.
+
+    Returns:
+        Formatted status string.
+    """
+    if result.status == "failed":
+        return (
+            f"INGEST RESULT\n"
+            f"=============\n"
+            f"File: {result.file_path}\n"
+            f"Status: FAILED\n"
+            f"Error: {result.error}"
+        )
+    return (
+        f"INGEST RESULT\n"
+        f"=============\n"
+        f"File: {result.file_path}\n"
+        f"Status: {result.status}\n"
+        f"Chunks: {result.chunk_count}"
+    )
+
+
+def _format_folder_result(result: IndexFolderResult) -> str:
+    """Format a folder indexing result as a human-readable string.
+
+    Args:
+        result: IndexFolderResult from the indexer.
+
+    Returns:
+        Formatted summary string.
+    """
+    return (
+        f"INGEST RESULT\n"
+        f"=============\n"
+        f"Indexed: {result.indexed} files\n"
+        f"Skipped: {result.skipped} files (unchanged)\n"
+        f"Failed: {result.failed} files\n"
+        f"Total: {len(result.results)} files processed"
+    )
 
 
 def _format_stats(stats: IndexStats) -> str:
