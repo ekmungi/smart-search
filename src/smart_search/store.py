@@ -229,6 +229,21 @@ class ChunkStore:
         row = cursor.fetchone()
         return row is not None and row[0] == file_hash
 
+    def remove_file_record(self, source_path: str) -> None:
+        """Remove the indexed_files record for a source file.
+
+        Called when a watched file is deleted. Does nothing if the
+        record does not exist.
+
+        Args:
+            source_path: Path to the document file.
+        """
+        self._sqlite_conn.execute(
+            "DELETE FROM indexed_files WHERE source_path = ?",
+            (source_path,),
+        )
+        self._sqlite_conn.commit()
+
     def record_file_indexed(
         self, source_path: str, file_hash: str, chunk_count: int
     ) -> None:

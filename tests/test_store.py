@@ -136,3 +136,14 @@ class TestStoreStats:
         """Changed file hash means the file needs re-indexing."""
         initialized_store.record_file_indexed("/docs/a.pdf", "hash_v1", 5)
         assert not initialized_store.is_file_indexed("/docs/a.pdf", "hash_v2")
+
+    def test_remove_file_record(self, initialized_store):
+        """remove_file_record deletes the SQLite indexed_files row."""
+        initialized_store.record_file_indexed("/tmp/test.md", "abc123", 5)
+        assert initialized_store.is_file_indexed("/tmp/test.md", "abc123")
+        initialized_store.remove_file_record("/tmp/test.md")
+        assert not initialized_store.is_file_indexed("/tmp/test.md", "abc123")
+
+    def test_remove_file_record_nonexistent_no_error(self, initialized_store):
+        """Removing a non-existent record does not raise."""
+        initialized_store.remove_file_record("/tmp/does_not_exist.md")

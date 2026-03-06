@@ -30,8 +30,23 @@ class SmartSearchConfig(BaseSettings):
     sqlite_path: str = "./data/metadata.db"
     lancedb_table_name: str = "chunks"
 
-    # Document settings
-    supported_extensions: List[str] = [".pdf", ".docx"]
+    # Document settings -- .md added in v0.2 for Markdown note indexing
+    supported_extensions: List[str] = [".pdf", ".docx", ".md"]
+
+    # Watch directories for file watcher (resolved to absolute in validator)
+    watch_directories: List[str] = []
+
+    # File exclusion patterns matched against path components
+    exclude_patterns: List[str] = [
+        ".git", ".obsidian", ".trash", "node_modules", ".smart-search"
+    ]
+
+    # Markdown block-level chunking controls (v0.2)
+    block_chunking_enabled: bool = True
+    min_chunk_length: int = 50  # Minimum characters; shorter chunks are discarded
+
+    # File watcher debounce window in seconds to avoid redundant re-indexing
+    watcher_debounce_seconds: float = 2.0
 
     # Search settings
     search_default_limit: int = 10
@@ -43,12 +58,21 @@ class SmartSearchConfig(BaseSettings):
 
     @model_validator(mode="after")
     def resolve_paths(self) -> "SmartSearchConfig":
-        """Resolve lancedb_path and sqlite_path to absolute paths."""
+        """Resolve storage paths and watch_directories to absolute paths.
+
+        Runs after all field assignments so relative paths provided by
+        callers or env vars are normalised before any code reads them.
+        """
         object.__setattr__(
             self, "lancedb_path", str(Path(self.lancedb_path).resolve())
         )
         object.__setattr__(
             self, "sqlite_path", str(Path(self.sqlite_path).resolve())
+        )
+        object.__setattr__(
+            self,
+            "watch_directories",
+            [str(Path(d).resolve()) for d in self.watch_directories],
         )
         return self
 

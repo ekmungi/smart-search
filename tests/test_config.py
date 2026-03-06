@@ -61,3 +61,47 @@ class TestGetConfig:
         """get_config returns a SmartSearchConfig instance."""
         config = get_config()
         assert isinstance(config, SmartSearchConfig)
+
+
+class TestConfigV02Fields:
+    """Tests for v0.2 fields: watch_directories, exclude_patterns, chunking controls."""
+
+    def test_default_supported_extensions_includes_md(self):
+        """supported_extensions default includes .md for Markdown notes."""
+        config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+        assert ".md" in config.supported_extensions
+
+    def test_default_watch_directories_empty(self):
+        """watch_directories defaults to an empty list."""
+        config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+        assert config.watch_directories == []
+
+    def test_default_exclude_patterns(self):
+        """exclude_patterns defaults include .git and .obsidian."""
+        config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+        assert ".git" in config.exclude_patterns
+        assert ".obsidian" in config.exclude_patterns
+
+    def test_default_block_chunking_enabled(self):
+        """block_chunking_enabled defaults to True."""
+        config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+        assert config.block_chunking_enabled is True
+
+    def test_default_min_chunk_length(self):
+        """min_chunk_length defaults to 50 characters."""
+        config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+        assert config.min_chunk_length == 50
+
+    def test_default_watcher_debounce(self):
+        """watcher_debounce_seconds defaults to 2.0."""
+        config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+        assert config.watcher_debounce_seconds == 2.0
+
+    def test_watch_directories_resolved_to_absolute(self):
+        """watch_directories entries are resolved to absolute paths at init."""
+        config = SmartSearchConfig(
+            lancedb_path="./x", sqlite_path="./y",
+            watch_directories=["./my_vault"]
+        )
+        for d in config.watch_directories:
+            assert Path(d).is_absolute()
