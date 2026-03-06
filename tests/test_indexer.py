@@ -205,3 +205,39 @@ class TestIndexerEndToEnd:
         )
         assert len(chunks) > 0
         assert all(len(c.embedding) == 768 for c in chunks)
+
+    def test_end_to_end_markdown_indexing(self, tmp_config, tmp_path):
+        """Real Markdown -> heading chunks -> real embeddings -> store."""
+        from smart_search.chunker import DocumentChunker
+        from smart_search.embedder import Embedder
+        from smart_search.markdown_chunker import MarkdownChunker
+
+        md = tmp_path / "test_note.md"
+        md.write_text(
+            "---\ntitle: Test Note\n---\n"
+            "# Section 1\n"
+            "This is the first section with enough content to index properly.\n"
+            "## Section 2\n"
+            "This is the second section with enough content to index properly.\n",
+            encoding="utf-8",
+        )
+
+        cfg = tmp_config.model_copy(update={"min_chunk_length": 10})
+        store = ChunkStore(cfg)
+        store.initialize()
+        indexer = DocumentIndexer(
+            config=cfg,
+            chunker=DocumentChunker(cfg),
+            embedder=Embedder(cfg),
+            store=store,
+            markdown_chunker=MarkdownChunker(cfg),
+        )
+        result = indexer.index_file(str(md))
+        assert result.status == "indexed"
+        assert result.chunk_count == 2
+
+        chunks = store.get_chunks_for_file(md.resolve().as_posix())
+        assert len(chunks) == 2
+        assert all(len(c.embedding) == 768 for c in chunks)
+        assert all(c.source_type == "md" for c in chunks)
+        assert chunks[0].source_title == "Test Note"
