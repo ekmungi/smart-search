@@ -17,6 +17,7 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings",
     "einops",
+    "watchdog",
 ]
 
 [project.optional-dependencies]

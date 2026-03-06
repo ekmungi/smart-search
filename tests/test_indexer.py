@@ -12,14 +12,23 @@ from smart_search.models import Chunk
 from smart_search.store import ChunkStore
 
 
-def _make_fake_chunks(source_path, count=3):
-    """Create fake chunks as if returned by a chunker."""
+def _make_fake_chunks(source_path, count=3, source_type="pdf"):
+    """Create fake chunks as if returned by a chunker.
+
+    Args:
+        source_path: Path to the source file.
+        count: Number of fake chunks to create.
+        source_type: The source type string to embed in each chunk.
+
+    Returns:
+        List of Chunk instances with synthetic data.
+    """
     rng = np.random.RandomState(42)
     return [
         Chunk(
             id=f"fake_{i}",
             source_path=source_path,
-            source_type="pdf",
+            source_type=source_type,
             content_type="text",
             text=f"Chunk {i} content.",
             page_number=i + 1,
@@ -42,6 +51,14 @@ def mock_chunker():
 
 
 @pytest.fixture
+def mock_md_chunker():
+    """Mock MarkdownChunker that returns fake chunks."""
+    chunker = MagicMock()
+    chunker.chunk_file.side_effect = lambda path: _make_fake_chunks(path, source_type="md")
+    return chunker
+
+
+@pytest.fixture
 def indexer_deps(tmp_config, mock_chunker, mock_embedder):
     """Set up all indexer dependencies with mocks."""
     store = ChunkStore(tmp_config)
@@ -58,6 +75,20 @@ def indexer_deps(tmp_config, mock_chunker, mock_embedder):
 def indexer(indexer_deps):
     """DocumentIndexer with mocked chunker and embedder."""
     return DocumentIndexer(**indexer_deps)
+
+
+@pytest.fixture
+def indexer_with_md(tmp_config, mock_chunker, mock_md_chunker, mock_embedder):
+    """DocumentIndexer with both document and markdown chunkers."""
+    store = ChunkStore(tmp_config)
+    store.initialize()
+    return DocumentIndexer(
+        config=tmp_config,
+        chunker=mock_chunker,
+        embedder=mock_embedder,
+        store=store,
+        markdown_chunker=mock_md_chunker,
+    ), mock_chunker, mock_md_chunker
 
 
 class TestIndexFile:
@@ -112,6 +143,37 @@ class TestIndexFolder:
         result = indexer.index_folder(str(tmp_path))
         assert result.indexed == 2
         assert result.skipped == 0
+
+
+class TestIndexerRouting:
+    """Tests that files are routed to the correct chunker."""
+
+    def test_md_routes_to_markdown_chunker(self, indexer_with_md, tmp_path):
+        """Markdown file uses the markdown chunker."""
+        indexer, doc_chunker, md_chunker = indexer_with_md
+        md = tmp_path / "note.md"
+        md.write_text("# Test\nContent here")
+        result = indexer.index_file(str(md))
+        assert result.status == "indexed"
+        md_chunker.chunk_file.assert_called_once()
+        doc_chunker.chunk_file.assert_not_called()
+
+    def test_pdf_routes_to_document_chunker(self, indexer_with_md, tmp_path):
+        """PDF file uses the document chunker."""
+        indexer, doc_chunker, md_chunker = indexer_with_md
+        pdf = tmp_path / "doc.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake")
+        result = indexer.index_file(str(pdf))
+        assert result.status == "indexed"
+        doc_chunker.chunk_file.assert_called_once()
+        md_chunker.chunk_file.assert_not_called()
+
+    def test_md_without_markdown_chunker_uses_document_chunker(self, indexer, tmp_path):
+        """When no markdown_chunker provided, .md falls back to document chunker."""
+        md = tmp_path / "note.md"
+        md.write_text("# Test\nContent")
+        result = indexer.index_file(str(md))
+        assert result.status == "indexed"
 
 
 @pytest.mark.slow

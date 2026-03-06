@@ -59,27 +59,33 @@ class DocumentIndexer:
         chunker: DocumentChunker,
         embedder: Embedder,
         store: ChunkStore,
+        markdown_chunker=None,
     ) -> None:
         """Initialize with all pipeline components.
 
         Args:
             config: SmartSearchConfig with supported extensions.
-            chunker: DocumentChunker for extracting chunks.
+            chunker: DocumentChunker for extracting chunks from PDFs/DOCX/etc.
             embedder: Embedder for generating vectors.
             store: ChunkStore for persistence.
+            markdown_chunker: Optional MarkdownChunker for .md files. When
+                provided, .md files are routed here instead of chunker.
         """
         self._config = config
         self._chunker = chunker
         self._embedder = embedder
         self._store = store
+        self._markdown_chunker = markdown_chunker
 
     def index_file(self, file_path: str, force: bool = False) -> IndexFileResult:
         """Index a single document file.
 
         Pipeline: validate -> hash -> check cache -> chunk -> embed -> store.
+        .md files are routed to markdown_chunker when one is set; all other
+        supported types use the document chunker.
 
         Args:
-            file_path: Path to a PDF or DOCX file.
+            file_path: Path to a supported document or Markdown file.
             force: If True, re-index even if file hash matches.
 
         Returns:
@@ -105,8 +111,13 @@ class DocumentIndexer:
             )
 
         try:
-            # Chunk the document
-            chunks = self._chunker.chunk_file(str(path))
+            # Route to the appropriate chunker based on file extension.
+            # .md files go to the markdown chunker when one is registered;
+            # all other supported types use the document chunker.
+            if path.suffix.lower() == ".md" and self._markdown_chunker is not None:
+                chunks = self._markdown_chunker.chunk_file(str(path))
+            else:
+                chunks = self._chunker.chunk_file(str(path))
             if not chunks:
                 return IndexFileResult(
                     file_path=str(path), status="indexed", chunk_count=0,
