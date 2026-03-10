@@ -170,7 +170,7 @@ def create_server(
             _get_registry().touch(path_posix)
             return engine.search(
                 query=query, limit=limit, mode=mode,
-                doc_types=doc_types, folder=folder,
+                doc_types=doc_types, folder=None,
             )
 
         engine = _get_engine()
