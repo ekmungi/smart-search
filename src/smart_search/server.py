@@ -8,6 +8,13 @@ from fastmcp import FastMCP
 from smart_search.config import SmartSearchConfig, get_config
 from smart_search.config_manager import ConfigManager
 from smart_search.data_dir import get_data_dir
+from smart_search.ephemeral_registry import EphemeralRegistry
+from smart_search.ephemeral_store import (
+    calculate_ephemeral_size,
+    create_ephemeral_components,
+    ephemeral_index_exists,
+    remove_ephemeral_index,
+)
 from smart_search.indexer import DocumentIndexer, IndexFileResult, IndexFolderResult
 from smart_search.models import IndexStats
 from smart_search.search import SearchEngine
@@ -108,6 +115,16 @@ def create_server(
             _watcher = FileWatcher(config, _get_indexer(), _get_store())
         return _watcher
 
+    _registry = None
+
+    def _get_registry() -> EphemeralRegistry:
+        """Get or create the ephemeral registry singleton."""
+        nonlocal _registry
+        if _registry is None:
+            _registry = EphemeralRegistry(config.sqlite_path)
+            _registry.initialize()
+        return _registry
+
     @mcp.tool()
     def knowledge_search(
         query: str,
@@ -115,6 +132,7 @@ def create_server(
         mode: str = "hybrid",
         doc_types: Optional[List[str]] = None,
         folder: Optional[str] = None,
+        ephemeral_folder: Optional[str] = None,
     ) -> str:
         """Search the knowledge base for documents matching a query.
 
@@ -122,16 +140,39 @@ def create_server(
         section headings, and relevance scores. Results are ranked
         by semantic similarity.
 
+        When ephemeral_folder is provided, searches a folder-local
+        .smart-search/ index created by knowledge_temp_index instead
+        of the global knowledge base.
+
         Args:
             query: Natural language search query.
             limit: Maximum number of results (default 10).
             mode: Search mode - semantic, keyword, or hybrid (default hybrid).
             doc_types: Optional filter by document type (e.g., ["pdf", "docx"]).
             folder: Optional folder path to restrict search results to.
+            ephemeral_folder: Optional path to a folder with a local index.
 
         Returns:
             Formatted search results as a string.
         """
+        if ephemeral_folder is not None:
+            path = Path(ephemeral_folder).resolve()
+            path_posix = path.as_posix()
+            if not ephemeral_index_exists(str(path)):
+                # Self-heal: remove stale registry entry
+                _get_registry().deregister(path_posix)
+                return (
+                    f"ERROR: No ephemeral index found at {path_posix}/.smart-search/\n"
+                    f"Run knowledge_temp_index first."
+                )
+            components = create_ephemeral_components(str(path))
+            engine = components["engine"]
+            _get_registry().touch(path_posix)
+            return engine.search(
+                query=query, limit=limit, mode=mode,
+                doc_types=doc_types, folder=folder,
+            )
+
         engine = _get_engine()
         return engine.search(
             query=query, limit=limit, mode=mode,
@@ -183,19 +224,43 @@ def create_server(
             return f"INGEST ERROR\nPath not found: {path}"
 
     @mcp.tool()
-    def find_related(note_path: str, limit: int = 10) -> str:
+    def find_related(
+        note_path: str,
+        limit: int = 10,
+        ephemeral_folder: Optional[str] = None,
+    ) -> str:
         """Find notes similar to a given note by vector similarity.
 
         Looks up the note's embeddings in the index and finds the closest
         matches, excluding the source note itself.
 
+        When ephemeral_folder is provided, searches a folder-local
+        .smart-search/ index created by knowledge_temp_index instead
+        of the global knowledge base.
+
         Args:
             note_path: Path to the source note (relative to a watch directory).
             limit: Maximum number of related notes to return.
+            ephemeral_folder: Optional path to a folder with a local index.
 
         Returns:
             Formatted list of related notes ranked by similarity.
         """
+        if ephemeral_folder is not None:
+            path = Path(ephemeral_folder).resolve()
+            path_posix = path.as_posix()
+            if not ephemeral_index_exists(str(path)):
+                # Self-heal: remove stale registry entry
+                _get_registry().deregister(path_posix)
+                return (
+                    f"ERROR: No ephemeral index found at {path_posix}/.smart-search/\n"
+                    f"Run knowledge_temp_index first."
+                )
+            components = create_ephemeral_components(str(path))
+            engine = components["engine"]
+            _get_registry().touch(path_posix)
+            return engine.find_related(note_path, limit=limit)
+
         engine = _get_engine()
         return engine.find_related(note_path, limit=limit)
 
@@ -332,6 +397,123 @@ def create_server(
         return "\n".join(lines)
 
     @mcp.tool()
+    def knowledge_temp_index(folder_path: str, force: bool = False) -> str:
+        """Create an ephemeral index inside a folder for temporary searching.
+
+        Creates a .smart-search/ directory inside the target folder containing
+        a local LanceDB and SQLite index. Independent of the global knowledge base.
+        Clean up with knowledge_temp_cleanup.
+
+        Args:
+            folder_path: Absolute path to the folder to index.
+            force: If True, re-index even if files are unchanged.
+
+        Returns:
+            Formatted summary of indexing results.
+        """
+        path = Path(folder_path).resolve()
+        if not path.is_dir():
+            return f"ERROR: Directory not found: {folder_path}"
+
+        try:
+            components = create_ephemeral_components(str(path))
+            indexer = components["indexer"]
+            result = indexer.index_folder(str(path), force=force)
+
+            registry = _get_registry()
+            size = calculate_ephemeral_size(str(path))
+            total_chunks = sum(
+                r.chunk_count for r in result.results if r.status == "indexed"
+            )
+            registry.register(path.as_posix(), total_chunks, size)
+
+            return (
+                f"EPHEMERAL INDEX CREATED\n"
+                f"======================\n"
+                f"Folder: {path.as_posix()}\n"
+                f"Index location: {path.as_posix()}/.smart-search/\n"
+                f"Files indexed: {result.indexed}\n"
+                f"Files skipped: {result.skipped}\n"
+                f"Files failed: {result.failed}\n"
+                f"Total chunks: {total_chunks}\n"
+                f"Index size: {size / 1024:.1f} KB\n"
+                f"\nSearch with: knowledge_search(query, ephemeral_folder=\"{path.as_posix()}\")"
+            )
+        except Exception as e:
+            return f"ERROR: Failed to create ephemeral index: {e}"
+
+    @mcp.tool()
+    def knowledge_temp_cleanup(folder_path: Optional[str] = None) -> str:
+        """Clean up ephemeral indexes or list all existing ones.
+
+        Without arguments: lists all registered ephemeral indexes with stats,
+        prunes stale entries whose .smart-search/ no longer exists.
+
+        With folder_path: deletes the .smart-search/ directory from that folder
+        and removes it from the registry.
+
+        Args:
+            folder_path: Optional path to a specific folder to clean up.
+
+        Returns:
+            Formatted list of indexes or cleanup confirmation.
+        """
+        registry = _get_registry()
+
+        if folder_path is None:
+            pruned = registry.prune_stale()
+            entries = registry.list_all()
+
+            if not entries and not pruned:
+                return "No ephemeral indexes found."
+
+            lines = ["EPHEMERAL INDEXES", "=" * 18]
+
+            if pruned:
+                lines.append(f"Pruned {len(pruned)} stale entries:")
+                for p in pruned:
+                    lines.append(f"  [stale] {p}")
+                lines.append("")
+
+            if entries:
+                lines.append(f"Active: {len(entries)} indexes")
+                lines.append("")
+                for entry in entries:
+                    size_kb = entry.size_bytes / 1024
+                    lines.append(f"  {entry.folder_path}")
+                    lines.append(
+                        f"    Chunks: {entry.chunk_count}, "
+                        f"Size: {size_kb:.1f} KB, "
+                        f"Created: {entry.created_at}"
+                    )
+            else:
+                lines.append("No active ephemeral indexes.")
+
+            return "\n".join(lines)
+
+        path = Path(folder_path).resolve()
+        path_posix = path.as_posix()
+
+        removed = remove_ephemeral_index(str(path))
+        registry.deregister(path_posix)
+
+        if removed:
+            return (
+                f"EPHEMERAL INDEX CLEANED\n"
+                f"======================\n"
+                f"Folder: {path_posix}\n"
+                f"Removed: .smart-search/ directory deleted\n"
+                f"Registry: entry removed"
+            )
+        else:
+            return (
+                f"EPHEMERAL INDEX CLEANUP\n"
+                f"======================\n"
+                f"Folder: {path_posix}\n"
+                f"No .smart-search/ directory found (registry entry cleaned if present)"
+            )
+
+    @mcp.tool()
     def read_note(note_path: str) -> str:
         """Read the content of a note by path with safety validation.
 
@@ -428,3 +610,7 @@ mcp = create_server()
 def main():
     """Run the MCP server via stdio transport."""
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
