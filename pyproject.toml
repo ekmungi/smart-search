@@ -20,6 +20,9 @@ dependencies = [
     "watchdog",
 ]
 
+[project.scripts]
+smart-search = "smart_search.server:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",

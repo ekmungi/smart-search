@@ -137,3 +137,61 @@ class TestSearchEndToEnd:
         result = engine.search("machine learning")
         assert "KNOWLEDGE SEARCH RESULTS" in result
         assert "Results:" in result
+
+
+def _make_chunk(
+    source_path="test/doc.pdf",
+    text="Sample chunk text for testing.",
+    embedding=None,
+    **kwargs,
+):
+    """Create a Chunk with sensible defaults for testing."""
+    defaults = dict(
+        id="test-chunk-001",
+        source_path=source_path,
+        source_type="md",
+        content_type="text",
+        text=text,
+        section_path='["Test"]',
+        embedding=embedding or np.random.RandomState(42).rand(768).tolist(),
+        indexed_at="2026-03-07T00:00:00",
+        model_name="nomic-ai/nomic-embed-text-v1.5",
+    )
+    defaults.update(kwargs)
+    return Chunk(**defaults)
+
+
+class TestFindRelated:
+    """Tests for the find_related method on SearchEngine."""
+
+    def test_returns_similar_notes(self, search_engine, mock_store):
+        """find_related returns formatted results for a known note."""
+        mock_store.get_chunks_for_file.return_value = [
+            _make_chunk(source_path="notes/source.md", text="hello world"),
+        ]
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.85, source="notes/similar.md"),
+        ]
+        result = search_engine.find_related("notes/source.md", limit=5)
+        assert "similar.md" in result
+        assert "0.85" in result
+        mock_store.get_chunks_for_file.assert_called_once_with("notes/source.md")
+        mock_store.vector_search.assert_called_once()
+
+    def test_returns_message_when_note_not_indexed(self, search_engine, mock_store):
+        """find_related returns helpful message when note has no chunks."""
+        mock_store.get_chunks_for_file.return_value = []
+        result = search_engine.find_related("notes/unknown.md")
+        assert "not found" in result.lower() or "not indexed" in result.lower()
+
+    def test_excludes_source_note_from_results(self, search_engine, mock_store):
+        """find_related filters out the source note from results."""
+        mock_store.get_chunks_for_file.return_value = [
+            _make_chunk(source_path="notes/source.md", text="hello"),
+        ]
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.99, source="notes/source.md"),
+            _make_search_result(rank=2, score=0.80, source="notes/other.md"),
+        ]
+        result = search_engine.find_related("notes/source.md")
+        assert "other.md" in result

@@ -177,3 +177,64 @@ class TestKnowledgeIngest:
         mock_indexer.index_file.assert_called_once()
         call_kwargs = mock_indexer.index_file.call_args
         assert call_kwargs[1].get("force") is True or call_kwargs[0][1] is True
+
+
+class TestFindRelatedTool:
+    """Tests for the find_related MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_find_related_tool_exists(self, server):
+        """find_related tool is registered on the server."""
+        tools = await server.list_tools()
+        tool_names = [t.name for t in tools]
+        assert "find_related" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_find_related_delegates_to_engine(
+        self, server, mock_search_engine
+    ):
+        """find_related calls search engine and returns results."""
+        mock_search_engine.find_related.return_value = (
+            "RELATED NOTES FOR: test.md\n..."
+        )
+        result = await server.call_tool(
+            "find_related", {"note_path": "test.md", "limit": 5}
+        )
+        text = _get_text(result)
+        mock_search_engine.find_related.assert_called_once_with(
+            "test.md", limit=5
+        )
+        assert "RELATED NOTES" in text
+
+
+class TestReadNoteTool:
+    """Tests for the read_note MCP tool."""
+
+    @pytest.mark.asyncio
+    async def test_read_note_tool_exists(self, server):
+        """read_note tool is registered on the server."""
+        tools = await server.list_tools()
+        tool_names = [t.name for t in tools]
+        assert "read_note" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_read_note_returns_content(self, tmp_path):
+        """read_note returns file content for valid path."""
+        from smart_search.config import SmartSearchConfig
+
+        note = tmp_path / "test.md"
+        note.write_text("# Test Note\n\nContent here.")
+        config = SmartSearchConfig(watch_directories=[str(tmp_path)])
+        srv = create_server(config=config)
+        result = await srv.call_tool("read_note", {"note_path": "test.md"})
+        text = _get_text(result)
+        assert "# Test Note" in text
+
+    @pytest.mark.asyncio
+    async def test_read_note_rejects_traversal(self, server):
+        """read_note returns error for path traversal."""
+        result = await server.call_tool(
+            "read_note", {"note_path": "../../etc/passwd"}
+        )
+        text = _get_text(result)
+        assert "error" in text.lower()

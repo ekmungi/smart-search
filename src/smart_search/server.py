@@ -154,6 +154,40 @@ def create_server(
         else:
             return f"INGEST ERROR\nPath not found: {path}"
 
+    @mcp.tool()
+    def find_related(note_path: str, limit: int = 10) -> str:
+        """Find notes similar to a given note by vector similarity.
+
+        Looks up the note's embeddings in the index and finds the closest
+        matches, excluding the source note itself.
+
+        Args:
+            note_path: Path to the source note (relative to a watch directory).
+            limit: Maximum number of related notes to return.
+
+        Returns:
+            Formatted list of related notes ranked by similarity.
+        """
+        engine = _get_engine()
+        return engine.find_related(note_path, limit=limit)
+
+    @mcp.tool()
+    def read_note(note_path: str) -> str:
+        """Read the content of a note by path with safety validation.
+
+        Resolves the path against configured watch directories and validates
+        against path traversal attacks before reading.
+
+        Args:
+            note_path: Relative path to the note (max 500 characters).
+
+        Returns:
+            Note content as text, or an error message.
+        """
+        from smart_search.reader import read_note as _read_note
+
+        return _read_note(note_path, config.watch_directories)
+
     return mcp
 
 

@@ -3,6 +3,8 @@
 import json
 from typing import List, Optional
 
+import numpy as np
+
 from smart_search.config import SmartSearchConfig
 from smart_search.embedder import Embedder
 from smart_search.models import SearchResult
@@ -72,6 +74,89 @@ class SearchEngine:
 
         except Exception as e:
             return f"KNOWLEDGE SEARCH ERROR\n=====================\nQuery: {query}\nError: {e}"
+
+    def find_related(
+        self, note_path: str, limit: int = 10
+    ) -> str:
+        """Find notes similar to a given note by averaging its embeddings.
+
+        Looks up the note's chunks in the store, averages their embedding
+        vectors, and searches for nearest neighbors excluding the source.
+
+        Args:
+            note_path: Relative or absolute path to the source note.
+            limit: Maximum number of related notes to return.
+
+        Returns:
+            Formatted string with ranked related notes, or error message.
+        """
+        chunks = self._store.get_chunks_for_file(note_path)
+        if not chunks:
+            return f"Note not found in index: '{note_path}'"
+
+        # Average all chunk embeddings for the source note
+        embeddings = np.array([c.embedding for c in chunks])
+        avg_embedding = embeddings.mean(axis=0).tolist()
+
+        # Search with extra results to account for self-matches
+        candidates = self._store.vector_search(
+            avg_embedding, limit=limit + len(chunks)
+        )
+
+        # Filter out chunks from the source note itself
+        filtered = [
+            r for r in candidates
+            if r.chunk.source_path != note_path
+        ][:limit]
+
+        if not filtered:
+            return f"No related notes found for '{note_path}'"
+
+        return self._format_related_results(filtered, note_path)
+
+    def _format_related_results(
+        self, results: List[SearchResult], source_path: str
+    ) -> str:
+        """Format find_related results as a ranked list.
+
+        Args:
+            results: Ranked search results (source note excluded).
+            source_path: Path of the source note for the header.
+
+        Returns:
+            Formatted multi-line string.
+        """
+        sources = list(dict.fromkeys(r.chunk.source_path for r in results))
+        lines = [
+            f"RELATED NOTES FOR: {source_path}",
+            "=" * 25,
+            f"Results: {len(results)} chunks from {len(sources)} documents",
+            "",
+        ]
+
+        for result in results:
+            chunk = result.chunk
+            section = self._format_section_path(chunk.section_path)
+            text = self._truncate_text(chunk.text)
+            filename = (
+                chunk.source_path.rsplit("/", 1)[-1]
+                if "/" in chunk.source_path
+                else chunk.source_path
+            )
+
+            header_parts = [f"[{result.rank}] {filename}"]
+            if section:
+                header_parts.append(f"Section: {section}")
+            lines.append(", ".join(header_parts))
+            lines.append(f"    {text}")
+            lines.append(f"    Similarity: {result.score:.2f}")
+            lines.append("")
+
+        lines.append("Sources:")
+        for source in sources:
+            lines.append(f"- {source}")
+
+        return "\n".join(lines)
 
     def _format_results(
         self, query: str, results: List[SearchResult], mode: str
