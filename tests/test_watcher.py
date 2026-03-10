@@ -143,3 +143,45 @@ class TestFileWatcher:
         w.start()
         assert w.is_running
         w.stop()
+
+
+class TestRuntimeWatchManagement:
+    """Tests for runtime add/remove of watch directories."""
+
+    def test_watched_directories_property(self, watcher):
+        """watched_directories returns list of currently watched paths."""
+        watcher.start()
+        dirs = watcher.watched_directories
+        assert isinstance(dirs, list)
+        assert len(dirs) == 1  # One dir from fixture
+
+    def test_add_directory_at_runtime(self, watcher, tmp_path):
+        """add_directory starts watching a new directory without restart."""
+        new_dir = tmp_path / "new_folder"
+        new_dir.mkdir()
+        watcher.start()
+        watcher.add_directory(str(new_dir))
+        assert str(new_dir.resolve()) in watcher.watched_directories
+
+    def test_remove_directory_at_runtime(self, watcher):
+        """remove_directory stops watching a directory without full restart."""
+        watcher.start()
+        initial_count = len(watcher.watched_directories)
+        assert initial_count > 0
+        watcher.remove_directory(watcher.watched_directories[0])
+        assert len(watcher.watched_directories) == initial_count - 1
+
+    def test_add_nonexistent_directory_is_noop(self, watcher):
+        """Adding a non-existent directory does not crash."""
+        watcher.start()
+        before = len(watcher.watched_directories)
+        watcher.add_directory("/nonexistent/path/12345")
+        assert len(watcher.watched_directories) == before
+
+    def test_add_duplicate_directory_is_noop(self, watcher):
+        """Adding a directory that's already watched does not duplicate."""
+        watcher.start()
+        existing = watcher.watched_directories[0]
+        before = len(watcher.watched_directories)
+        watcher.add_directory(existing)
+        assert len(watcher.watched_directories) == before

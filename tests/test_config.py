@@ -34,6 +34,14 @@ class TestConfigDefaults:
         assert Path(config.lancedb_path).is_absolute()
         assert Path(config.sqlite_path).is_absolute()
 
+    def test_default_paths_use_data_dir(self):
+        """Default paths point to OS-convention data directory."""
+        config = SmartSearchConfig()
+        assert "smart-search" in config.lancedb_path
+        assert "vectors" in config.lancedb_path
+        assert "smart-search" in config.sqlite_path
+        assert "metadata.db" in config.sqlite_path
+
 
 class TestConfigOverrides:
     """Tests for environment variable overrides."""
