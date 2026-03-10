@@ -1,15 +1,15 @@
 # smart-search
 
-Local-first MCP server for semantic search over Markdown, PDF, and DOCX documents. Runs entirely on CPU with no cloud dependencies, no GPU required. Designed to make your personal knowledge base searchable from Claude Code.
+Local-first MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX, and HTML documents. Runs entirely on CPU with no cloud dependencies, no GPU required. Designed to make your personal knowledge base searchable from Claude Code.
 
-**Version:** 0.2.6
+**Version:** 0.3.0
 
 ---
 
 ## What It Does
 
-- Indexes Markdown notes, PDFs, and DOCX files into a searchable knowledge base
-- Heading-based chunking for Markdown, structure-aware hierarchical chunking for documents
+- Indexes Markdown notes, PDFs, DOCX, PPTX, XLSX, and HTML files into a searchable knowledge base
+- Single pipeline: all non-Markdown files converted to Markdown via MarkItDown, then chunked by headings
 - Generates embeddings with nomic-embed-text-v1.5 (ONNX, CPU-optimized)
 - Stores vectors in LanceDB and metadata in SQLite -- both file-based, no server needed
 - Watches directories for changes and re-indexes automatically
@@ -204,7 +204,7 @@ Index a file or folder into the knowledge base.
 | `path`    | string  | Yes      | -       | Absolute path to a file or folder to ingest    |
 | `force`   | boolean | No       | `false` | Re-index even if file hash is unchanged        |
 
-Supports `.md`, `.pdf`, and `.docx` files. Uses hash-based change detection to skip unchanged files.
+Supports `.md`, `.pdf`, `.docx`, `.pptx`, `.xlsx`, and `.html` files. Uses hash-based change detection to skip unchanged files.
 
 ### `knowledge_add_folder`
 
@@ -293,7 +293,7 @@ All settings can be overridden with environment variables prefixed `SMART_SEARCH
 | `SMART_SEARCH_LANCEDB_PATH`           | `<data_dir>/vectors`               | Directory for LanceDB vector store               |
 | `SMART_SEARCH_SQLITE_PATH`            | `<data_dir>/metadata.db`           | Path to SQLite metadata database                 |
 | `SMART_SEARCH_LANCEDB_TABLE_NAME`     | `chunks`                           | LanceDB table name                               |
-| `SMART_SEARCH_SUPPORTED_EXTENSIONS`   | `[".pdf", ".docx", ".md"]`         | File types to index                              |
+| `SMART_SEARCH_SUPPORTED_EXTENSIONS`   | `[".pdf", ".docx", ".md", ".pptx", ".xlsx", ".html"]` | File types to index                              |
 | `SMART_SEARCH_WATCH_DIRECTORIES`      | `[]`                               | Directories to watch for changes                 |
 | `SMART_SEARCH_EXCLUDE_PATTERNS`       | `[".git", ".obsidian", ...]`       | Path components to exclude from indexing         |
 | `SMART_SEARCH_BLOCK_CHUNKING_ENABLED` | `true`                             | Enable heading-based Markdown chunking           |
@@ -324,7 +324,6 @@ In Claude Code, ask to ingest files:
 
 ```python
 from smart_search.config import get_config
-from smart_search.chunker import DocumentChunker
 from smart_search.embedder import Embedder
 from smart_search.markdown_chunker import MarkdownChunker
 from smart_search.store import ChunkStore
@@ -336,7 +335,6 @@ store.initialize()
 
 indexer = DocumentIndexer(
     config=config,
-    chunker=DocumentChunker(config),
     embedder=Embedder(config),
     store=store,
     markdown_chunker=MarkdownChunker(config),
@@ -346,7 +344,7 @@ indexer = DocumentIndexer(
 result = indexer.index_file("/path/to/document.pdf")
 print(result.status, result.chunk_count)
 
-# Index a folder (recursively finds .md, .pdf, .docx)
+# Index a folder (recursively finds .md, .pdf, .docx, .pptx, .xlsx, .html)
 result = indexer.index_folder("/path/to/documents")
 print(f"Indexed: {result.indexed}, Skipped: {result.skipped}, Failed: {result.failed}")
 ```
@@ -376,27 +374,28 @@ Slow tests are marked with `@pytest.mark.slow` and require ML models to be downl
 
 ```
 src/smart_search/
-  server.py           - FastMCP entry point; MCP tool definitions
-  cli.py              - CLI with subcommands (stats, config, watch, index, search, model)
-  indexer.py           - Document ingestion pipeline (chunk, embed, store, dedup)
-  chunker.py           - Docling HierarchicalChunker for PDF/DOCX
-  markdown_chunker.py  - Heading-based Markdown section splitter
-  watcher.py           - Watchdog file watcher with debounce and runtime add/remove
-  embedder.py          - nomic-embed-text-v1.5 ONNX embedding generation
-  store.py             - LanceDB vector store + SQLite metadata store
-  search.py            - Semantic search with Smart Context formatting and folder filter
-  models.py            - Pydantic models: Chunk, SearchResult, IndexStats
-  config.py            - Settings with SMART_SEARCH_ env var overrides
-  config_manager.py    - Persistent config.json with atomic writes
-  data_dir.py          - OS-convention data directory resolution
-  protocols.py         - Extension point protocols (Embedder, Chunker, Enricher, Retriever)
-  index_metadata.py    - Index metadata tracking in SQLite
-  reader.py            - Note reader with path traversal safety
+  server.py            - FastMCP entry point; MCP tool definitions
+  cli.py               - CLI with subcommands (stats, config, watch, index, search, model)
+  indexer.py            - Document ingestion pipeline (chunk, embed, store, dedup)
+  markitdown_parser.py  - MarkItDown wrapper: converts any file to Markdown
+  markdown_chunker.py   - Heading-based Markdown section splitter
+  watcher.py            - Watchdog file watcher with debounce and runtime add/remove
+  embedder.py           - nomic-embed-text-v1.5 ONNX embedding generation
+  store.py              - LanceDB vector store + SQLite metadata store
+  search.py             - Semantic search with Smart Context formatting and folder filter
+  models.py             - Pydantic models: Chunk, SearchResult, IndexStats
+  config.py             - Settings with SMART_SEARCH_ env var overrides
+  config_manager.py     - Persistent config.json with atomic writes
+  data_dir.py           - OS-convention data directory resolution
+  protocols.py          - Extension point protocols (Embedder, Chunker, Enricher, Retriever)
+  index_metadata.py     - Index metadata tracking in SQLite
+  reader.py             - Note reader with path traversal safety
 
 tests/
   test_server.py             - MCP tool registration, dispatch, folder tools
   test_cli.py                - CLI subcommand tests
   test_indexer.py            - Indexer pipeline and routing
+  test_markitdown_parser.py  - MarkItDown document conversion
   test_markdown_chunker.py   - Markdown heading-based chunking
   test_watcher.py            - File watcher, debounce, runtime management
   test_store.py              - LanceDB, SQLite, file listing, folder removal
@@ -407,7 +406,6 @@ tests/
   test_protocols.py          - Protocol compliance tests
   test_index_metadata.py     - Index metadata tracking
   test_models.py             - Pydantic model validation
-  test_chunker.py            - DocumentChunker (slow: requires Docling)
   test_embedder.py           - Embedder (slow: loads ONNX model)
 ```
 
@@ -418,8 +416,9 @@ tests/
 | Component        | Library / Model                                        |
 |------------------|--------------------------------------------------------|
 | MCP server       | FastMCP                                                |
-| Document parsing | Docling (DocumentConverter, HierarchicalChunker)       |
+| Document parsing | MarkItDown (PDF, DOCX, PPTX, XLSX, HTML)               |
 | Markdown parsing | Custom heading-based splitter (no dependencies)        |
+| Pipeline         | All files -> MarkItDown -> MarkdownChunker (single path) |
 | Embeddings       | nomic-ai/nomic-embed-text-v1.5 via sentence-transformers + ONNX |
 | Vector store     | LanceDB (file-based, no server)                        |
 | Metadata store   | SQLite (Python stdlib)                                 |

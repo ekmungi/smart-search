@@ -33,6 +33,8 @@ class MarkdownChunker:
     def chunk_file(self, file_path: str) -> List[Chunk]:
         """Read a Markdown file and return heading-delimited Chunk objects.
 
+        Thin wrapper around chunk_text() that reads from disk first.
+
         Args:
             file_path: Absolute or relative path to a .md file.
 
@@ -57,10 +59,29 @@ class MarkdownChunker:
             )
 
         raw_text = path.read_text(encoding="utf-8")
-        frontmatter, body = _strip_frontmatter(raw_text)
-
         source_path = path.resolve().as_posix()
-        source_title = frontmatter.get("title") or path.stem
+        return self.chunk_text(raw_text, source_path=source_path)
+
+    def chunk_text(
+        self, text: str, source_path: str, source_type: str = "md"
+    ) -> List[Chunk]:
+        """Chunk a Markdown string into heading-delimited Chunk objects.
+
+        Core chunking method that operates on text directly. Used by
+        chunk_file() for .md files and by the indexer for MarkItDown-
+        converted documents (PDF, DOCX, PPTX, etc.).
+
+        Args:
+            text: Markdown text content (may include YAML frontmatter).
+            source_path: Resolved posix path to attribute chunks to.
+            source_type: File type identifier (e.g., "md", "pdf", "docx").
+
+        Returns:
+            List of Chunk objects with empty embeddings, ready for embedding.
+        """
+        frontmatter, body = _strip_frontmatter(text)
+
+        source_title = frontmatter.get("title") or Path(source_path).stem
         source_date = frontmatter.get("date") or None
         now = datetime.now(timezone.utc).isoformat()
 
@@ -71,6 +92,7 @@ class MarkdownChunker:
                 source_path=source_path,
                 source_title=source_title,
                 source_date=source_date,
+                source_type=source_type,
                 now=now,
             )
 
@@ -87,6 +109,7 @@ class MarkdownChunker:
             source_path=source_path,
             source_title=source_title,
             source_date=source_date,
+            source_type=source_type,
             now=now,
         )
 
@@ -97,6 +120,7 @@ class MarkdownChunker:
         source_title: Optional[str],
         source_date: Optional[str],
         now: str,
+        source_type: str = "md",
     ) -> List[Chunk]:
         """Construct Chunk objects from a list of section dicts.
 
@@ -106,6 +130,7 @@ class MarkdownChunker:
             source_title: Title extracted from frontmatter or filename stem.
             source_date: Date string extracted from frontmatter, or None.
             now: UTC ISO timestamp string for indexed_at.
+            source_type: File type identifier (e.g., "md", "pdf", "docx").
 
         Returns:
             List of Chunk objects, one per section.
@@ -115,7 +140,7 @@ class MarkdownChunker:
             chunk = Chunk(
                 id=generate_chunk_id(source_path, idx),
                 source_path=source_path,
-                source_type="md",
+                source_type=source_type,
                 content_type="text",
                 text=section["text"].strip(),
                 page_number=None,

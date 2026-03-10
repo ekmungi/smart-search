@@ -1,7 +1,7 @@
 # Tests for DocumentIndexer: full ingestion pipeline.
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -12,7 +12,7 @@ from smart_search.models import Chunk
 from smart_search.store import ChunkStore
 
 
-def _make_fake_chunks(source_path, count=3, source_type="pdf"):
+def _make_fake_chunks(source_path, count=3, source_type="md"):
     """Create fake chunks as if returned by a chunker.
 
     Args:
@@ -43,31 +43,26 @@ def _make_fake_chunks(source_path, count=3, source_type="pdf"):
 
 
 @pytest.fixture
-def mock_chunker():
-    """Mock DocumentChunker that returns fake chunks."""
-    chunker = MagicMock()
-    chunker.chunk_file.side_effect = lambda path: _make_fake_chunks(path)
-    return chunker
-
-
-@pytest.fixture
 def mock_md_chunker():
-    """Mock MarkdownChunker that returns fake chunks."""
+    """Mock MarkdownChunker that returns fake chunks for both methods."""
     chunker = MagicMock()
     chunker.chunk_file.side_effect = lambda path: _make_fake_chunks(path, source_type="md")
+    chunker.chunk_text.side_effect = lambda text, source_path, source_type="md": _make_fake_chunks(
+        source_path, source_type=source_type,
+    )
     return chunker
 
 
 @pytest.fixture
-def indexer_deps(tmp_config, mock_chunker, mock_embedder):
+def indexer_deps(tmp_config, mock_md_chunker, mock_embedder):
     """Set up all indexer dependencies with mocks."""
     store = ChunkStore(tmp_config)
     store.initialize()
     return {
         "config": tmp_config,
-        "chunker": mock_chunker,
         "embedder": mock_embedder,
         "store": store,
+        "markdown_chunker": mock_md_chunker,
     }
 
 
@@ -78,23 +73,23 @@ def indexer(indexer_deps):
 
 
 @pytest.fixture
-def indexer_with_md(tmp_config, mock_chunker, mock_md_chunker, mock_embedder):
-    """DocumentIndexer with both document and markdown chunkers."""
+def indexer_with_md(tmp_config, mock_md_chunker, mock_embedder):
+    """DocumentIndexer with mocked markdown chunker."""
     store = ChunkStore(tmp_config)
     store.initialize()
     return DocumentIndexer(
         config=tmp_config,
-        chunker=mock_chunker,
         embedder=mock_embedder,
         store=store,
         markdown_chunker=mock_md_chunker,
-    ), mock_chunker, mock_md_chunker
+    ), mock_md_chunker
 
 
 class TestIndexFile:
     """Tests for single-file indexing."""
 
-    def test_index_file_creates_chunks_in_store(self, indexer, indexer_deps, sample_pdf_path):
+    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content")
+    def test_index_file_creates_chunks_in_store(self, mock_convert, indexer, indexer_deps, sample_pdf_path):
         """Indexed file produces chunks retrievable from store."""
         result = indexer.index_file(str(sample_pdf_path))
         assert result.status == "indexed"
@@ -104,13 +99,15 @@ class TestIndexFile:
         chunks = indexer_deps["store"].get_chunks_for_file(posix_path)
         assert len(chunks) == 3
 
-    def test_index_file_skips_unchanged_file(self, indexer, sample_pdf_path):
+    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content")
+    def test_index_file_skips_unchanged_file(self, mock_convert, indexer, sample_pdf_path):
         """Second index call with same file returns 'skipped'."""
         indexer.index_file(str(sample_pdf_path))
         result = indexer.index_file(str(sample_pdf_path))
         assert result.status == "skipped"
 
-    def test_index_file_force_reindexes(self, indexer, sample_pdf_path):
+    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content")
+    def test_index_file_force_reindexes(self, mock_convert, indexer, sample_pdf_path):
         """force=True re-indexes even if file hash unchanged."""
         indexer.index_file(str(sample_pdf_path))
         result = indexer.index_file(str(sample_pdf_path), force=True)
@@ -123,11 +120,11 @@ class TestIndexFile:
         result = indexer.index_file(str(txt_file))
         assert result.status == "failed"
 
-    def test_index_file_handles_failure_gracefully(self, indexer, indexer_deps, tmp_path):
+    @patch("smart_search.indexer.convert_to_markdown", side_effect=Exception("Parse error"))
+    def test_index_file_handles_failure_gracefully(self, mock_convert, indexer, tmp_path):
         """Corrupted/unprocessable file returns 'failed', not crash."""
         bad_pdf = tmp_path / "corrupt.pdf"
         bad_pdf.write_text("not a real pdf")
-        indexer_deps["chunker"].chunk_file.side_effect = Exception("Parse error")
         result = indexer.index_file(str(bad_pdf))
         assert result.status == "failed"
 
@@ -135,7 +132,8 @@ class TestIndexFile:
 class TestIndexFolder:
     """Tests for folder-level indexing."""
 
-    def test_index_folder_counts(self, indexer, tmp_path):
+    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content")
+    def test_index_folder_counts(self, mock_convert, indexer, tmp_path):
         """Folder with 2 supported files reports indexed=2."""
         (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4 fake")
         (tmp_path / "b.pdf").write_bytes(b"%PDF-1.4 fake2")
@@ -146,34 +144,42 @@ class TestIndexFolder:
 
 
 class TestIndexerRouting:
-    """Tests that files are routed to the correct chunker."""
+    """Tests that files are routed to the correct pipeline."""
 
-    def test_md_routes_to_markdown_chunker(self, indexer_with_md, tmp_path):
-        """Markdown file uses the markdown chunker."""
-        indexer, doc_chunker, md_chunker = indexer_with_md
+    def test_md_routes_to_chunk_file(self, indexer_with_md, tmp_path):
+        """Markdown file uses chunk_file (reads from disk directly)."""
+        indexer, md_chunker = indexer_with_md
         md = tmp_path / "note.md"
         md.write_text("# Test\nContent here")
         result = indexer.index_file(str(md))
         assert result.status == "indexed"
         md_chunker.chunk_file.assert_called_once()
-        doc_chunker.chunk_file.assert_not_called()
+        md_chunker.chunk_text.assert_not_called()
 
-    def test_pdf_routes_to_document_chunker(self, indexer_with_md, tmp_path):
-        """PDF file uses the document chunker."""
-        indexer, doc_chunker, md_chunker = indexer_with_md
+    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content here")
+    def test_pdf_routes_through_markitdown(self, mock_convert, indexer_with_md, tmp_path):
+        """PDF file is converted via MarkItDown, then chunked via chunk_text."""
+        indexer, md_chunker = indexer_with_md
         pdf = tmp_path / "doc.pdf"
         pdf.write_bytes(b"%PDF-1.4 fake")
         result = indexer.index_file(str(pdf))
         assert result.status == "indexed"
-        doc_chunker.chunk_file.assert_called_once()
+        mock_convert.assert_called_once()
+        md_chunker.chunk_text.assert_called_once()
         md_chunker.chunk_file.assert_not_called()
 
-    def test_md_without_markdown_chunker_uses_document_chunker(self, indexer, tmp_path):
-        """When no markdown_chunker provided, .md falls back to document chunker."""
-        md = tmp_path / "note.md"
-        md.write_text("# Test\nContent")
-        result = indexer.index_file(str(md))
+    @patch("smart_search.indexer.convert_to_markdown", return_value="# Slides\nContent")
+    def test_pptx_routes_through_markitdown(self, mock_convert, indexer_with_md, tmp_path):
+        """PPTX file is converted via MarkItDown pipeline."""
+        indexer, md_chunker = indexer_with_md
+        pptx = tmp_path / "slides.pptx"
+        pptx.write_bytes(b"fake pptx")
+        result = indexer.index_file(str(pptx))
         assert result.status == "indexed"
+        mock_convert.assert_called_once()
+        # source_type should be "pptx"
+        call_kwargs = md_chunker.chunk_text.call_args
+        assert call_kwargs[1].get("source_type", call_kwargs[0][2] if len(call_kwargs[0]) > 2 else None) == "pptx"
 
 
 @pytest.mark.slow
@@ -181,19 +187,18 @@ class TestIndexerEndToEnd:
     """End-to-end test with real chunker and embedder."""
 
     def test_end_to_end_pdf_indexing(self, tmp_config, sample_pdf_path):
-        """Real PDF -> real chunks -> real embeddings -> store."""
-        from smart_search.chunker import DocumentChunker
+        """Real PDF -> MarkItDown -> MarkdownChunker -> embeddings -> store."""
         from smart_search.embedder import Embedder
+        from smart_search.markdown_chunker import MarkdownChunker
 
         store = ChunkStore(tmp_config)
         store.initialize()
-        chunker = DocumentChunker(tmp_config)
         embedder = Embedder(tmp_config)
         indexer = DocumentIndexer(
             config=tmp_config,
-            chunker=chunker,
             embedder=embedder,
             store=store,
+            markdown_chunker=MarkdownChunker(tmp_config),
         )
         result = indexer.index_file(str(sample_pdf_path))
         assert result.status == "indexed"
@@ -208,7 +213,6 @@ class TestIndexerEndToEnd:
 
     def test_end_to_end_markdown_indexing(self, tmp_config, tmp_path):
         """Real Markdown -> heading chunks -> real embeddings -> store."""
-        from smart_search.chunker import DocumentChunker
         from smart_search.embedder import Embedder
         from smart_search.markdown_chunker import MarkdownChunker
 
@@ -227,7 +231,6 @@ class TestIndexerEndToEnd:
         store.initialize()
         indexer = DocumentIndexer(
             config=cfg,
-            chunker=DocumentChunker(cfg),
             embedder=Embedder(cfg),
             store=store,
             markdown_chunker=MarkdownChunker(cfg),

@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smart-search"
-version = "0.2.7"
-description = "Local MCP server for semantic search over Markdown, PDF, and DOCX documents"
+version = "0.3.0"
+description = "Local MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX, and HTML documents"
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp",
-    "docling",
+    "markitdown[all]",
     "lancedb",
     "sentence-transformers",
     "optimum[onnxruntime]",

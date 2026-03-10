@@ -5,9 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
-from smart_search.chunker import DocumentChunker
 from smart_search.config import SmartSearchConfig
 from smart_search.embedder import Embedder
+from smart_search.markdown_chunker import MarkdownChunker
+from smart_search.markitdown_parser import convert_to_markdown
 from smart_search.models import Chunk
 from smart_search.store import ChunkStore
 
@@ -56,26 +57,23 @@ class DocumentIndexer:
     def __init__(
         self,
         config: SmartSearchConfig,
-        chunker: DocumentChunker,
         embedder: Embedder,
         store: ChunkStore,
-        markdown_chunker=None,
+        markdown_chunker: MarkdownChunker | None = None,
     ) -> None:
         """Initialize with all pipeline components.
 
         Args:
             config: SmartSearchConfig with supported extensions.
-            chunker: DocumentChunker for extracting chunks from PDFs/DOCX/etc.
             embedder: Embedder for generating vectors.
             store: ChunkStore for persistence.
-            markdown_chunker: Optional MarkdownChunker for .md files. When
-                provided, .md files are routed here instead of chunker.
+            markdown_chunker: Optional MarkdownChunker instance. Created
+                automatically if not provided.
         """
         self._config = config
-        self._chunker = chunker
         self._embedder = embedder
         self._store = store
-        self._markdown_chunker = markdown_chunker
+        self._markdown_chunker = markdown_chunker or MarkdownChunker(config)
 
     def index_file(self, file_path: str, force: bool = False) -> IndexFileResult:
         """Index a single document file.
@@ -111,13 +109,18 @@ class DocumentIndexer:
             )
 
         try:
-            # Route to the appropriate chunker based on file extension.
-            # .md files go to the markdown chunker when one is registered;
-            # all other supported types use the document chunker.
-            if path.suffix.lower() == ".md" and self._markdown_chunker is not None:
+            # Route by extension: .md files are chunked directly;
+            # all other types are converted to Markdown via MarkItDown first.
+            if path.suffix.lower() == ".md":
                 chunks = self._markdown_chunker.chunk_file(str(path))
             else:
-                chunks = self._chunker.chunk_file(str(path))
+                markdown_text = convert_to_markdown(str(path))
+                source_type = path.suffix.lower().lstrip(".")
+                chunks = self._markdown_chunker.chunk_text(
+                    markdown_text,
+                    source_path=source_path,
+                    source_type=source_type,
+                )
             if not chunks:
                 return IndexFileResult(
                     file_path=str(path), status="indexed", chunk_count=0,

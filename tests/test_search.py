@@ -146,18 +146,18 @@ class TestSearchEndToEnd:
 
     def test_search_returns_relevant_result(self, tmp_config, sample_pdf_path):
         """Real PDF indexed and searched returns relevant content."""
-        from smart_search.chunker import DocumentChunker
         from smart_search.embedder import Embedder
         from smart_search.indexer import DocumentIndexer
+        from smart_search.markdown_chunker import MarkdownChunker
         from smart_search.store import ChunkStore
 
         store = ChunkStore(tmp_config)
         store.initialize()
-        chunker = DocumentChunker(tmp_config)
         embedder = Embedder(tmp_config)
 
         indexer = DocumentIndexer(
-            config=tmp_config, chunker=chunker, embedder=embedder, store=store,
+            config=tmp_config, embedder=embedder, store=store,
+            markdown_chunker=MarkdownChunker(tmp_config),
         )
         indexer.index_file(str(sample_pdf_path))
 

@@ -84,7 +84,6 @@ def create_server(
         """Get or create the document indexer singleton."""
         nonlocal _indexer, _store
         if _indexer is None:
-            from smart_search.chunker import DocumentChunker
             from smart_search.embedder import Embedder
             from smart_search.markdown_chunker import MarkdownChunker
 
@@ -94,7 +93,6 @@ def create_server(
 
             _indexer = DocumentIndexer(
                 config=config,
-                chunker=DocumentChunker(config),
                 embedder=Embedder(config),
                 store=_store,
                 markdown_chunker=MarkdownChunker(config),

@@ -52,6 +52,21 @@ class ChunkerProtocol(Protocol):
         """
         ...
 
+    def chunk_text(
+        self, text: str, source_path: str, source_type: str = "md"
+    ) -> List[Chunk]:
+        """Chunk a text string into Chunk objects.
+
+        Args:
+            text: Markdown text content to chunk.
+            source_path: Path to attribute chunks to.
+            source_type: File type identifier.
+
+        Returns:
+            List of Chunk objects.
+        """
+        ...
+
 
 @runtime_checkable
 class ChunkEnricher(Protocol):
