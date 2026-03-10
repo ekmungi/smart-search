@@ -147,3 +147,38 @@ class TestStoreStats:
     def test_remove_file_record_nonexistent_no_error(self, initialized_store):
         """Removing a non-existent record does not raise."""
         initialized_store.remove_file_record("/tmp/does_not_exist.md")
+
+
+class TestStoreExtensions:
+    """Tests for list_indexed_files and remove_files_for_folder."""
+
+    def test_list_indexed_files_returns_all_files(self, initialized_store):
+        """list_indexed_files returns all recorded files with metadata."""
+        initialized_store.record_file_indexed("C:/docs/file1.pdf", "hash1", 5)
+        initialized_store.record_file_indexed("C:/docs/file2.pdf", "hash2", 3)
+        files = initialized_store.list_indexed_files()
+        assert len(files) == 2
+        assert "source_path" in files[0]
+        assert "chunk_count" in files[0]
+        assert "indexed_at" in files[0]
+
+    def test_list_indexed_files_empty_store(self, initialized_store):
+        """list_indexed_files returns empty list when nothing indexed."""
+        files = initialized_store.list_indexed_files()
+        assert files == []
+
+    def test_remove_files_for_folder(self, initialized_store):
+        """remove_files_for_folder removes all files under a folder prefix."""
+        initialized_store.record_file_indexed("C:/docs/sub/file1.pdf", "hash1", 2)
+        initialized_store.record_file_indexed("C:/docs/other/file2.pdf", "hash2", 3)
+        removed = initialized_store.remove_files_for_folder("C:/docs/sub")
+        assert removed == 1
+        files = initialized_store.list_indexed_files()
+        paths = [f["source_path"] for f in files]
+        assert "C:/docs/sub/file1.pdf" not in paths
+        assert "C:/docs/other/file2.pdf" in paths
+
+    def test_remove_files_for_folder_empty(self, initialized_store):
+        """Removing from nonexistent folder returns 0."""
+        removed = initialized_store.remove_files_for_folder("C:/nonexistent")
+        assert removed == 0

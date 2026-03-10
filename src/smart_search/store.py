@@ -263,6 +263,50 @@ class ChunkStore:
         )
         self._sqlite_conn.commit()
 
+    def list_indexed_files(self) -> list:
+        """List all indexed files with metadata.
+
+        Returns:
+            List of dicts with source_path, file_hash, chunk_count, indexed_at.
+        """
+        cursor = self._sqlite_conn.execute(
+            "SELECT source_path, file_hash, chunk_count, indexed_at "
+            "FROM indexed_files ORDER BY indexed_at DESC"
+        )
+        return [
+            {
+                "source_path": row[0],
+                "file_hash": row[1],
+                "chunk_count": row[2],
+                "indexed_at": row[3],
+            }
+            for row in cursor.fetchall()
+        ]
+
+    def remove_files_for_folder(self, folder_path: str) -> int:
+        """Remove all indexed files under a folder prefix.
+
+        Removes both chunks (LanceDB) and file records (SQLite).
+
+        Args:
+            folder_path: Folder path prefix to match.
+
+        Returns:
+            Number of files removed.
+        """
+        normalized = folder_path.replace("\\", "/")
+        if not normalized.endswith("/"):
+            normalized += "/"
+        cursor = self._sqlite_conn.execute(
+            "SELECT source_path FROM indexed_files WHERE source_path LIKE ?",
+            (normalized + "%",),
+        )
+        files = [row[0] for row in cursor.fetchall()]
+        for source_path in files:
+            self.delete_chunks_for_file(source_path)
+            self.remove_file_record(source_path)
+        return len(files)
+
     def _chunk_to_record(self, chunk: Chunk) -> dict:
         """Convert a Chunk to a dict suitable for LanceDB insertion.
 
