@@ -73,13 +73,30 @@ def main(argv=None):
     elif args.command == "watch":
         _cmd_watch(args, cm)
     elif args.command == "index":
-        _cmd_index(args)
+        _cmd_index(args, data_dir)
     elif args.command == "search":
-        _cmd_search(args)
+        _cmd_search(args, data_dir)
     elif args.command == "model":
         _cmd_model(args, cm)
     else:
         parser.print_help()
+
+
+def _build_config(data_dir):
+    """Build a SmartSearchConfig using the data directory.
+
+    Args:
+        data_dir: Path to the data directory.
+
+    Returns:
+        SmartSearchConfig with paths set to data_dir.
+    """
+    from smart_search.config import SmartSearchConfig
+
+    return SmartSearchConfig(
+        lancedb_path=str(data_dir / "vectors"),
+        sqlite_path=str(data_dir / "metadata.db"),
+    )
 
 
 def _cmd_stats(data_dir, cm):
@@ -89,9 +106,20 @@ def _cmd_stats(data_dir, cm):
         data_dir: Path to the data directory.
         cm: ConfigManager instance.
     """
+    from smart_search.store import ChunkStore
+
     print(f"Data directory: {data_dir}")
     config = cm.load()
     print(f"Watch directories: {len(config.get('watch_directories', []))}")
+
+    cfg = _build_config(data_dir)
+    store = ChunkStore(cfg)
+    store.initialize()
+    stats = store.get_stats()
+    size_mb = stats.index_size_bytes / (1024 * 1024)
+    print(f"Documents indexed: {stats.document_count}")
+    print(f"Chunks stored: {stats.chunk_count}")
+    print(f"Index size: {size_mb:.1f} MB")
 
 
 def _cmd_config_show(data_dir, cm):
@@ -132,32 +160,98 @@ def _cmd_watch(args, cm):
         print("Use: smart-search watch [list|add|remove]")
 
 
-def _cmd_index(args):
-    """Handle index subcommands (stubs for heavy operations).
+def _cmd_index(args, data_dir):
+    """Handle index subcommands.
 
     Args:
         args: Parsed CLI arguments.
+        data_dir: Path to the data directory.
     """
+    from smart_search.store import ChunkStore
+
+    cfg = _build_config(data_dir)
+    store = ChunkStore(cfg)
+    store.initialize()
+
     if args.index_command == "list":
-        print("Index list requires initialized store -- use MCP tool or activate venv.")
+        files = store.list_indexed_files()
+        if not files:
+            print("No files indexed yet.")
+            return
+        print(f"Indexed files: {len(files)}")
+        for f in files:
+            print(f"  {f['source_path']} ({f['chunk_count']} chunks)")
     elif args.index_command == "remove":
-        print(f"Would remove: {args.path}")
+        count = store.remove_files_for_folder(args.path)
+        print(f"Removed {count} files from index.")
     elif args.index_command == "rebuild":
-        print("Rebuild requires initialized store -- use MCP tool or activate venv.")
+        print("Rebuild: re-indexing all watched directories...")
+        indexer = _build_indexer(cfg, store)
+        from smart_search.config_manager import ConfigManager
+        cm = ConfigManager(data_dir)
+        for d in cm.list_watch_dirs():
+            result = indexer.index_folder(d, force=True)
+            print(f"  {d}: {result.indexed} indexed, {result.failed} failed")
     elif args.index_command == "ingest":
-        print(f"Would index: {args.path}")
+        from pathlib import Path
+        indexer = _build_indexer(cfg, store)
+        target = Path(args.path)
+        if target.is_file():
+            result = indexer.index_file(str(target))
+            print(f"Indexed: {result.file_path} ({result.chunk_count} chunks, {result.status})")
+        elif target.is_dir():
+            result = indexer.index_folder(str(target))
+            print(f"Indexed: {result.indexed} files, skipped: {result.skipped}, failed: {result.failed}")
+        else:
+            print(f"Path not found: {args.path}")
     else:
         print("Use: smart-search index [list|remove|rebuild|ingest]")
 
 
-def _cmd_search(args):
-    """Handle search command (stub for heavy operation).
+def _build_indexer(cfg, store):
+    """Build a DocumentIndexer with all chunkers.
+
+    Args:
+        cfg: SmartSearchConfig instance.
+        store: ChunkStore instance.
+
+    Returns:
+        Configured DocumentIndexer.
+    """
+    from smart_search.chunker import DocumentChunker
+    from smart_search.embedder import Embedder
+    from smart_search.indexer import DocumentIndexer
+    from smart_search.markdown_chunker import MarkdownChunker
+
+    return DocumentIndexer(
+        config=cfg,
+        chunker=DocumentChunker(cfg),
+        embedder=Embedder(cfg),
+        store=store,
+        markdown_chunker=MarkdownChunker(cfg),
+    )
+
+
+def _cmd_search(args, data_dir):
+    """Handle search command.
 
     Args:
         args: Parsed CLI arguments.
+        data_dir: Path to the data directory.
     """
-    print(f"Search: {args.query} (limit={args.limit}, folder={args.folder})")
-    print("Full search requires initialized engine -- use MCP tool or activate venv.")
+    from smart_search.embedder import Embedder
+    from smart_search.search import SearchEngine
+    from smart_search.store import ChunkStore
+
+    cfg = _build_config(data_dir)
+    store = ChunkStore(cfg)
+    store.initialize()
+    embedder = Embedder(cfg)
+    engine = SearchEngine(cfg, embedder, store)
+    result = engine.search(
+        query=args.query, limit=args.limit, folder=args.folder,
+    )
+    print(result)
 
 
 def _cmd_model(args, cm):
