@@ -102,6 +102,34 @@ class TestSearchFilters:
         result = search_engine.search("test", doc_types=["pdf"])
         assert isinstance(result, str)
 
+    def test_search_filters_by_folder(self, search_engine, mock_store):
+        """folder filter restricts results to matching source_path prefix."""
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.9, source="C:/vault/notes/a.md"),
+            _make_search_result(rank=2, score=0.8, source="C:/vault/archive/b.md"),
+        ]
+        result = search_engine.search("test", folder="C:/vault/notes")
+        assert "a.md" in result
+        assert "b.md" not in result
+
+    def test_search_folder_filter_normalizes_backslashes(self, search_engine, mock_store):
+        """Folder filter normalizes backslashes to forward slashes."""
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.9, source="C:/vault/notes/a.md"),
+        ]
+        result = search_engine.search("test", folder="C:\\vault\\notes")
+        assert "a.md" in result
+
+    def test_search_folder_none_returns_all(self, search_engine, mock_store):
+        """folder=None returns all results (no filtering)."""
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.9, source="C:/vault/notes/a.md"),
+            _make_search_result(rank=2, score=0.8, source="C:/other/b.md"),
+        ]
+        result = search_engine.search("test", folder=None)
+        assert "a.md" in result
+        assert "b.md" in result
+
     def test_search_malformed_section_path_fallback(self, search_engine, mock_store):
         """Invalid JSON in section_path falls back to raw string."""
         mock_store.vector_search.return_value = [

@@ -44,6 +44,7 @@ class SearchEngine:
         limit: int = 10,
         mode: str = "hybrid",
         doc_types: Optional[List[str]] = None,
+        folder: Optional[str] = None,
     ) -> str:
         """Search the knowledge base and return formatted context.
 
@@ -52,6 +53,7 @@ class SearchEngine:
             limit: Maximum number of results to return.
             mode: Search mode (semantic/keyword/hybrid). v0.1: all use semantic.
             doc_types: Optional filter by document type (e.g., ["pdf"]).
+            folder: Optional folder prefix to restrict results to.
 
         Returns:
             Formatted string in Smart Context pattern, never raises.
@@ -65,6 +67,16 @@ class SearchEngine:
                 results = [
                     r for r in results
                     if r.chunk.source_type in doc_types
+                ]
+
+            # Apply folder filter if specified
+            if folder:
+                normalized_folder = folder.replace("\\", "/")
+                if not normalized_folder.endswith("/"):
+                    normalized_folder += "/"
+                results = [
+                    r for r in results
+                    if r.chunk.source_path.startswith(normalized_folder)
                 ]
 
             if not results:
