@@ -26,7 +26,6 @@ def create_ephemeral_components(folder_path: str) -> Dict[str, Any]:
         ValueError: If folder_path does not resolve to an existing directory.
     """
     # Imports inside function to avoid circular imports at module load time.
-    from smart_search.chunker import DocumentChunker
     from smart_search.embedder import Embedder
     from smart_search.indexer import DocumentIndexer
     from smart_search.markdown_chunker import MarkdownChunker
@@ -48,11 +47,9 @@ def create_ephemeral_components(folder_path: str) -> Dict[str, Any]:
     store.initialize()
 
     embedder = Embedder(config)
-    chunker = DocumentChunker(config)
     markdown_chunker = MarkdownChunker(config)
     indexer = DocumentIndexer(
         config=config,
-        chunker=chunker,
         embedder=embedder,
         store=store,
         markdown_chunker=markdown_chunker,

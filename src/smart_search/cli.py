@@ -229,7 +229,7 @@ def _cmd_index(args, data_dir):
 
 
 def _build_indexer(cfg, store):
-    """Build a DocumentIndexer with all chunkers.
+    """Build a DocumentIndexer with the MarkdownChunker pipeline.
 
     Args:
         cfg: SmartSearchConfig instance.
@@ -238,14 +238,12 @@ def _build_indexer(cfg, store):
     Returns:
         Configured DocumentIndexer.
     """
-    from smart_search.chunker import DocumentChunker
     from smart_search.embedder import Embedder
     from smart_search.indexer import DocumentIndexer
     from smart_search.markdown_chunker import MarkdownChunker
 
     return DocumentIndexer(
         config=cfg,
-        chunker=DocumentChunker(cfg),
         embedder=Embedder(cfg),
         store=store,
         markdown_chunker=MarkdownChunker(cfg),

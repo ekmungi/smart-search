@@ -135,3 +135,55 @@ class TestMarkdownChunkerFast:
         assert len(chunks) == 2
         assert "Preamble" in chunks[0].text
         assert json.loads(chunks[0].section_path) == []
+
+
+class TestChunkText:
+    """Tests for MarkdownChunker.chunk_text() method."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, tmp_config):
+        cfg = tmp_config.model_copy(update={"min_chunk_length": 0})
+        self.chunker = MarkdownChunker(cfg)
+
+    def test_chunk_text_returns_chunks(self):
+        """chunk_text produces Chunk objects from a Markdown string."""
+        text = "# Section A\nContent A\n## Section B\nContent B\n"
+        chunks = self.chunker.chunk_text(text, source_path="/test/doc.pdf", source_type="pdf")
+        assert len(chunks) == 2
+        assert "Content A" in chunks[0].text
+        assert "Content B" in chunks[1].text
+
+    def test_chunk_text_uses_source_type(self):
+        """source_type is set correctly on produced chunks."""
+        text = "# Heading\nSome content here"
+        chunks = self.chunker.chunk_text(text, source_path="/test/doc.docx", source_type="docx")
+        assert all(c.source_type == "docx" for c in chunks)
+
+    def test_chunk_text_default_source_type_is_md(self):
+        """Default source_type is 'md' when not specified."""
+        text = "# Heading\nSome content here"
+        chunks = self.chunker.chunk_text(text, source_path="/test/note.md")
+        assert all(c.source_type == "md" for c in chunks)
+
+    def test_chunk_text_strips_frontmatter(self):
+        """YAML frontmatter is stripped from text input."""
+        text = "---\ntitle: My Doc\n---\n# Heading\nBody text\n"
+        chunks = self.chunker.chunk_text(text, source_path="/test/doc.pdf", source_type="pdf")
+        assert all("---" not in c.text for c in chunks)
+        assert chunks[0].source_title == "My Doc"
+
+    def test_chunk_text_source_path_set(self):
+        """source_path is set on all chunks."""
+        text = "# Heading\nContent"
+        chunks = self.chunker.chunk_text(text, source_path="/my/file.pdf", source_type="pdf")
+        assert all(c.source_path == "/my/file.pdf" for c in chunks)
+
+    def test_chunk_file_delegates_to_chunk_text(self, tmp_path):
+        """chunk_file produces same results as chunk_text for same content."""
+        md = tmp_path / "note.md"
+        content = "# A\nContent A\n# B\nContent B\n"
+        md.write_text(content, encoding="utf-8")
+        file_chunks = self.chunker.chunk_file(str(md))
+        text_chunks = self.chunker.chunk_text(content, source_path=md.resolve().as_posix())
+        assert len(file_chunks) == len(text_chunks)
+        assert [c.text for c in file_chunks] == [c.text for c in text_chunks]

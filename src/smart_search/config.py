@@ -32,8 +32,8 @@ class SmartSearchConfig(BaseSettings):
     sqlite_path: str = ""
     lancedb_table_name: str = "chunks"
 
-    # Document settings -- .md added in v0.2 for Markdown note indexing
-    supported_extensions: List[str] = [".pdf", ".docx", ".md"]
+    # Document settings -- expanded in v0.3.0 with MarkItDown support
+    supported_extensions: List[str] = [".pdf", ".docx", ".md", ".pptx", ".xlsx", ".html"]
 
     # Watch directories for file watcher (resolved to absolute in validator)
     watch_directories: List[str] = []
