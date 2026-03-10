@@ -51,12 +51,32 @@ def mock_indexer():
 
 
 @pytest.fixture
-def server(mock_search_engine, mock_store, mock_indexer):
+def mock_config_manager():
+    """Mock ConfigManager for folder management tests."""
+    mgr = MagicMock()
+    mgr.list_watch_dirs.return_value = ["C:/vault/notes", "C:/vault/research"]
+    return mgr
+
+
+@pytest.fixture
+def mock_watcher():
+    """Mock FileWatcher for folder management tests."""
+    w = MagicMock()
+    w.is_running = True
+    w.watched_directories = ["C:/vault/notes"]
+    return w
+
+
+@pytest.fixture
+def server(mock_search_engine, mock_store, mock_indexer,
+           mock_config_manager, mock_watcher):
     """Create server with mocked dependencies."""
     return create_server(
         search_engine=mock_search_engine,
         store=mock_store,
         indexer=mock_indexer,
+        config_manager=mock_config_manager,
+        watcher=mock_watcher,
     )
 
 
@@ -238,3 +258,116 @@ class TestReadNoteTool:
         )
         text = _get_text(result)
         assert "error" in text.lower()
+
+
+class TestKnowledgeFolderTools:
+    """Tests for folder management MCP tools."""
+
+    @pytest.mark.asyncio
+    async def test_folder_tools_registered(self, server):
+        """All folder management tools are registered."""
+        tools = await server.list_tools()
+        names = [t.name for t in tools]
+        assert "knowledge_add_folder" in names
+        assert "knowledge_remove_folder" in names
+        assert "knowledge_list_folders" in names
+        assert "knowledge_list_files" in names
+
+    @pytest.mark.asyncio
+    async def test_add_folder(self, server, mock_config_manager,
+                              mock_watcher, mock_indexer, tmp_path):
+        """knowledge_add_folder adds dir and triggers indexing."""
+        folder = tmp_path / "vault"
+        folder.mkdir()
+        result = await server.call_tool(
+            "knowledge_add_folder", {"folder_path": str(folder)}
+        )
+        text = _get_text(result)
+        assert "FOLDER ADDED" in text
+        mock_config_manager.add_watch_dir.assert_called_once()
+        mock_watcher.add_directory.assert_called_once()
+        mock_indexer.index_folder.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_add_nonexistent_folder(self, server):
+        """knowledge_add_folder returns error for missing directory."""
+        result = await server.call_tool(
+            "knowledge_add_folder", {"folder_path": "/nonexistent/dir"}
+        )
+        text = _get_text(result)
+        assert "ERROR" in text
+
+    @pytest.mark.asyncio
+    async def test_remove_folder(self, server, mock_config_manager,
+                                 mock_watcher, tmp_path):
+        """knowledge_remove_folder removes dir from config and watcher."""
+        folder = tmp_path / "vault"
+        folder.mkdir()
+        result = await server.call_tool(
+            "knowledge_remove_folder", {"folder_path": str(folder)}
+        )
+        text = _get_text(result)
+        assert "FOLDER REMOVED" in text
+        mock_config_manager.remove_watch_dir.assert_called_once()
+        mock_watcher.remove_directory.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_remove_folder_with_data(self, server, mock_store, tmp_path):
+        """knowledge_remove_folder with remove_data deletes indexed chunks."""
+        folder = tmp_path / "vault"
+        folder.mkdir()
+        mock_store.remove_files_for_folder.return_value = 5
+        result = await server.call_tool(
+            "knowledge_remove_folder",
+            {"folder_path": str(folder), "remove_data": True},
+        )
+        text = _get_text(result)
+        assert "Data removed: 5 files" in text
+        mock_store.remove_files_for_folder.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_list_folders(self, server, mock_config_manager):
+        """knowledge_list_folders returns watched directories."""
+        result = await server.call_tool("knowledge_list_folders", {})
+        text = _get_text(result)
+        assert "WATCHED FOLDERS" in text
+        assert "C:/vault/notes" in text
+
+    @pytest.mark.asyncio
+    async def test_list_folders_empty(self, server, mock_config_manager):
+        """knowledge_list_folders with no dirs returns helpful message."""
+        mock_config_manager.list_watch_dirs.return_value = []
+        result = await server.call_tool("knowledge_list_folders", {})
+        text = _get_text(result)
+        assert "No folders configured" in text
+
+    @pytest.mark.asyncio
+    async def test_list_files(self, server, mock_store):
+        """knowledge_list_files returns indexed files."""
+        mock_store.list_indexed_files.return_value = [
+            {"source_path": "C:/vault/a.md", "chunk_count": 5,
+             "indexed_at": "2026-03-10"},
+        ]
+        result = await server.call_tool("knowledge_list_files", {})
+        text = _get_text(result)
+        assert "INDEXED FILES" in text
+        assert "a.md" in text
+
+    @pytest.mark.asyncio
+    async def test_list_files_empty(self, server, mock_store):
+        """knowledge_list_files with no files returns helpful message."""
+        mock_store.list_indexed_files.return_value = []
+        result = await server.call_tool("knowledge_list_files", {})
+        text = _get_text(result)
+        assert "No files indexed" in text
+
+    @pytest.mark.asyncio
+    async def test_search_with_folder_filter(self, server, mock_search_engine):
+        """knowledge_search passes folder param to engine."""
+        result = await server.call_tool(
+            "knowledge_search",
+            {"query": "test", "folder": "C:/vault/notes"},
+        )
+        mock_search_engine.search.assert_called_once()
+        call_kwargs = mock_search_engine.search.call_args[1]
+        assert call_kwargs["folder"] == "C:/vault/notes"
