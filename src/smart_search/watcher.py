@@ -34,6 +34,7 @@ class FileWatcher:
         self._indexer = indexer
         self._store = store
         self._observers: list = []
+        self._dir_observer_map: Dict[str, Observer] = {}
         self._running = False
         self._debounce_timers: Dict[str, threading.Timer] = {}
         self._lock = threading.Lock()
@@ -63,6 +64,7 @@ class FileWatcher:
             observer.daemon = True
             observer.start()
             self._observers.append(observer)
+            self._dir_observer_map[str(path)] = observer
 
         self._running = True
 
@@ -85,6 +87,46 @@ class FileWatcher:
             observer.join(timeout=5)
         self._observers.clear()
         self._running = False
+
+    @property
+    def watched_directories(self) -> list:
+        """Return list of currently watched directory paths."""
+        return list(self._dir_observer_map.keys())
+
+    def add_directory(self, dir_path: str) -> None:
+        """Start watching a new directory at runtime.
+
+        Args:
+            dir_path: Absolute path to the directory to watch.
+        """
+        path = Path(dir_path).resolve()
+        path_str = str(path)
+        if path_str in self._dir_observer_map:
+            return
+        if not path.is_dir():
+            logger.warning("Watch directory does not exist: %s", path_str)
+            return
+        handler = _WatcherHandler(self)
+        observer = Observer()
+        observer.schedule(handler, path_str, recursive=True)
+        observer.daemon = True
+        observer.start()
+        self._dir_observer_map[path_str] = observer
+        self._observers.append(observer)
+
+    def remove_directory(self, dir_path: str) -> None:
+        """Stop watching a directory at runtime.
+
+        Args:
+            dir_path: Path to the directory to stop watching.
+        """
+        path_str = str(Path(dir_path).resolve())
+        observer = self._dir_observer_map.pop(path_str, None)
+        if observer:
+            observer.stop()
+            observer.join(timeout=5)
+            if observer in self._observers:
+                self._observers.remove(observer)
 
     def _is_excluded(self, file_path: str) -> bool:
         """Check if a file path matches any exclusion pattern.
