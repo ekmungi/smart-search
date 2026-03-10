@@ -21,7 +21,8 @@ dependencies = [
 ]
 
 [project.scripts]
-smart-search = "smart_search.server:main"
+smart-search = "smart_search.cli:main"
+smart-search-server = "smart_search.server:main"
 
 [project.optional-dependencies]
 dev = [

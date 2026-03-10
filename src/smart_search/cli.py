@@ -1,0 +1,186 @@
+# Command-line interface for smart-search.
+
+"""CLI with subcommands for config, watch, index, search, and model management."""
+
+import argparse
+import sys
+
+from smart_search.config_manager import ConfigManager
+from smart_search.data_dir import get_data_dir
+
+
+def main(argv=None):
+    """Entry point for the smart-search CLI.
+
+    Args:
+        argv: Command line arguments (defaults to sys.argv).
+    """
+    parser = argparse.ArgumentParser(
+        prog="smart-search",
+        description="Local semantic search for documents and notes.",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    # --- stats ---
+    subparsers.add_parser("stats", help="Show index statistics and data directory")
+
+    # --- config ---
+    config_parser = subparsers.add_parser("config", help="Configuration management")
+    config_sub = config_parser.add_subparsers(dest="config_command")
+    config_sub.add_parser("show", help="Show current configuration")
+
+    # --- watch ---
+    watch_parser = subparsers.add_parser("watch", help="Watch directory management")
+    watch_sub = watch_parser.add_subparsers(dest="watch_command")
+    watch_sub.add_parser("list", help="List watched directories")
+    watch_add = watch_sub.add_parser("add", help="Add a watch directory")
+    watch_add.add_argument("path", help="Directory path to watch")
+    watch_remove = watch_sub.add_parser("remove", help="Remove a watch directory")
+    watch_remove.add_argument("path", help="Directory path to stop watching")
+
+    # --- index ---
+    index_parser = subparsers.add_parser("index", help="Index management")
+    index_sub = index_parser.add_subparsers(dest="index_command")
+    index_sub.add_parser("list", help="List indexed files")
+    index_remove = index_sub.add_parser("remove", help="Remove files from index")
+    index_remove.add_argument("path", help="File or folder path to remove")
+    index_sub.add_parser("rebuild", help="Rebuild entire index")
+    index_ingest = index_sub.add_parser("ingest", help="Index a file or folder")
+    index_ingest.add_argument("path", help="File or folder path to index")
+
+    # --- search ---
+    search_parser = subparsers.add_parser("search", help="Search the knowledge base")
+    search_parser.add_argument("query", help="Search query")
+    search_parser.add_argument("--limit", type=int, default=10, help="Max results")
+    search_parser.add_argument("--folder", help="Filter results to a folder")
+
+    # --- model ---
+    model_parser = subparsers.add_parser("model", help="Embedding model management")
+    model_sub = model_parser.add_subparsers(dest="model_command")
+    model_sub.add_parser("show", help="Show current and index models")
+    model_set = model_sub.add_parser("set", help="Change embedding model")
+    model_set.add_argument("name", help="Model name (e.g., nomic-ai/nomic-embed-text-v1.5)")
+    model_set.add_argument("--dim", type=int, help="Embedding dimensions")
+
+    args = parser.parse_args(argv)
+    data_dir = get_data_dir()
+    cm = ConfigManager(data_dir)
+
+    if args.command == "stats":
+        _cmd_stats(data_dir, cm)
+    elif args.command == "config" and args.config_command == "show":
+        _cmd_config_show(data_dir, cm)
+    elif args.command == "watch":
+        _cmd_watch(args, cm)
+    elif args.command == "index":
+        _cmd_index(args)
+    elif args.command == "search":
+        _cmd_search(args)
+    elif args.command == "model":
+        _cmd_model(args, cm)
+    else:
+        parser.print_help()
+
+
+def _cmd_stats(data_dir, cm):
+    """Print index statistics.
+
+    Args:
+        data_dir: Path to the data directory.
+        cm: ConfigManager instance.
+    """
+    print(f"Data directory: {data_dir}")
+    config = cm.load()
+    print(f"Watch directories: {len(config.get('watch_directories', []))}")
+
+
+def _cmd_config_show(data_dir, cm):
+    """Print current configuration.
+
+    Args:
+        data_dir: Path to the data directory.
+        cm: ConfigManager instance.
+    """
+    import json
+
+    config = cm.load()
+    print(f"Data directory: {data_dir}")
+    print(f"Config file: {cm.config_path}")
+    print(json.dumps(config, indent=2))
+
+
+def _cmd_watch(args, cm):
+    """Handle watch subcommands.
+
+    Args:
+        args: Parsed CLI arguments.
+        cm: ConfigManager instance.
+    """
+    if args.watch_command == "list":
+        dirs = cm.list_watch_dirs()
+        if not dirs:
+            print("No watch directories configured.")
+        for d in dirs:
+            print(f"  {d}")
+    elif args.watch_command == "add":
+        cm.add_watch_dir(args.path)
+        print(f"Added: {args.path}")
+    elif args.watch_command == "remove":
+        cm.remove_watch_dir(args.path)
+        print(f"Removed: {args.path}")
+    else:
+        print("Use: smart-search watch [list|add|remove]")
+
+
+def _cmd_index(args):
+    """Handle index subcommands (stubs for heavy operations).
+
+    Args:
+        args: Parsed CLI arguments.
+    """
+    if args.index_command == "list":
+        print("Index list requires initialized store -- use MCP tool or activate venv.")
+    elif args.index_command == "remove":
+        print(f"Would remove: {args.path}")
+    elif args.index_command == "rebuild":
+        print("Rebuild requires initialized store -- use MCP tool or activate venv.")
+    elif args.index_command == "ingest":
+        print(f"Would index: {args.path}")
+    else:
+        print("Use: smart-search index [list|remove|rebuild|ingest]")
+
+
+def _cmd_search(args):
+    """Handle search command (stub for heavy operation).
+
+    Args:
+        args: Parsed CLI arguments.
+    """
+    print(f"Search: {args.query} (limit={args.limit}, folder={args.folder})")
+    print("Full search requires initialized engine -- use MCP tool or activate venv.")
+
+
+def _cmd_model(args, cm):
+    """Handle model subcommands.
+
+    Args:
+        args: Parsed CLI arguments.
+        cm: ConfigManager instance.
+    """
+    config = cm.load()
+    if args.model_command == "show":
+        print(f"Config model: {config.get('embedding_model', 'unknown')}")
+        print(f"Config dimensions: {config.get('embedding_dimensions', 'unknown')}")
+    elif args.model_command == "set":
+        config["embedding_model"] = args.name
+        if args.dim:
+            config["embedding_dimensions"] = str(args.dim)
+        cm.save(config)
+        print(f"Model set to: {args.name}")
+        print("WARNING: Run 'smart-search index rebuild' to re-index with the new model.")
+    else:
+        print("Use: smart-search model [show|set]")
+
+
+if __name__ == "__main__":
+    main()
