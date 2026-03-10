@@ -2,7 +2,7 @@
 
 Local-first MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX, and HTML documents. Runs entirely on CPU with no cloud dependencies, no GPU required. Designed to make your personal knowledge base searchable from Claude Code.
 
-**Version:** 0.3.0
+**Version:** 0.3.1
 
 ---
 
@@ -14,7 +14,7 @@ Local-first MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX,
 - Stores vectors in LanceDB and metadata in SQLite -- both file-based, no server needed
 - Watches directories for changes and re-indexes automatically
 - Exposes MCP tools to Claude Code: search, stats, ingest, folder management, related notes
-- CLI for config, watch directories, model management, and index operations
+- CLI for config, watch directories, model management, and index operations with tqdm progress bars
 - Persistent config.json with OS-convention data directory
 
 ---

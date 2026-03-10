@@ -3,7 +3,7 @@
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Callable, List, Optional
 
 from smart_search.config import SmartSearchConfig
 from smart_search.embedder import Embedder
@@ -157,7 +157,11 @@ class DocumentIndexer:
             )
 
     def index_folder(
-        self, folder_path: str, recursive: bool = True, force: bool = False
+        self,
+        folder_path: str,
+        recursive: bool = True,
+        force: bool = False,
+        on_progress: Optional[Callable[[str, "IndexFileResult"], None]] = None,
     ) -> IndexFolderResult:
         """Index all supported documents in a folder.
 
@@ -165,6 +169,8 @@ class DocumentIndexer:
             folder_path: Path to the folder to scan.
             recursive: If True, scan subdirectories.
             force: If True, re-index all files regardless of hash.
+            on_progress: Optional callback invoked after each file with
+                (file_path, IndexFileResult). Used by CLI for progress bars.
 
         Returns:
             IndexFolderResult with counts and per-file results.
@@ -175,17 +181,24 @@ class DocumentIndexer:
         skipped = 0
         failed = 0
 
+        # Collect files first so callers can know the total count.
         pattern = "**/*" if recursive else "*"
-        for path in sorted(folder.glob(pattern)):
-            if path.is_file() and path.suffix.lower() in self._config.supported_extensions:
-                result = self.index_file(str(path), force=force)
-                results.append(result)
-                if result.status == "indexed":
-                    indexed += 1
-                elif result.status == "skipped":
-                    skipped += 1
-                else:
-                    failed += 1
+        files = sorted(
+            p for p in folder.glob(pattern)
+            if p.is_file() and p.suffix.lower() in self._config.supported_extensions
+        )
+
+        for path in files:
+            result = self.index_file(str(path), force=force)
+            results.append(result)
+            if result.status == "indexed":
+                indexed += 1
+            elif result.status == "skipped":
+                skipped += 1
+            else:
+                failed += 1
+            if on_progress is not None:
+                on_progress(str(path), result)
 
         return IndexFolderResult(
             indexed=indexed, skipped=skipped, failed=failed, results=results,
