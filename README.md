@@ -2,7 +2,7 @@
 
 Local-first MCP server for semantic search over Markdown, PDF, and DOCX documents. Runs entirely on CPU with no cloud dependencies, no GPU required. Designed to make your personal knowledge base searchable from Claude Code.
 
-**Version:** 0.2.0
+**Version:** 0.2.6
 
 ---
 
@@ -13,7 +13,9 @@ Local-first MCP server for semantic search over Markdown, PDF, and DOCX document
 - Generates embeddings with nomic-embed-text-v1.5 (ONNX, CPU-optimized)
 - Stores vectors in LanceDB and metadata in SQLite -- both file-based, no server needed
 - Watches directories for changes and re-indexes automatically
-- Exposes three MCP tools to Claude Code: search, stats, and ingest
+- Exposes MCP tools to Claude Code: search, stats, ingest, folder management, related notes
+- CLI for config, watch directories, model management, and index operations
+- Persistent config.json with OS-convention data directory
 
 ---
 
@@ -146,9 +148,30 @@ If you prefer not to install the package:
 
 ---
 
+## CLI Commands
+
+After installation, the `smart-search` command is available:
+
+```bash
+smart-search stats                    # Show index statistics and data directory
+smart-search config show              # Show current configuration
+smart-search watch list               # List watched directories
+smart-search watch add /path/to/dir   # Add a watch directory
+smart-search watch remove /path/to/dir# Remove a watch directory
+smart-search index list               # List all indexed files
+smart-search index ingest /path       # Index a file or folder
+smart-search index rebuild            # Re-index all watched directories
+smart-search search "query"           # Search the knowledge base
+smart-search search "query" --folder /path --limit 5
+smart-search model show               # Show current embedding model
+smart-search model set model-name --dim 256  # Change embedding model
+```
+
+---
+
 ## MCP Tools
 
-The server exposes three tools to Claude Code.
+The server exposes the following tools to Claude Code.
 
 ### `knowledge_search`
 
@@ -160,6 +183,7 @@ Search the knowledge base for document chunks matching a natural language query.
 | `limit`    | integer         | No       | `10`       | Maximum number of chunks to return                       |
 | `mode`     | string          | No       | `"hybrid"` | Search mode: `semantic`, `keyword`, or `hybrid`          |
 | `doc_types`| list of strings | No       | `null`     | Filter by file type, e.g. `["pdf"]` or `["pdf", "md"]`  |
+| `folder`   | string          | No       | `null`     | Restrict results to a folder path prefix                 |
 
 Returns formatted results with source file path, page number, section heading, chunk text, and relevance score.
 
@@ -182,6 +206,48 @@ Index a file or folder into the knowledge base.
 
 Supports `.md`, `.pdf`, and `.docx` files. Uses hash-based change detection to skip unchanged files.
 
+### `knowledge_add_folder`
+
+Add a folder to the watch list and trigger initial indexing.
+
+| Parameter     | Type   | Required | Description                        |
+|---------------|--------|----------|------------------------------------|
+| `folder_path` | string | Yes      | Absolute path to the folder        |
+
+### `knowledge_remove_folder`
+
+Stop watching a folder. Optionally remove its indexed data.
+
+| Parameter     | Type    | Required | Default | Description                              |
+|---------------|---------|----------|---------|------------------------------------------|
+| `folder_path` | string  | Yes      | -       | Path to the folder                       |
+| `remove_data` | boolean | No       | `false` | Also delete indexed chunks from this folder |
+
+### `knowledge_list_folders`
+
+List all watched directories and their status. No parameters.
+
+### `knowledge_list_files`
+
+List all indexed files with chunk counts and timestamps. No parameters.
+
+### `find_related`
+
+Find notes similar to a given note by averaging its embeddings.
+
+| Parameter   | Type    | Required | Default | Description                       |
+|-------------|---------|----------|---------|-----------------------------------|
+| `note_path` | string  | Yes      | -       | Path to the source note           |
+| `limit`     | integer | No       | `10`    | Maximum number of related notes   |
+
+### `read_note`
+
+Read a note's content by path, with safety validation against path traversal.
+
+| Parameter   | Type   | Required | Description                        |
+|-------------|--------|----------|------------------------------------|
+| `note_path` | string | Yes      | Relative path to the note          |
+
 ---
 
 ## File Watching
@@ -198,7 +264,25 @@ The watcher monitors all subdirectories recursively. Files matching exclude patt
 
 ## Configuration
 
-All settings are overridden with environment variables prefixed `SMART_SEARCH_`.
+### Data Directory
+
+smart-search stores its data (vectors, metadata, config.json) in an OS-convention directory:
+
+| OS      | Default Path                              |
+|---------|-------------------------------------------|
+| Windows | `%LOCALAPPDATA%\smart-search`             |
+| Linux   | `~/.local/share/smart-search`             |
+| macOS   | `~/.local/share/smart-search`             |
+
+Override with: `SMART_SEARCH_DATA_DIR=/custom/path`
+
+### config.json
+
+Persistent configuration is stored in `config.json` in the data directory. Managed via CLI (`smart-search config show`, `smart-search watch add`) or MCP tools (`knowledge_add_folder`, `knowledge_remove_folder`).
+
+### Environment Variables
+
+All settings can be overridden with environment variables prefixed `SMART_SEARCH_`.
 
 | Environment Variable                  | Default                            | Description                                      |
 |---------------------------------------|------------------------------------|--------------------------------------------------|
@@ -206,8 +290,8 @@ All settings are overridden with environment variables prefixed `SMART_SEARCH_`.
 | `SMART_SEARCH_EMBEDDING_DIMENSIONS`   | `768`                              | Output vector dimensions                         |
 | `SMART_SEARCH_EMBEDDING_BACKEND`      | `onnx`                             | Backend: `onnx` or `pytorch`                     |
 | `SMART_SEARCH_CHUNK_MAX_TOKENS`       | `512`                              | Maximum tokens per chunk                         |
-| `SMART_SEARCH_LANCEDB_PATH`           | `./data/vectors`                   | Directory for LanceDB vector store               |
-| `SMART_SEARCH_SQLITE_PATH`            | `./data/metadata.db`               | Path to SQLite metadata database                 |
+| `SMART_SEARCH_LANCEDB_PATH`           | `<data_dir>/vectors`               | Directory for LanceDB vector store               |
+| `SMART_SEARCH_SQLITE_PATH`            | `<data_dir>/metadata.db`           | Path to SQLite metadata database                 |
 | `SMART_SEARCH_LANCEDB_TABLE_NAME`     | `chunks`                           | LanceDB table name                               |
 | `SMART_SEARCH_SUPPORTED_EXTENSIONS`   | `[".pdf", ".docx", ".md"]`         | File types to index                              |
 | `SMART_SEARCH_WATCH_DIRECTORIES`      | `[]`                               | Directories to watch for changes                 |
@@ -293,24 +377,35 @@ Slow tests are marked with `@pytest.mark.slow` and require ML models to be downl
 ```
 src/smart_search/
   server.py           - FastMCP entry point; MCP tool definitions
+  cli.py              - CLI with subcommands (stats, config, watch, index, search, model)
   indexer.py           - Document ingestion pipeline (chunk, embed, store, dedup)
   chunker.py           - Docling HierarchicalChunker for PDF/DOCX
   markdown_chunker.py  - Heading-based Markdown section splitter
-  watcher.py           - Watchdog file watcher with debounce
+  watcher.py           - Watchdog file watcher with debounce and runtime add/remove
   embedder.py          - nomic-embed-text-v1.5 ONNX embedding generation
   store.py             - LanceDB vector store + SQLite metadata store
-  search.py            - Semantic search with Smart Context formatting
+  search.py            - Semantic search with Smart Context formatting and folder filter
   models.py            - Pydantic models: Chunk, SearchResult, IndexStats
   config.py            - Settings with SMART_SEARCH_ env var overrides
+  config_manager.py    - Persistent config.json with atomic writes
+  data_dir.py          - OS-convention data directory resolution
+  protocols.py         - Extension point protocols (Embedder, Chunker, Enricher, Retriever)
+  index_metadata.py    - Index metadata tracking in SQLite
+  reader.py            - Note reader with path traversal safety
 
 tests/
-  test_server.py             - MCP tool registration and dispatch
+  test_server.py             - MCP tool registration, dispatch, folder tools
+  test_cli.py                - CLI subcommand tests
   test_indexer.py            - Indexer pipeline and routing
   test_markdown_chunker.py   - Markdown heading-based chunking
-  test_watcher.py            - File watcher and debounce
-  test_store.py              - LanceDB and SQLite operations
-  test_search.py             - Search formatting and filtering
-  test_config.py             - Config fields and env var overrides
+  test_watcher.py            - File watcher, debounce, runtime management
+  test_store.py              - LanceDB, SQLite, file listing, folder removal
+  test_search.py             - Search formatting, filtering, folder filter
+  test_config.py             - Config fields, env vars, data dir defaults
+  test_config_manager.py     - Config manager CRUD and persistence
+  test_data_dir.py           - Data directory resolution
+  test_protocols.py          - Protocol compliance tests
+  test_index_metadata.py     - Index metadata tracking
   test_models.py             - Pydantic model validation
   test_chunker.py            - DocumentChunker (slow: requires Docling)
   test_embedder.py           - Embedder (slow: loads ONNX model)

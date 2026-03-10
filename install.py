@@ -466,6 +466,18 @@ def main():
     if args.claude_desktop:
         register_claude_desktop(venv_python, watch_dirs, args.embedding_dim)
 
+    # Persist watch directories to config.json
+    if watch_dirs:
+        from smart_search.data_dir import get_data_dir as _get_data_dir
+        from smart_search.config_manager import ConfigManager as _CM
+
+        data_dir = _get_data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        cm_inst = _CM(data_dir)
+        for d in watch_dirs:
+            cm_inst.add_watch_dir(d)
+        print(f"\n  Config saved to: {cm_inst.config_path}")
+
     # Summary
     print("\n" + "=" * 40)
     print("Installation complete!")
@@ -478,12 +490,26 @@ def main():
         for d in watch_dirs:
             print(f"  {d}")
     print()
+    print("Data directory:")
+    from smart_search.data_dir import get_data_dir as _gdd
+    print(f"  {_gdd()}")
+    print()
     print("MCP tools available:")
-    print("  knowledge_search  -- Semantic search across indexed files")
-    print("  knowledge_stats   -- Index health check")
-    print("  knowledge_ingest  -- Trigger indexing of files/folders")
-    print("  find_related      -- Find notes similar to a given note")
-    print("  read_note         -- Read note content by path")
+    print("  knowledge_search       -- Semantic search across indexed files")
+    print("  knowledge_stats        -- Index health check")
+    print("  knowledge_ingest       -- Trigger indexing of files/folders")
+    print("  knowledge_add_folder   -- Add a watch directory at runtime")
+    print("  knowledge_remove_folder-- Remove a watch directory")
+    print("  knowledge_list_folders -- List watched directories")
+    print("  knowledge_list_files   -- List all indexed files")
+    print("  find_related           -- Find notes similar to a given note")
+    print("  read_note              -- Read note content by path")
+    print()
+    print("CLI commands (after activating venv):")
+    print("  smart-search stats         -- Show index statistics")
+    print("  smart-search config show   -- Show configuration")
+    print("  smart-search watch list    -- List watched directories")
+    print("  smart-search search <q>    -- Search the knowledge base")
     print()
     print("To uninstall:")
     print("  python install.py --uninstall")
