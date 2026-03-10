@@ -148,24 +148,48 @@ If you prefer not to install the package:
 
 ---
 
-## CLI Commands
+## Cheatsheet
 
-After installation, the `smart-search` command is available:
+### CLI Commands
 
 ```bash
-smart-search stats                    # Show index statistics and data directory
-smart-search config show              # Show current configuration
-smart-search watch list               # List watched directories
-smart-search watch add /path/to/dir   # Add a watch directory
-smart-search watch remove /path/to/dir# Remove a watch directory
-smart-search index list               # List all indexed files
-smart-search index ingest /path       # Index a file or folder
-smart-search index rebuild            # Re-index all watched directories
-smart-search search "query"           # Search the knowledge base
-smart-search search "query" --folder /path --limit 5
-smart-search model show               # Show current embedding model
+smart-search stats                           # Index stats and data directory
+smart-search config show                     # Show current configuration
+smart-search watch list                      # List watched directories
+smart-search watch add /path/to/dir          # Add a watch directory
+smart-search watch remove /path/to/dir       # Remove a watch directory
+smart-search index list                      # List all indexed files
+smart-search index ingest /path              # Index a file or folder
+smart-search index ingest /path --ephemeral  # Create a local .smart-search/ index
+smart-search index rebuild                   # Re-index all watched directories
+smart-search index remove /path              # Remove files from index
+smart-search search "query"                  # Search the knowledge base
+smart-search search "query" --folder /path   # Search within a folder
+smart-search search "query" --limit 5        # Limit results
+smart-search search "query" --ephemeral /path # Search a local index
+smart-search temp list                       # List ephemeral indexes
+smart-search temp cleanup /path              # Remove an ephemeral index
+smart-search model show                      # Show current embedding model
 smart-search model set model-name --dim 256  # Change embedding model
 ```
+
+### Claude Code Prompts
+
+| Task | Prompt |
+|------|--------|
+| Index a folder | "Index my notes in C:/Users/me/vault" |
+| Search | "Search my knowledge base for regulatory compliance" |
+| Add watch folder | "Add C:/Users/me/papers to the watch list" |
+| Remove watch folder | "Stop watching C:/Users/me/old-notes" |
+| Check stats | "Show knowledge base statistics" |
+| List indexed files | "List all indexed files" |
+| Find related notes | "Find notes related to meeting-notes/2026-03-10.md" |
+| Read a note | "Read the note at projects/smart-search.md" |
+| Force re-index | "Re-index C:/Users/me/vault with force=true" |
+| Temp index a folder | "Create a temporary index of C:/Users/me/Downloads/papers" |
+| Search temp index | "Search the temp index at C:/Users/me/Downloads/papers for transformers" |
+| Clean up temp index | "Clean up the temporary index at C:/Users/me/Downloads/papers" |
+| List temp indexes | "List all ephemeral indexes" |
 
 ---
 
