@@ -1,25 +1,27 @@
 # FastMCP server entry point: exposes knowledge tools and file watcher.
+#
+# IMPORTANT: Keep top-level imports minimal for fast MCP server startup.
+# Heavy dependencies (sentence-transformers, markitdown, lancedb) are
+# imported lazily inside functions to stay under Claude Code's ~10s timeout.
+
+from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from fastmcp import FastMCP
 
 from smart_search.config import SmartSearchConfig, get_config
 from smart_search.config_manager import ConfigManager
 from smart_search.data_dir import get_data_dir
-from smart_search.ephemeral_registry import EphemeralRegistry
-from smart_search.ephemeral_store import (
-    calculate_ephemeral_size,
-    create_ephemeral_components,
-    ephemeral_index_exists,
-    remove_ephemeral_index,
-)
-from smart_search.indexer import DocumentIndexer, IndexFileResult, IndexFolderResult
 from smart_search.models import IndexStats
-from smart_search.search import SearchEngine
-from smart_search.store import ChunkStore
-from smart_search.watcher import FileWatcher
+
+if TYPE_CHECKING:
+    from smart_search.ephemeral_registry import EphemeralRegistry
+    from smart_search.indexer import DocumentIndexer, IndexFileResult, IndexFolderResult
+    from smart_search.search import SearchEngine
+    from smart_search.store import ChunkStore
+    from smart_search.watcher import FileWatcher
 
 
 def create_server(
@@ -63,20 +65,24 @@ def create_server(
         nonlocal _engine, _store
         if _engine is None:
             from smart_search.embedder import Embedder
+            from smart_search.search import SearchEngine as _SearchEngine
+            from smart_search.store import ChunkStore as _ChunkStore
 
             if _store is None:
-                _store = ChunkStore(config)
+                _store = _ChunkStore(config)
                 _store.initialize()
 
             embedder = Embedder(config)
-            _engine = SearchEngine(config, embedder, _store)
+            _engine = _SearchEngine(config, embedder, _store)
         return _engine
 
     def _get_store() -> ChunkStore:
         """Get or create the chunk store singleton."""
         nonlocal _store
         if _store is None:
-            _store = ChunkStore(config)
+            from smart_search.store import ChunkStore as _ChunkStore
+
+            _store = _ChunkStore(config)
             _store.initialize()
         return _store
 
@@ -85,13 +91,15 @@ def create_server(
         nonlocal _indexer, _store
         if _indexer is None:
             from smart_search.embedder import Embedder
+            from smart_search.indexer import DocumentIndexer as _DocumentIndexer
             from smart_search.markdown_chunker import MarkdownChunker
+            from smart_search.store import ChunkStore as _ChunkStore
 
             if _store is None:
-                _store = ChunkStore(config)
+                _store = _ChunkStore(config)
                 _store.initialize()
 
-            _indexer = DocumentIndexer(
+            _indexer = _DocumentIndexer(
                 config=config,
                 embedder=Embedder(config),
                 store=_store,
@@ -110,7 +118,9 @@ def create_server(
         """Get or create the file watcher singleton."""
         nonlocal _watcher
         if _watcher is None:
-            _watcher = FileWatcher(config, _get_indexer(), _get_store())
+            from smart_search.watcher import FileWatcher as _FileWatcher
+
+            _watcher = _FileWatcher(config, _get_indexer(), _get_store())
         return _watcher
 
     _registry = None
@@ -119,7 +129,11 @@ def create_server(
         """Get or create the ephemeral registry singleton."""
         nonlocal _registry
         if _registry is None:
-            _registry = EphemeralRegistry(config.sqlite_path)
+            from smart_search.ephemeral_registry import (
+                EphemeralRegistry as _EphemeralRegistry,
+            )
+
+            _registry = _EphemeralRegistry(config.sqlite_path)
             _registry.initialize()
         return _registry
 
@@ -154,6 +168,11 @@ def create_server(
             Formatted search results as a string.
         """
         if ephemeral_folder is not None:
+            from smart_search.ephemeral_store import (
+                create_ephemeral_components,
+                ephemeral_index_exists,
+            )
+
             path = Path(ephemeral_folder).resolve()
             path_posix = path.as_posix()
             if not ephemeral_index_exists(str(path)):
@@ -245,6 +264,11 @@ def create_server(
             Formatted list of related notes ranked by similarity.
         """
         if ephemeral_folder is not None:
+            from smart_search.ephemeral_store import (
+                create_ephemeral_components,
+                ephemeral_index_exists,
+            )
+
             path = Path(ephemeral_folder).resolve()
             path_posix = path.as_posix()
             if not ephemeral_index_exists(str(path)):
@@ -414,6 +438,11 @@ def create_server(
             return f"ERROR: Directory not found: {folder_path}"
 
         try:
+            from smart_search.ephemeral_store import (
+                calculate_ephemeral_size,
+                create_ephemeral_components,
+            )
+
             components = create_ephemeral_components(str(path))
             indexer = components["indexer"]
             result = indexer.index_folder(str(path), force=force)
@@ -488,6 +517,8 @@ def create_server(
                 lines.append("No active ephemeral indexes.")
 
             return "\n".join(lines)
+
+        from smart_search.ephemeral_store import remove_ephemeral_index
 
         path = Path(folder_path).resolve()
         path_posix = path.as_posix()
