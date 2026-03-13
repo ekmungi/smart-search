@@ -2,7 +2,7 @@
 
 Local-first MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX, and HTML documents. Runs entirely on CPU with no cloud dependencies, no GPU required. Designed to make your personal knowledge base searchable from Claude Code.
 
-**Version:** 0.3.1
+**Version:** 0.3.2
 
 ---
 
@@ -398,7 +398,7 @@ Slow tests are marked with `@pytest.mark.slow` and require ML models to be downl
 
 ```
 src/smart_search/
-  server.py            - FastMCP entry point; MCP tool definitions
+  server.py            - FastMCP entry point; MCP tool definitions (lazy imports for fast startup)
   cli.py               - CLI with subcommands (stats, config, watch, index, search, model)
   indexer.py            - Document ingestion pipeline (chunk, embed, store, dedup)
   markitdown_parser.py  - MarkItDown wrapper: converts any file to Markdown
