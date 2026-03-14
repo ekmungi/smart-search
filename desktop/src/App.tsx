@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./components/Dashboard";
+import FolderManager from "./components/FolderManager";
+import Settings from "./components/Settings";
 
 type View = "dashboard" | "folders" | "settings";
 
@@ -14,12 +16,8 @@ function App() {
       <Sidebar activeView={activeView} onNavigate={setActiveView} />
       <main className="flex-1 overflow-auto p-6">
         {activeView === "dashboard" && <Dashboard />}
-        {activeView === "folders" && (
-          <p className="text-text-secondary">Folders (coming in Phase 4)</p>
-        )}
-        {activeView === "settings" && (
-          <p className="text-text-secondary">Settings (coming in Phase 4)</p>
-        )}
+        {activeView === "folders" && <FolderManager />}
+        {activeView === "settings" && <Settings />}
       </main>
     </div>
   );
