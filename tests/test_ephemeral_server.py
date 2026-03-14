@@ -149,13 +149,13 @@ class TestKnowledgeTempIndex:
         mock_registry = MagicMock()
 
         with patch(
-            "smart_search.server.create_ephemeral_components",
+            "smart_search.ephemeral_store.create_ephemeral_components",
             return_value=mock_components,
         ), patch(
-            "smart_search.server.calculate_ephemeral_size", return_value=4096
+            "smart_search.ephemeral_store.calculate_ephemeral_size", return_value=4096
         ), patch.object(server, "_get_registry", mock_registry, create=True):
             # Patch the registry inline via the create_server closure
-            with patch("smart_search.server.EphemeralRegistry") as mock_reg_cls:
+            with patch("smart_search.ephemeral_registry.EphemeralRegistry") as mock_reg_cls:
                 mock_reg_inst = MagicMock()
                 mock_reg_cls.return_value = mock_reg_inst
 
@@ -170,7 +170,7 @@ class TestKnowledgeTempIndex:
     async def test_temp_index_error_is_caught(self, server, tmp_path):
         """knowledge_temp_index catches exceptions and returns ERROR string."""
         with patch(
-            "smart_search.server.create_ephemeral_components",
+            "smart_search.ephemeral_store.create_ephemeral_components",
             side_effect=RuntimeError("embedding model unavailable"),
         ):
             result = await server.call_tool(
@@ -198,7 +198,7 @@ class TestKnowledgeTempCleanup:
             )
         ]
 
-        with patch("smart_search.server.EphemeralRegistry") as mock_reg_cls:
+        with patch("smart_search.ephemeral_registry.EphemeralRegistry") as mock_reg_cls:
             mock_reg_inst = MagicMock()
             mock_reg_inst.prune_stale.return_value = []
             mock_reg_inst.list_all.return_value = mock_entries
@@ -221,8 +221,8 @@ class TestKnowledgeTempCleanup:
     async def test_cleanup_with_folder_removes_index(self, server, tmp_path):
         """knowledge_temp_cleanup with folder_path removes the index."""
         with patch(
-            "smart_search.server.remove_ephemeral_index", return_value=True
-        ), patch("smart_search.server.EphemeralRegistry") as mock_reg_cls:
+            "smart_search.ephemeral_store.remove_ephemeral_index", return_value=True
+        ), patch("smart_search.ephemeral_registry.EphemeralRegistry") as mock_reg_cls:
             mock_reg_inst = MagicMock()
             mock_reg_inst.deregister.return_value = True
             mock_reg_cls.return_value = mock_reg_inst
@@ -245,8 +245,8 @@ class TestKnowledgeTempCleanup:
     async def test_cleanup_missing_smart_search_dir(self, server, tmp_path):
         """knowledge_temp_cleanup handles missing .smart-search/ gracefully."""
         with patch(
-            "smart_search.server.remove_ephemeral_index", return_value=False
-        ), patch("smart_search.server.EphemeralRegistry") as mock_reg_cls:
+            "smart_search.ephemeral_store.remove_ephemeral_index", return_value=False
+        ), patch("smart_search.ephemeral_registry.EphemeralRegistry") as mock_reg_cls:
             mock_reg_inst = MagicMock()
             mock_reg_inst.deregister.return_value = False
             mock_reg_cls.return_value = mock_reg_inst
@@ -275,8 +275,8 @@ class TestEphemeralSearchIntegration:
     ):
         """knowledge_search returns error when ephemeral index does not exist."""
         with patch(
-            "smart_search.server.ephemeral_index_exists", return_value=False
-        ), patch("smart_search.server.EphemeralRegistry") as mock_reg_cls:
+            "smart_search.ephemeral_store.ephemeral_index_exists", return_value=False
+        ), patch("smart_search.ephemeral_registry.EphemeralRegistry") as mock_reg_cls:
             mock_reg_inst = MagicMock()
             mock_reg_cls.return_value = mock_reg_inst
 
@@ -301,8 +301,8 @@ class TestEphemeralSearchIntegration:
     ):
         """find_related returns error when ephemeral index does not exist."""
         with patch(
-            "smart_search.server.ephemeral_index_exists", return_value=False
-        ), patch("smart_search.server.EphemeralRegistry") as mock_reg_cls:
+            "smart_search.ephemeral_store.ephemeral_index_exists", return_value=False
+        ), patch("smart_search.ephemeral_registry.EphemeralRegistry") as mock_reg_cls:
             mock_reg_inst = MagicMock()
             mock_reg_cls.return_value = mock_reg_inst
 
@@ -336,11 +336,11 @@ class TestEphemeralSearchIntegration:
         }
 
         with patch(
-            "smart_search.server.ephemeral_index_exists", return_value=True
+            "smart_search.ephemeral_store.ephemeral_index_exists", return_value=True
         ), patch(
-            "smart_search.server.create_ephemeral_components",
+            "smart_search.ephemeral_store.create_ephemeral_components",
             return_value=mock_components,
-        ), patch("smart_search.server.EphemeralRegistry") as mock_reg_cls:
+        ), patch("smart_search.ephemeral_registry.EphemeralRegistry") as mock_reg_cls:
             mock_reg_inst = MagicMock()
             mock_reg_cls.return_value = mock_reg_inst
 
@@ -375,11 +375,11 @@ class TestEphemeralSearchIntegration:
         }
 
         with patch(
-            "smart_search.server.ephemeral_index_exists", return_value=True
+            "smart_search.ephemeral_store.ephemeral_index_exists", return_value=True
         ), patch(
-            "smart_search.server.create_ephemeral_components",
+            "smart_search.ephemeral_store.create_ephemeral_components",
             return_value=mock_components,
-        ), patch("smart_search.server.EphemeralRegistry") as mock_reg_cls:
+        ), patch("smart_search.ephemeral_registry.EphemeralRegistry") as mock_reg_cls:
             mock_reg_inst = MagicMock()
             mock_reg_cls.return_value = mock_reg_inst
 

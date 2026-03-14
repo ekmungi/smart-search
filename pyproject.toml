@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smart-search"
-version = "0.3.2"
+version = "0.4.0"
 description = "Local MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX, and HTML documents"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,6 +19,8 @@ dependencies = [
     "einops",
     "tqdm",
     "watchdog",
+    "fastapi",
+    "uvicorn[standard]",
 ]
 
 [project.scripts]
@@ -32,6 +34,7 @@ dev = [
     "pytest-cov",
     "reportlab",
     "python-docx",
+    "httpx",
 ]
 
 [tool.pytest.ini_options]

@@ -25,12 +25,12 @@ if TYPE_CHECKING:
 
 
 def create_server(
-    search_engine: Optional[SearchEngine] = None,
-    store: Optional[ChunkStore] = None,
+    search_engine: Optional["SearchEngine"] = None,
+    store: Optional["ChunkStore"] = None,
     config: Optional[SmartSearchConfig] = None,
-    indexer: Optional[DocumentIndexer] = None,
+    indexer: Optional["DocumentIndexer"] = None,
     config_manager: Optional[ConfigManager] = None,
-    watcher: Optional[FileWatcher] = None,
+    watcher: Optional["FileWatcher"] = None,
 ) -> FastMCP:
     """Create and configure the FastMCP server with tools.
 
@@ -60,7 +60,7 @@ def create_server(
     _config_mgr = config_manager
     _watcher = watcher
 
-    def _get_engine() -> SearchEngine:
+    def _get_engine():
         """Get or create the search engine singleton."""
         nonlocal _engine, _store
         if _engine is None:
@@ -76,7 +76,7 @@ def create_server(
             _engine = _SearchEngine(config, embedder, _store)
         return _engine
 
-    def _get_store() -> ChunkStore:
+    def _get_store():
         """Get or create the chunk store singleton."""
         nonlocal _store
         if _store is None:
@@ -86,7 +86,7 @@ def create_server(
             _store.initialize()
         return _store
 
-    def _get_indexer() -> DocumentIndexer:
+    def _get_indexer():
         """Get or create the document indexer singleton."""
         nonlocal _indexer, _store
         if _indexer is None:
@@ -107,14 +107,14 @@ def create_server(
             )
         return _indexer
 
-    def _get_config_mgr() -> ConfigManager:
+    def _get_config_mgr():
         """Get or create the config manager singleton."""
         nonlocal _config_mgr
         if _config_mgr is None:
             _config_mgr = ConfigManager(get_data_dir())
         return _config_mgr
 
-    def _get_watcher() -> FileWatcher:
+    def _get_watcher():
         """Get or create the file watcher singleton."""
         nonlocal _watcher
         if _watcher is None:
@@ -125,7 +125,7 @@ def create_server(
 
     _registry = None
 
-    def _get_registry() -> EphemeralRegistry:
+    def _get_registry():
         """Get or create the ephemeral registry singleton."""
         nonlocal _registry
         if _registry is None:
@@ -176,7 +176,6 @@ def create_server(
             path = Path(ephemeral_folder).resolve()
             path_posix = path.as_posix()
             if not ephemeral_index_exists(str(path)):
-                # Self-heal: remove stale registry entry
                 _get_registry().deregister(path_posix)
                 return (
                     f"ERROR: No ephemeral index found at {path_posix}/.smart-search/\n"
@@ -272,7 +271,6 @@ def create_server(
             path = Path(ephemeral_folder).resolve()
             path_posix = path.as_posix()
             if not ephemeral_index_exists(str(path)):
-                # Self-heal: remove stale registry entry
                 _get_registry().deregister(path_posix)
                 return (
                     f"ERROR: No ephemeral index found at {path_posix}/.smart-search/\n"
@@ -562,7 +560,7 @@ def create_server(
     return mcp
 
 
-def _format_file_result(result: IndexFileResult) -> str:
+def _format_file_result(result) -> str:
     """Format a single-file indexing result as a human-readable string.
 
     Args:
@@ -588,7 +586,7 @@ def _format_file_result(result: IndexFileResult) -> str:
     )
 
 
-def _format_folder_result(result: IndexFolderResult) -> str:
+def _format_folder_result(result) -> str:
     """Format a folder indexing result as a human-readable string.
 
     Args:
@@ -607,7 +605,7 @@ def _format_folder_result(result: IndexFolderResult) -> str:
     )
 
 
-def _format_stats(stats: IndexStats) -> str:
+def _format_stats(stats) -> str:
     """Format IndexStats as a human-readable string.
 
     Args:

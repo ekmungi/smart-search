@@ -76,6 +76,19 @@ def main(argv=None):
     model_set.add_argument("name", help="Model name (e.g., nomic-ai/nomic-embed-text-v1.5)")
     model_set.add_argument("--dim", type=int, help="Embedding dimensions")
 
+    # --- serve ---
+    serve_parser = subparsers.add_parser(
+        "serve", help="Start HTTP API server for desktop app",
+    )
+    serve_parser.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind address (default: 127.0.0.1)",
+    )
+    serve_parser.add_argument(
+        "--port", type=int, default=9742,
+        help="Listen port (default: 9742)",
+    )
+
     args = parser.parse_args(argv)
     data_dir = get_data_dir()
     cm = ConfigManager(data_dir)
@@ -94,6 +107,8 @@ def main(argv=None):
         _cmd_temp(args, data_dir)
     elif args.command == "model":
         _cmd_model(args, cm)
+    elif args.command == "serve":
+        _cmd_serve(args)
     else:
         parser.print_help()
 
@@ -434,6 +449,18 @@ def _cmd_model(args, cm):
         print("WARNING: Run 'smart-search index rebuild' to re-index with the new model.")
     else:
         print("Use: smart-search model [show|set]")
+
+
+def _cmd_serve(args):
+    """Start the HTTP API server for the desktop app.
+
+    Args:
+        args: Parsed CLI arguments with host and port.
+    """
+    from smart_search.http import main as http_main
+
+    print(f"Starting smart-search HTTP server on {args.host}:{args.port}")
+    http_main(host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

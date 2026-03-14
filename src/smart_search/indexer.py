@@ -3,14 +3,15 @@
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 from smart_search.config import SmartSearchConfig
-from smart_search.embedder import Embedder
 from smart_search.markdown_chunker import MarkdownChunker
-from smart_search.markitdown_parser import convert_to_markdown
 from smart_search.models import Chunk
 from smart_search.store import ChunkStore
+
+if TYPE_CHECKING:
+    from smart_search.embedder import Embedder
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,7 @@ class DocumentIndexer:
     def __init__(
         self,
         config: SmartSearchConfig,
-        embedder: Embedder,
+        embedder: "Embedder",
         store: ChunkStore,
         markdown_chunker: MarkdownChunker | None = None,
     ) -> None:
@@ -114,6 +115,8 @@ class DocumentIndexer:
             if path.suffix.lower() == ".md":
                 chunks = self._markdown_chunker.chunk_file(str(path))
             else:
+                from smart_search.markitdown_parser import convert_to_markdown
+
                 markdown_text = convert_to_markdown(str(path))
                 source_type = path.suffix.lower().lstrip(".")
                 chunks = self._markdown_chunker.chunk_text(

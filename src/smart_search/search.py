@@ -1,14 +1,16 @@
 # Search logic with Smart Context formatting for Claude-ready output.
 
 import json
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 
 from smart_search.config import SmartSearchConfig
-from smart_search.embedder import Embedder
 from smart_search.models import SearchResult
 from smart_search.store import ChunkStore
+
+if TYPE_CHECKING:
+    from smart_search.embedder import Embedder
 
 # Maximum characters to display per chunk in results
 _MAX_TEXT_LENGTH = 500
@@ -24,7 +26,7 @@ class SearchEngine:
     def __init__(
         self,
         config: SmartSearchConfig,
-        embedder: Embedder,
+        embedder: "Embedder",
         store: ChunkStore,
     ) -> None:
         """Initialize with config, embedder, and store.
@@ -37,6 +39,51 @@ class SearchEngine:
         self._config = config
         self._embedder = embedder
         self._store = store
+
+    def search_results(
+        self,
+        query: str,
+        limit: int = 10,
+        mode: str = "hybrid",
+        doc_types: Optional[List[str]] = None,
+        folder: Optional[str] = None,
+    ) -> List[SearchResult]:
+        """Execute search and return raw SearchResult objects.
+
+        Same filtering logic as search() but returns structured data
+        instead of formatted strings. Used by the HTTP API layer.
+
+        Args:
+            query: Natural language search query.
+            limit: Maximum number of results.
+            mode: Search mode (semantic/keyword/hybrid). v0.1: all use semantic.
+            doc_types: Optional filter by document type (e.g., ["pdf"]).
+            folder: Optional folder prefix to restrict results.
+
+        Returns:
+            List of SearchResult objects ranked by relevance.
+        """
+        query_vec = self._embedder.embed_query(query)
+        results = self._store.vector_search(query_vec, limit=limit)
+
+        # Apply doc_types filter if specified
+        if doc_types:
+            results = [
+                r for r in results
+                if r.chunk.source_type in doc_types
+            ]
+
+        # Apply folder filter if specified
+        if folder:
+            normalized_folder = folder.replace("\\", "/")
+            if not normalized_folder.endswith("/"):
+                normalized_folder += "/"
+            results = [
+                r for r in results
+                if r.chunk.source_path.startswith(normalized_folder)
+            ]
+
+        return results
 
     def search(
         self,
@@ -59,25 +106,10 @@ class SearchEngine:
             Formatted string in Smart Context pattern, never raises.
         """
         try:
-            query_vec = self._embedder.embed_query(query)
-            results = self._store.vector_search(query_vec, limit=limit)
-
-            # Apply doc_types filter if specified
-            if doc_types:
-                results = [
-                    r for r in results
-                    if r.chunk.source_type in doc_types
-                ]
-
-            # Apply folder filter if specified
-            if folder:
-                normalized_folder = folder.replace("\\", "/")
-                if not normalized_folder.endswith("/"):
-                    normalized_folder += "/"
-                results = [
-                    r for r in results
-                    if r.chunk.source_path.startswith(normalized_folder)
-                ]
+            results = self.search_results(
+                query=query, limit=limit, mode=mode,
+                doc_types=doc_types, folder=folder,
+            )
 
             if not results:
                 return self._format_no_results(query)

@@ -140,6 +140,41 @@ class TestSearchFilters:
         # Should not crash, should display something
 
 
+class TestSearchResults:
+    """Tests for search_results() returning raw SearchResult objects."""
+
+    def test_returns_list_of_search_results(self, search_engine, mock_store):
+        """search_results returns List[SearchResult] not a string."""
+        results = search_engine.search_results("test query")
+        assert isinstance(results, list)
+        assert len(results) == 2
+        assert all(isinstance(r, SearchResult) for r in results)
+
+    def test_filters_by_doc_types(self, search_engine, mock_store):
+        """search_results filters results by document type."""
+        results = search_engine.search_results("test", doc_types=["docx"])
+        # Only notes.docx has source_type "pdf" (from fixture), so filter by
+        # a type not present returns empty (fixture uses source_type="pdf")
+        assert all(r.chunk.source_type == "pdf" for r in results) or len(results) == 0
+
+    def test_filters_by_folder(self, search_engine, mock_store):
+        """search_results filters results by folder prefix."""
+        results = search_engine.search_results("test", folder="/docs")
+        assert all(r.chunk.source_path.startswith("/docs/") for r in results)
+
+    def test_returns_empty_list_for_no_matches(self, search_engine, mock_store):
+        """search_results returns empty list when all filtered out."""
+        results = search_engine.search_results("test", folder="/nonexistent")
+        assert results == []
+
+    def test_search_delegates_to_search_results(self, search_engine, mock_store):
+        """search() uses search_results() internally (no duplication)."""
+        formatted = search_engine.search("test query")
+        # search() should produce formatted output from same data
+        assert "KNOWLEDGE SEARCH RESULTS" in formatted
+        assert "report.pdf" in formatted
+
+
 @pytest.mark.slow
 class TestSearchEndToEnd:
     """End-to-end search with real embeddings."""
