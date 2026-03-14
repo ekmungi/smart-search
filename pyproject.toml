@@ -36,6 +36,9 @@ dev = [
     "python-docx",
     "httpx",
 ]
+bundle = [
+    "pyinstaller>=6.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

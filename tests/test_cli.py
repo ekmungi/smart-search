@@ -62,3 +62,20 @@ def test_cli_serve_calls_http_main():
     with patch("smart_search.http.main") as mock_http:
         main(["serve", "--host", "0.0.0.0", "--port", "8080"])
         mock_http.assert_called_once_with(host="0.0.0.0", port=8080)
+
+
+def test_cli_mcp_subcommand_exists():
+    """smart-search mcp --help shows MCP server option."""
+    result = subprocess.run(
+        [sys.executable, "-m", "smart_search.cli", "mcp", "--help"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0
+    assert "mcp" in result.stdout.lower()
+
+
+def test_cli_mcp_calls_server_main():
+    """mcp subcommand delegates to server.main."""
+    with patch("smart_search.server.main") as mock_mcp:
+        main(["mcp"])
+        mock_mcp.assert_called_once()

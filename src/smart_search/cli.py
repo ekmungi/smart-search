@@ -89,6 +89,9 @@ def main(argv=None):
         help="Listen port (default: 9742)",
     )
 
+    # --- mcp ---
+    subparsers.add_parser("mcp", help="Start MCP server (stdio transport)")
+
     args = parser.parse_args(argv)
     data_dir = get_data_dir()
     cm = ConfigManager(data_dir)
@@ -109,6 +112,8 @@ def main(argv=None):
         _cmd_model(args, cm)
     elif args.command == "serve":
         _cmd_serve(args)
+    elif args.command == "mcp":
+        _cmd_mcp()
     else:
         parser.print_help()
 
@@ -449,6 +454,17 @@ def _cmd_model(args, cm):
         print("WARNING: Run 'smart-search index rebuild' to re-index with the new model.")
     else:
         print("Use: smart-search model [show|set]")
+
+
+def _cmd_mcp():
+    """Start the MCP server via stdio transport.
+
+    Used by Claude Code and other MCP clients. Equivalent to
+    running `python -m smart_search.server`.
+    """
+    from smart_search.server import main as mcp_main
+
+    mcp_main()
 
 
 def _cmd_serve(args):
