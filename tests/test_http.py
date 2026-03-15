@@ -412,3 +412,62 @@ class TestModelStatus:
         data = resp.json()
         assert data["model_name"] == "nomic-ai/nomic-embed-text-v1.5"
         mock_cached.assert_called_once_with("nomic-ai/nomic-embed-text-v1.5")
+
+
+class TestModelSwitch:
+    """Tests for model switch triggering re-index (B5 fix)."""
+
+    def test_model_change_triggers_reindex(
+        self, client, mock_config_manager, mock_store, mock_task_manager,
+    ):
+        """Changing embedding_model triggers rebuild + submit for each folder."""
+        mock_config_manager.load.return_value = {
+            "embedding_model": "old-model",
+            "embedding_dimensions": "768",
+        }
+        mock_config_manager.list_watch_dirs.return_value = ["C:/docs", "C:/notes"]
+        resp = client.put(
+            "/api/config",
+            json={"config": {"embedding_model": "new-model"}},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["requires_reindex"] is True
+        mock_store.rebuild_table.assert_called_once()
+        assert mock_task_manager.submit.call_count == 2
+
+    def test_no_model_change_skips_reindex(
+        self, client, mock_config_manager, mock_store, mock_task_manager,
+    ):
+        """Non-model config change does not trigger rebuild or re-index."""
+        mock_config_manager.load.return_value = {
+            "embedding_model": "same-model",
+            "embedding_dimensions": "768",
+        }
+        resp = client.put(
+            "/api/config",
+            json={"config": {"search_default_limit": 20}},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["requires_reindex"] is False
+        mock_store.rebuild_table.assert_not_called()
+        mock_task_manager.submit.assert_not_called()
+
+    def test_model_change_no_folders(
+        self, client, mock_config_manager, mock_store, mock_task_manager,
+    ):
+        """Model change with no watched folders succeeds with zero submissions."""
+        mock_config_manager.load.return_value = {
+            "embedding_model": "old-model",
+            "embedding_dimensions": "768",
+        }
+        mock_config_manager.list_watch_dirs.return_value = []
+        resp = client.put(
+            "/api/config",
+            json={"config": {"embedding_model": "new-model"}},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["requires_reindex"] is True
+        mock_store.rebuild_table.assert_called_once()
+        mock_task_manager.submit.assert_not_called()

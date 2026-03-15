@@ -45,6 +45,7 @@ def create_router(
     get_watcher: Callable,
     get_uptime: Callable,
     get_task_mgr: Callable,
+    reset_embedding_singletons: Callable,
     config: SmartSearchConfig,
 ) -> APIRouter:
     """Create an APIRouter with all REST endpoints.
@@ -60,6 +61,7 @@ def create_router(
         get_watcher: Returns FileWatcher instance.
         get_uptime: Returns server uptime in seconds.
         get_task_mgr: Returns IndexingTaskManager instance.
+        reset_embedding_singletons: Invalidates cached engine/indexer singletons.
         config: SmartSearchConfig instance.
 
     Returns:
@@ -323,6 +325,12 @@ def create_router(
         if requires_reindex:
             store = get_store()
             store.rebuild_table()
+            reset_embedding_singletons()
+
+            # Submit all watched folders for background re-indexing
+            folders = get_config_mgr().list_watch_dirs()
+            for folder in folders:
+                get_task_mgr().submit(folder, get_indexer())
 
         return ConfigUpdateResponse(
             config=current, requires_reindex=requires_reindex,

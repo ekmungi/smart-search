@@ -171,6 +171,12 @@ def create_app(
         """Return seconds since server started."""
         return time.time() - state["start_time"]
 
+    def reset_embedding_singletons():
+        """Invalidate cached engine and indexer so they're recreated with new config."""
+        nonlocal _engine, _indexer
+        _engine = None
+        _indexer = None
+
     # Wire up all API routes
     router = create_router(
         get_engine=get_engine,
@@ -180,6 +186,7 @@ def create_app(
         get_watcher=get_watcher,
         get_uptime=get_uptime,
         get_task_mgr=get_task_mgr,
+        reset_embedding_singletons=reset_embedding_singletons,
         config=config,
     )
     app.include_router(router)
