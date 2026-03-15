@@ -351,12 +351,18 @@ def create_router(
 
     @router.get("/model/status", response_model=ModelStatusResponse)
     def model_status():
-        """Check whether the embedding model is cached locally."""
+        """Check whether the embedding model is cached locally.
+
+        Reads from ConfigManager for live config (B4 fix), falling
+        back to startup config if no persisted value exists.
+        """
         from smart_search.embedder import Embedder
 
+        live_config = get_config_mgr().load()
+        model_name = live_config.get("embedding_model", config.embedding_model)
         return ModelStatusResponse(
-            cached=Embedder.is_model_cached(config.embedding_model),
-            model_name=config.embedding_model,
+            cached=Embedder.is_model_cached(model_name),
+            model_name=model_name,
         )
 
     @router.get("/model/loaded", response_model=ModelLoadedResponse)

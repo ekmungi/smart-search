@@ -4,13 +4,14 @@
 with mocked backend components. No real embeddings or databases."""
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
 from smart_search.config import SmartSearchConfig
 from smart_search.http import create_app
 from smart_search.indexer import IndexFileResult, IndexFolderResult
+from smart_search.indexing_task import IndexingStatus, IndexingTaskManager
 from smart_search.models import Chunk, IndexStats, SearchResult
 
 
@@ -109,7 +110,20 @@ def mock_watcher():
 
 
 @pytest.fixture
-def client(mock_store, mock_engine, mock_indexer, mock_config_manager, mock_watcher):
+def mock_task_manager():
+    """Mock IndexingTaskManager with controllable returns."""
+    mgr = MagicMock(spec=IndexingTaskManager)
+    mgr.submit.return_value = "abc12345"
+    mgr.get_all_tasks.return_value = []
+    mgr.cancel_folder.return_value = True
+    return mgr
+
+
+@pytest.fixture
+def client(
+    mock_store, mock_engine, mock_indexer,
+    mock_config_manager, mock_watcher, mock_task_manager,
+):
     """FastAPI TestClient wired to mocked components."""
     config = _make_config()
     app = create_app(
@@ -119,6 +133,7 @@ def client(mock_store, mock_engine, mock_indexer, mock_config_manager, mock_watc
         indexer=mock_indexer,
         config_manager=mock_config_manager,
         watcher=mock_watcher,
+        task_manager=mock_task_manager,
     )
     return TestClient(app)
 
@@ -131,7 +146,7 @@ class TestHealth:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["version"] == "0.4.0"
+        assert data["version"] == "0.7.0"
 
     def test_includes_uptime(self, client):
         resp = client.get("/api/health")
@@ -218,23 +233,26 @@ class TestFolders:
         )
         assert resp.status_code == 404
 
-    def test_add_folder_existing(
+    def test_add_folder_returns_202_with_task_id(
         self, client, mock_config_manager, mock_watcher,
-        mock_indexer, tmp_path,
+        mock_task_manager, tmp_path,
     ):
+        """Adding a folder returns 202 Accepted with a background task ID."""
         resp = client.post("/api/folders", json={"path": str(tmp_path)})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
-        assert data["indexed"] == 5
-        assert data["skipped"] == 2
-        assert data["failed"] == 0
+        assert data["status"] == "accepted"
+        assert data["task_id"] == "abc12345"
+        assert "path" in data
         mock_config_manager.add_watch_dir.assert_called_once()
         mock_watcher.start.assert_called_once()
-        mock_indexer.index_folder.assert_called_once()
+        mock_task_manager.submit.assert_called_once()
 
-    def test_remove_folder(self, client, mock_config_manager, mock_watcher):
+    def test_remove_folder(self, client, mock_config_manager, mock_watcher, mock_task_manager):
+        """Removing a folder cancels active indexing first."""
         resp = client.delete("/api/folders?path=C:/docs")
         assert resp.status_code == 200
+        mock_task_manager.cancel_folder.assert_called_once()
         mock_config_manager.remove_watch_dir.assert_called_once()
         mock_watcher.remove_directory.assert_called_once()
 
@@ -282,12 +300,14 @@ class TestIngest:
         assert data["chunk_count"] == 3
         mock_indexer.index_file.assert_called_once()
 
-    def test_ingest_folder(self, client, mock_indexer, tmp_path):
+    def test_ingest_directory_returns_202(self, client, mock_task_manager, tmp_path):
+        """Ingesting a directory submits a background task and returns 202."""
         resp = client.post("/api/ingest", json={"path": str(tmp_path)})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
-        assert data["indexed"] == 5
-        assert data["status"] == "completed"
+        assert data["status"] == "accepted"
+        assert data["task_id"] == "abc12345"
+        mock_task_manager.submit.assert_called_once()
 
 
 class TestConfig:
@@ -310,3 +330,85 @@ class TestConfig:
         # Verify the saved config includes the update
         saved = mock_config_manager.save.call_args[0][0]
         assert saved["search_default_limit"] == 20
+
+
+class TestIndexingStatus:
+    """Tests for GET /api/indexing/status (Phase A)."""
+
+    def test_returns_empty_when_no_tasks(self, client, mock_task_manager):
+        """No active tasks returns active=0 and empty tasks list."""
+        resp = client.get("/api/indexing/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["active"] == 0
+        assert data["tasks"] == []
+
+    def test_returns_running_task(self, client, mock_task_manager):
+        """Active indexing task appears in response with correct fields."""
+        mock_task_manager.get_all_tasks.return_value = [
+            IndexingStatus(
+                task_id="task-001",
+                folder="C:/docs",
+                state="running",
+                indexed=3,
+                skipped=1,
+                failed=0,
+            ),
+        ]
+        resp = client.get("/api/indexing/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["active"] == 1
+        assert len(data["tasks"]) == 1
+        task = data["tasks"][0]
+        assert task["task_id"] == "task-001"
+        assert task["folder"] == "C:/docs"
+        assert task["state"] == "running"
+        assert task["indexed"] == 3
+        assert task["skipped"] == 1
+        assert task["failed"] == 0
+
+    def test_returns_mixed_states(self, client, mock_task_manager):
+        """Completed and running tasks both appear; active counts only running."""
+        mock_task_manager.get_all_tasks.return_value = [
+            IndexingStatus(
+                task_id="task-001", folder="C:/docs",
+                state="completed", indexed=10, skipped=2, failed=0,
+            ),
+            IndexingStatus(
+                task_id="task-002", folder="C:/notes",
+                state="running", indexed=1, skipped=0, failed=0,
+            ),
+        ]
+        resp = client.get("/api/indexing/status")
+        data = resp.json()
+        assert data["active"] == 1
+        assert len(data["tasks"]) == 2
+
+
+class TestStatsLiveConfig:
+    """Tests that stats endpoint uses live config (B22 fix)."""
+
+    def test_stats_reads_live_watch_directories(self, client, mock_config_manager, mock_store):
+        """get_stats receives watch_directories from ConfigManager, not frozen config."""
+        mock_config_manager.list_watch_dirs.return_value = ["C:/docs", "C:/notes", "C:/new"]
+        client.get("/api/stats")
+        # Verify store.get_stats was called with the live directories
+        call_kwargs = mock_store.get_stats.call_args
+        assert call_kwargs == ((), {"watch_directories": ["C:/docs", "C:/notes", "C:/new"]})
+
+
+class TestModelStatus:
+    """Tests for GET /api/model/status (B4 fix)."""
+
+    def test_reads_model_from_live_config(self, client, mock_config_manager):
+        """model/status should read embedding_model from ConfigManager, not frozen config."""
+        mock_config_manager.load.return_value = {
+            "embedding_model": "nomic-ai/nomic-embed-text-v1.5",
+        }
+        with patch("smart_search.embedder.Embedder.is_model_cached", return_value=True) as mock_cached:
+            resp = client.get("/api/model/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["model_name"] == "nomic-ai/nomic-embed-text-v1.5"
+        mock_cached.assert_called_once_with("nomic-ai/nomic-embed-text-v1.5")

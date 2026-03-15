@@ -88,7 +88,7 @@ def indexer_with_md(tmp_config, mock_md_chunker, mock_embedder):
 class TestIndexFile:
     """Tests for single-file indexing."""
 
-    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content")
+    @patch("smart_search.markitdown_parser.convert_to_markdown", return_value="# Converted\nPDF content")
     def test_index_file_creates_chunks_in_store(self, mock_convert, indexer, indexer_deps, sample_pdf_path):
         """Indexed file produces chunks retrievable from store."""
         result = indexer.index_file(str(sample_pdf_path))
@@ -99,14 +99,14 @@ class TestIndexFile:
         chunks = indexer_deps["store"].get_chunks_for_file(posix_path)
         assert len(chunks) == 3
 
-    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content")
+    @patch("smart_search.markitdown_parser.convert_to_markdown", return_value="# Converted\nPDF content")
     def test_index_file_skips_unchanged_file(self, mock_convert, indexer, sample_pdf_path):
         """Second index call with same file returns 'skipped'."""
         indexer.index_file(str(sample_pdf_path))
         result = indexer.index_file(str(sample_pdf_path))
         assert result.status == "skipped"
 
-    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content")
+    @patch("smart_search.markitdown_parser.convert_to_markdown", return_value="# Converted\nPDF content")
     def test_index_file_force_reindexes(self, mock_convert, indexer, sample_pdf_path):
         """force=True re-indexes even if file hash unchanged."""
         indexer.index_file(str(sample_pdf_path))
@@ -120,7 +120,7 @@ class TestIndexFile:
         result = indexer.index_file(str(txt_file))
         assert result.status == "failed"
 
-    @patch("smart_search.indexer.convert_to_markdown", side_effect=Exception("Parse error"))
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
     def test_index_file_handles_failure_gracefully(self, mock_convert, indexer, tmp_path):
         """Corrupted/unprocessable file returns 'failed', not crash."""
         bad_pdf = tmp_path / "corrupt.pdf"
@@ -132,7 +132,7 @@ class TestIndexFile:
 class TestIndexFolder:
     """Tests for folder-level indexing."""
 
-    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content")
+    @patch("smart_search.markitdown_parser.convert_to_markdown", return_value="# Converted\nPDF content")
     def test_index_folder_counts(self, mock_convert, indexer, tmp_path):
         """Folder with 2 supported files reports indexed=2."""
         (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4 fake")
@@ -141,6 +141,35 @@ class TestIndexFolder:
         result = indexer.index_folder(str(tmp_path))
         assert result.indexed == 2
         assert result.skipped == 0
+
+    def test_index_folder_respects_cancel_event(self, indexer, tmp_path):
+        """Cancel event stops processing remaining files mid-folder.
+
+        Creates 3 markdown files but sets the cancel event after the first
+        file via on_progress callback. Expects fewer than 3 files indexed.
+        """
+        import threading
+
+        (tmp_path / "a.md").write_text("# Note A\nContent A")
+        (tmp_path / "b.md").write_text("# Note B\nContent B")
+        (tmp_path / "c.md").write_text("# Note C\nContent C")
+
+        cancel = threading.Event()
+        call_count = 0
+
+        def cancel_after_first(file_path, result):
+            """Set cancel event after the first file completes."""
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 1:
+                cancel.set()
+
+        result = indexer.index_folder(
+            str(tmp_path), on_progress=cancel_after_first, cancel_event=cancel,
+        )
+        # Should have processed 1 file, then stopped before the rest
+        assert result.indexed < 3
+        assert len(result.results) < 3
 
 
 class TestIndexerRouting:
@@ -156,7 +185,7 @@ class TestIndexerRouting:
         md_chunker.chunk_file.assert_called_once()
         md_chunker.chunk_text.assert_not_called()
 
-    @patch("smart_search.indexer.convert_to_markdown", return_value="# Converted\nPDF content here")
+    @patch("smart_search.markitdown_parser.convert_to_markdown", return_value="# Converted\nPDF content here")
     def test_pdf_routes_through_markitdown(self, mock_convert, indexer_with_md, tmp_path):
         """PDF file is converted via MarkItDown, then chunked via chunk_text."""
         indexer, md_chunker = indexer_with_md
@@ -168,7 +197,7 @@ class TestIndexerRouting:
         md_chunker.chunk_text.assert_called_once()
         md_chunker.chunk_file.assert_not_called()
 
-    @patch("smart_search.indexer.convert_to_markdown", return_value="# Slides\nContent")
+    @patch("smart_search.markitdown_parser.convert_to_markdown", return_value="# Slides\nContent")
     def test_pptx_routes_through_markitdown(self, mock_convert, indexer_with_md, tmp_path):
         """PPTX file is converted via MarkItDown pipeline."""
         indexer, md_chunker = indexer_with_md
