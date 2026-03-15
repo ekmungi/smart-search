@@ -31,9 +31,23 @@ export interface FoldersResponse {
 
 export interface AddFolderResponse {
   path: string;
+  task_id: string;
+  status: string;
+}
+
+export interface IndexingTask {
+  task_id: string;
+  folder: string;
+  state: string;
   indexed: number;
   skipped: number;
   failed: number;
+  error: string | null;
+}
+
+export interface IndexingStatusResponse {
+  active: number;
+  tasks: IndexingTask[];
 }
 
 export interface ConfigResponse {
@@ -193,6 +207,13 @@ export async function fetchModelLoaded(): Promise<ModelLoadedResponse> {
 /** Fetch the list of available embedding models. */
 export async function fetchModels(): Promise<ModelsResponse> {
   const res = await fetch(`${BASE_URL}/models`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Fetch the current background indexing task status. */
+export async function fetchIndexingStatus(): Promise<IndexingStatusResponse> {
+  const res = await fetch(`${BASE_URL}/indexing/status`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

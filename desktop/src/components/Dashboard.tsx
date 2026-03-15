@@ -6,8 +6,10 @@ import {
   fetchHealth,
   fetchStats,
   fetchModelStatus,
+  fetchIndexingStatus,
   type HealthResponse,
   type StatsResponse,
+  type IndexingTask,
 } from "../lib/api";
 import StatsCard from "./StatsCard";
 
@@ -30,6 +32,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [modelCached, setModelCached] = useState<boolean | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
+  const [activeTasks, setActiveTasks] = useState<IndexingTask[]>([]);
   useEffect(() => {
     const poll = async () => {
       try {
@@ -47,6 +50,39 @@ export default function Dashboard() {
     const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Poll indexing status every 2s while tasks are active, slow down when idle
+  useEffect(() => {
+    if (!health) return;
+
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const checkIndexing = async () => {
+      try {
+        const status = await fetchIndexingStatus();
+        if (!cancelled) {
+          setActiveTasks(status.tasks);
+          // When no active tasks, switch to slow polling (10s) to reduce load
+          const nextDelay = status.active > 0 ? 2000 : 10000;
+          if (intervalId !== null) clearInterval(intervalId);
+          if (!cancelled) {
+            intervalId = setInterval(checkIndexing, nextDelay);
+          }
+        }
+      } catch {
+        // Backend not ready or endpoint missing -- ignore
+      }
+    };
+
+    checkIndexing();
+    intervalId = setInterval(checkIndexing, 2000);
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null) clearInterval(intervalId);
+    };
+  }, [health]);
 
   // Poll model status until cached (first-launch download UX)
   useEffect(() => {
@@ -104,19 +140,38 @@ export default function Dashboard() {
       )}
 
       {/* Indexing in progress banner */}
-      {stats && stats.total_files > 0 && stats.document_count < stats.total_files && (
+      {activeTasks.some((t) => t.state === "running" || t.state === "pending") && (
         <div className="bg-bg-surface border border-accent-blue/30 rounded-lg p-4 mb-6">
           <div className="flex items-center gap-3">
             <div className="w-4 h-4 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
             <div>
               <p className="text-sm font-medium text-text-primary">
-                Indexing documents... {stats.document_count} of {stats.total_files}
+                Indexing{" "}
+                {activeTasks
+                  .filter((t) => t.state === "running" || t.state === "pending")
+                  .map((t) => t.folder.split(/[\\/]/).pop())
+                  .join(", ")}
+                ...
               </p>
               <p className="text-xs text-text-secondary mt-1">
-                {stats.chunk_count} chunks indexed so far
+                {activeTasks
+                  .filter((t) => t.state === "running")
+                  .reduce((sum, t) => sum + t.indexed, 0)}{" "}
+                documents indexed so far
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Completed/failed task results (shown briefly via state) */}
+      {activeTasks.some((t) => t.state === "failed") && (
+        <div className="bg-bg-surface border border-accent-red/30 rounded-lg p-4 mb-6 text-sm text-accent-red">
+          Indexing failed for:{" "}
+          {activeTasks
+            .filter((t) => t.state === "failed")
+            .map((t) => t.folder.split(/[\\/]/).pop())
+            .join(", ")}
         </div>
       )}
 

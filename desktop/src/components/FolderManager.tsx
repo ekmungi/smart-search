@@ -16,8 +16,10 @@ import {
   addFolder,
   removeFolder,
   reindexFolder,
+  fetchIndexingStatus,
   type FolderInfo,
   type StatsResponse,
+  type IndexingTask,
 } from "../lib/api";
 
 export default function FolderManager() {
@@ -26,7 +28,8 @@ export default function FolderManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [indexingPaths, setIndexingPaths] = useState<Set<string>>(new Set());
+  // indexingTasks from the backend /indexing/status endpoint (source of truth for per-folder state)
+  const [indexingTasks, setIndexingTasks] = useState<IndexingTask[]>([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -43,8 +46,8 @@ export default function FolderManager() {
 
   useEffect(() => {
     refresh();
-    // Poll stats every 5s to update indexing progress
-    const interval = setInterval(async () => {
+    // Poll stats every 5s for document count updates
+    const statsInterval = setInterval(async () => {
       try {
         const s = await fetchStats();
         setStats(s);
@@ -52,11 +55,58 @@ export default function FolderManager() {
         // Ignore poll errors
       }
     }, 5000);
-    return () => clearInterval(interval);
+    return () => clearInterval(statsInterval);
   }, [refresh]);
 
-  /** Whether indexing is currently active (fewer docs indexed than files on disk). */
-  const isIndexing = stats !== null && stats.total_files > 0 && stats.document_count < stats.total_files;
+  // Poll indexing status every 2s while tasks are active, slow down when idle
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const checkIndexing = async () => {
+      try {
+        const status = await fetchIndexingStatus();
+        if (!cancelled) {
+          setIndexingTasks(status.tasks);
+          // Refresh folder list when tasks complete so status badges update
+          if (status.active === 0 && indexingTasks.some((t) => t.state === "running")) {
+            refresh();
+          }
+          // Slow down when no active tasks
+          const nextDelay = status.active > 0 ? 2000 : 10000;
+          if (intervalId !== null) clearInterval(intervalId);
+          if (!cancelled) {
+            intervalId = setInterval(checkIndexing, nextDelay);
+          }
+        }
+      } catch {
+        // Ignore -- backend may not support endpoint yet
+      }
+    };
+
+    checkIndexing();
+    intervalId = setInterval(checkIndexing, 2000);
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null) clearInterval(intervalId);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Whether indexing is currently active according to the backend task queue. */
+  const isIndexing = indexingTasks.some((t) => t.state === "running" || t.state === "pending");
+
+  /** Return the active indexing task for a given folder path, if any. */
+  const taskForFolder = (path: string): IndexingTask | undefined =>
+    indexingTasks.find(
+      (t) => (t.state === "running" || t.state === "pending") && t.folder === path,
+    );
+
+  /** Return the most recent completed/failed task for a given folder path. */
+  const completedTaskForFolder = (path: string): IndexingTask | undefined =>
+    indexingTasks.find(
+      (t) => (t.state === "done" || t.state === "failed") && t.folder === path,
+    );
 
   const handleAdd = async () => {
     const selected = await open({ directory: true, multiple: false });
@@ -65,29 +115,14 @@ export default function FolderManager() {
     setError(null);
     const folderPath = selected as string;
 
-    // Mark this folder as indexing immediately
-    setIndexingPaths((prev) => new Set([...prev, folderPath]));
-
-    // Fire-and-forget: start indexing in background, don't block the UI
+    // Fire-and-forget: POST /folders returns 202 immediately; indexing runs in background
     addFolder(folderPath)
       .then(async (result) => {
-        setIndexingPaths((prev) => {
-          const next = new Set(prev);
-          next.delete(folderPath);
-          return next;
-        });
         await refresh();
-        setError(
-          `Added ${result.path} -- ${result.indexed} indexed, ${result.skipped} skipped`,
-        );
+        setError(`Added ${result.path} -- indexing started (task ${result.task_id})`);
         setTimeout(() => setError(null), 4000);
       })
       .catch((e) => {
-        setIndexingPaths((prev) => {
-          const next = new Set(prev);
-          next.delete(folderPath);
-          return next;
-        });
         setError(e instanceof Error ? e.message : "Failed to add folder");
       });
 
@@ -139,7 +174,11 @@ export default function FolderManager() {
             <>
               <Loader size={14} className="text-accent-blue animate-spin shrink-0" />
               <span className="text-sm text-text-secondary">
-                Indexing {stats.document_count} of {stats.total_files} files ({stats.chunk_count} chunks)
+                Indexing in progress &mdash;{" "}
+                {indexingTasks
+                  .filter((t) => t.state === "running" || t.state === "pending")
+                  .reduce((sum, t) => sum + t.indexed, 0)}{" "}
+                documents indexed so far ({stats.chunk_count} chunks)
               </span>
             </>
           ) : (
@@ -181,8 +220,10 @@ export default function FolderManager() {
             <div className="flex items-center gap-3 min-w-0">
               {!folder.exists ? (
                 <AlertCircle size={16} className="text-accent-red shrink-0" />
-              ) : indexingPaths.has(folder.path) ? (
+              ) : taskForFolder(folder.path) ? (
                 <Loader size={16} className="text-accent-blue animate-spin shrink-0" />
+              ) : completedTaskForFolder(folder.path)?.state === "failed" ? (
+                <AlertCircle size={16} className="text-accent-red shrink-0" />
               ) : (
                 <CheckCircle size={16} className="text-accent-green shrink-0" />
               )}
@@ -191,9 +232,13 @@ export default function FolderManager() {
                 <p className="text-xs text-text-muted">
                   {!folder.exists
                     ? "Missing"
-                    : indexingPaths.has(folder.path)
-                      ? "Indexing..."
-                      : "Indexed"}
+                    : taskForFolder(folder.path)
+                      ? `Indexing... ${taskForFolder(folder.path)!.indexed} indexed`
+                      : completedTaskForFolder(folder.path)?.state === "failed"
+                        ? `Failed: ${completedTaskForFolder(folder.path)!.error ?? "unknown error"}`
+                        : completedTaskForFolder(folder.path)
+                          ? `Done -- ${completedTaskForFolder(folder.path)!.indexed} indexed, ${completedTaskForFolder(folder.path)!.skipped} skipped`
+                          : "Indexed"}
                 </p>
               </div>
             </div>
