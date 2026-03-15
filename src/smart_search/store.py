@@ -176,42 +176,54 @@ class ChunkStore:
     def get_stats(self) -> IndexStats:
         """Get statistics about the indexed knowledge base.
 
+        Uses count_rows() and SQLite queries instead of loading all data
+        into memory, keeping RAM usage constant regardless of index size.
+
         Returns:
             IndexStats with document count, chunk count, size, formats.
         """
+        # Chunk count via LanceDB count_rows() -- no data loaded into RAM
         try:
-            all_data = self._table.search().limit(100000).to_list()
-            chunk_count = len(all_data)
+            chunk_count = self._table.count_rows()
         except Exception:
-            all_data = []
             chunk_count = 0
 
-        # Count unique source paths and formats
-        source_paths = set()
-        formats = set()
-        for row in all_data:
-            source_paths.add(row.get("source_path", ""))
-            formats.add(row.get("source_type", ""))
+        # Document count, formats, and last indexed from SQLite (already tracked)
+        doc_count = 0
+        formats: list[str] = []
+        last_indexed = None
+        if self._sqlite_conn:
+            row = self._sqlite_conn.execute(
+                "SELECT COUNT(DISTINCT source_path) FROM indexed_files"
+            ).fetchone()
+            doc_count = row[0] if row else 0
+
+            # Derive formats from file extensions in source_path
+            path_rows = self._sqlite_conn.execute(
+                "SELECT DISTINCT source_path FROM indexed_files"
+            ).fetchall()
+            ext_set = set()
+            for r in path_rows:
+                ext = Path(r[0]).suffix.lower()
+                if ext:
+                    ext_set.add(ext)
+            formats = sorted(ext_set)
+
+            ts_row = self._sqlite_conn.execute(
+                "SELECT MAX(indexed_at) FROM indexed_files"
+            ).fetchone()
+            if ts_row and ts_row[0]:
+                last_indexed = ts_row[0]
 
         # Calculate index size on disk
         index_size = self._calculate_index_size()
 
-        # Get last indexed timestamp from SQLite
-        last_indexed = None
-        if self._sqlite_conn:
-            cursor = self._sqlite_conn.execute(
-                "SELECT MAX(indexed_at) FROM indexed_files"
-            )
-            row = cursor.fetchone()
-            if row and row[0]:
-                last_indexed = row[0]
-
         return IndexStats(
-            document_count=len(source_paths),
+            document_count=doc_count,
             chunk_count=chunk_count,
             index_size_bytes=index_size,
             last_indexed_at=last_indexed,
-            formats_indexed=sorted(formats - {""}),
+            formats_indexed=formats,
         )
 
     def is_file_indexed(self, source_path: str, file_hash: str) -> bool:

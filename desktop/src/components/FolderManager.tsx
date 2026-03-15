@@ -43,22 +43,22 @@ export default function FolderManager() {
     const selected = await open({ directory: true, multiple: false });
     if (!selected) return;
 
-    setBusy("adding");
     setError(null);
-    try {
-      const result = await addFolder(selected as string);
-      setError(null);
-      setBusy(null);
-      await refresh();
-      // Brief success message
-      setError(
-        `Added ${result.path} -- ${result.indexed} indexed, ${result.skipped} skipped`,
-      );
-      setTimeout(() => setError(null), 4000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to add folder");
-      setBusy(null);
-    }
+    // Fire-and-forget: start indexing in background, don't block the UI
+    addFolder(selected as string)
+      .then(async (result) => {
+        await refresh();
+        setError(
+          `Added ${result.path} -- ${result.indexed} indexed, ${result.skipped} skipped`,
+        );
+        setTimeout(() => setError(null), 4000);
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : "Failed to add folder");
+      });
+
+    // Optimistically refresh folder list (folder appears before indexing completes)
+    setTimeout(() => refresh(), 500);
   };
 
   const handleRemove = async (path: string) => {
@@ -91,11 +91,10 @@ export default function FolderManager() {
         <h1 className="text-xl font-semibold">Folders</h1>
         <button
           onClick={handleAdd}
-          disabled={busy === "adding"}
-          className="flex items-center gap-2 px-3 py-2 bg-accent-blue text-white rounded-lg text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+          className="flex items-center gap-2 px-3 py-2 bg-accent-blue text-white rounded-lg text-sm hover:opacity-90 transition-opacity"
         >
           <FolderPlus size={16} />
-          {busy === "adding" ? "Indexing..." : "Add Folder"}
+          Add Folder
         </button>
       </div>
 

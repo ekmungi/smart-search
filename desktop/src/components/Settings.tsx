@@ -18,8 +18,14 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
   const [fontSize, setFontSize] = useState(FONT_DEFAULT);
   const [autostart, setAutostart] = useState(false);
-  const [mcpRegistered, setMcpRegistered] = useState(false);
-  const [mcpChecking, setMcpChecking] = useState(true);
+  const [mcpRegistered, setMcpRegistered] = useState(() => {
+    // Use cached value to avoid re-checking on every mount
+    return localStorage.getItem("smart-search-mcp-registered") === "true";
+  });
+  const [mcpChecking, setMcpChecking] = useState(() => {
+    // Skip spinner if we already have a cached result
+    return localStorage.getItem("smart-search-mcp-registered") === null;
+  });
   const [mcpRegistering, setMcpRegistering] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -45,11 +51,17 @@ export default function Settings() {
     }
     // Check autostart status
     isEnabled().then(setAutostart).catch(() => {});
-    // Check MCP registration status
-    invoke<boolean>("check_mcp_registered")
-      .then(setMcpRegistered)
-      .catch(() => {})
-      .finally(() => setMcpChecking(false));
+    // Check MCP registration status only if not cached (avoid spinner on re-mount)
+    const cached = localStorage.getItem("smart-search-mcp-registered");
+    if (cached === null) {
+      invoke<boolean>("check_mcp_registered")
+        .then((registered) => {
+          setMcpRegistered(registered);
+          localStorage.setItem("smart-search-mcp-registered", String(registered));
+        })
+        .catch(() => {})
+        .finally(() => setMcpChecking(false));
+    }
   }, [refresh]);
 
   /** Toggle font size and persist to localStorage. */
@@ -93,6 +105,7 @@ export default function Settings() {
     try {
       await invoke<string>("register_mcp");
       setMcpRegistered(true);
+      localStorage.setItem("smart-search-mcp-registered", "true");
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {

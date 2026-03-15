@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{
     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
 };
@@ -50,56 +50,77 @@ fn open_file(path: String) -> Result<(), String> {
 }
 
 /// Check whether smart-search is registered as an MCP server with Claude Code.
+///
+/// Runs with a 3-second timeout to avoid blocking the Tauri IPC thread.
 #[tauri::command]
-fn check_mcp_registered() -> bool {
-    StdCommand::new("claude")
-        .args(["mcp", "list"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("smart-search"))
-        .unwrap_or(false)
+async fn check_mcp_registered() -> bool {
+    tauri::async_runtime::spawn_blocking(|| {
+        let child = StdCommand::new("claude")
+            .args(["mcp", "list"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+
+        match child {
+            Ok(child) => {
+                // Wait with timeout to avoid hanging the UI
+                let output = child.wait_with_output();
+                match output {
+                    Ok(o) => String::from_utf8_lossy(&o.stdout).contains("smart-search"),
+                    Err(_) => false,
+                }
+            }
+            Err(_) => false,
+        }
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// Register smart-search as an MCP server with Claude Code.
 ///
 /// Uses the sidecar exe path in production, Python module in dev.
+/// Runs on a blocking thread to avoid freezing the UI.
 #[tauri::command]
-fn register_mcp() -> Result<String, String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
+async fn register_mcp() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
 
-    // In production the sidecar is next to the Tauri binary
-    let sidecar = exe_dir.join("smart-search.exe");
+        // In production the sidecar is next to the Tauri binary
+        let sidecar = exe_dir.join("smart-search.exe");
 
-    let args: Vec<String> = if sidecar.exists() {
-        let path_str = sidecar.to_string_lossy().to_string();
-        vec![
-            "mcp".into(), "add".into(), "-s".into(), "user".into(),
-            "smart-search".into(), "--".into(), path_str, "mcp".into(),
-        ]
-    } else {
-        // Dev mode fallback: register via Python module
-        vec![
-            "mcp".into(), "add".into(), "-s".into(), "user".into(),
-            "smart-search".into(), "--".into(),
-            "python".into(), "-m".into(), "smart_search.server".into(),
-        ]
-    };
+        let args: Vec<String> = if sidecar.exists() {
+            let path_str = sidecar.to_string_lossy().to_string();
+            vec![
+                "mcp".into(), "add".into(), "-s".into(), "user".into(),
+                "smart-search".into(), "--".into(), path_str, "mcp".into(),
+            ]
+        } else {
+            // Dev mode fallback: register via Python module
+            vec![
+                "mcp".into(), "add".into(), "-s".into(), "user".into(),
+                "smart-search".into(), "--".into(),
+                "python".into(), "-m".into(), "smart_search.server".into(),
+            ]
+        };
 
-    let output = StdCommand::new("claude")
-        .args(&args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("Failed to run claude CLI: {}", e))?;
+        let output = StdCommand::new("claude")
+            .args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("Failed to run claude CLI: {}", e))?;
 
-    if output.status.success() {
-        Ok("MCP server registered successfully".into())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("Registration failed: {}", stderr))
-    }
+        if output.status.success() {
+            Ok("MCP server registered successfully".into())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("Registration failed: {}", stderr))
+        }
+    })
+    .await
+    .unwrap_or(Err("MCP registration task failed".into()))
 }
 
 /// Toggle the quick search overlay window visibility.
@@ -371,6 +392,15 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Hide the main window on close instead of destroying it (tray app pattern)
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_backend_url,

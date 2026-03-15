@@ -119,9 +119,13 @@ class TestStoreStats:
         chunks_b = [_make_chunk(source_path="/docs/b.pdf", idx=i) for i in range(3)]
         initialized_store.upsert_chunks(chunks_a)
         initialized_store.upsert_chunks(chunks_b)
+        # Record in SQLite (as the indexer does in production)
+        initialized_store.record_file_indexed("/docs/a.pdf", "hash_a", 2)
+        initialized_store.record_file_indexed("/docs/b.pdf", "hash_b", 3)
         stats = initialized_store.get_stats()
         assert stats.chunk_count == 5
         assert stats.document_count == 2
+        assert ".pdf" in stats.formats_indexed
 
     def test_is_file_indexed_false_initially(self, initialized_store):
         """A file that was never indexed returns False."""

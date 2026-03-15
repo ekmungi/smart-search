@@ -57,8 +57,12 @@ export default function QuickSearch() {
     const currentWindow = getCurrentWindow();
     const unlisten = currentWindow.onFocusChanged(({ payload: focused }) => {
       if (focused) {
+        // Clean slate on every open (Spotlight behavior)
+        setQuery("");
+        setResults([]);
+        setSelectedIndex(0);
+        setError(null);
         inputRef.current?.focus();
-        inputRef.current?.select();
       } else {
         // Auto-hide on blur (Spotlight behavior)
         hideWindow();
@@ -72,7 +76,7 @@ export default function QuickSearch() {
 
   /** Execute search against the backend API. */
   const doSearch = useCallback(async (q: string) => {
-    if (q.trim().length < 2) {
+    if (q.trim().length < 3) {
       setResults([]);
       setSelectedIndex(0);
       return;
@@ -188,7 +192,7 @@ export default function QuickSearch() {
           <div className="px-4 py-3 text-sm text-text-muted">Searching...</div>
         )}
 
-        {!loading && query.trim().length >= 2 && results.length === 0 && !error && (
+        {!loading && query.trim().length >= 3 && results.length === 0 && !error && (
           <div className="px-4 py-3 text-sm text-text-muted">
             No results found
           </div>
