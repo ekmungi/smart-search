@@ -12,14 +12,14 @@ class TestConfigDefaults:
     """Tests for default configuration values."""
 
     def test_default_embedding_model(self):
-        """Default model is nomic-ai/nomic-embed-text-v1.5."""
+        """Default model is Snowflake/snowflake-arctic-embed-m-v2.0."""
         config = SmartSearchConfig()
-        assert config.embedding_model == "nomic-ai/nomic-embed-text-v1.5"
+        assert config.embedding_model == "Snowflake/snowflake-arctic-embed-m-v2.0"
 
     def test_default_dimensions(self):
-        """Default embedding dimensions is 768."""
+        """Default embedding dimensions is 256 (Matryoshka truncation)."""
         config = SmartSearchConfig()
-        assert config.embedding_dimensions == 768
+        assert config.embedding_dimensions == 256
 
     def test_supported_extensions_is_list(self):
         """supported_extensions is a list, not a string."""

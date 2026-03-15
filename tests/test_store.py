@@ -1,5 +1,8 @@
 # Tests for ChunkStore: LanceDB vector storage + SQLite metadata.
 
+from pathlib import Path
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
@@ -7,11 +10,11 @@ from smart_search.models import Chunk, generate_chunk_id
 from smart_search.store import ChunkStore
 
 
-def _make_chunk(source_path="/docs/test.pdf", idx=0, embedding=None):
+def _make_chunk(source_path="/docs/test.pdf", idx=0, embedding=None, dims=256):
     """Helper to create a Chunk with a deterministic embedding."""
     if embedding is None:
         rng = np.random.RandomState(idx)
-        embedding = rng.randn(768).tolist()
+        embedding = rng.randn(dims).tolist()
     return Chunk(
         id=generate_chunk_id(source_path, idx),
         source_path=source_path,
@@ -92,10 +95,10 @@ class TestVectorSearch:
 
     def test_vector_search_returns_ranked_results(self, initialized_store):
         """Search returns results ranked by similarity (closest first)."""
-        # Create chunks with known embeddings
-        target = [1.0] * 768
-        close = [0.9] * 768
-        far = [0.0] * 768
+        # Create chunks with known embeddings (256 dims to match config)
+        target = [1.0] * 256
+        close = [0.9] * 256
+        far = [0.0] * 256
 
         chunks = [
             _make_chunk(idx=0, embedding=far),
@@ -186,3 +189,49 @@ class TestStoreExtensions:
         """Removing from nonexistent folder returns 0."""
         removed = initialized_store.remove_files_for_folder("C:/nonexistent")
         assert removed == 0
+
+
+class TestReconcile:
+    """Tests for ChunkStore.reconcile() LanceDB compaction."""
+
+    def test_reconcile_compacts_after_removal(self, initialized_store, tmp_path):
+        """Verify LanceDB optimize is attempted when orphans are removed."""
+        # Create a file, index it, then delete it
+        file_a = tmp_path / "a.md"
+        file_a.write_text("Content")
+        p = Path(file_a).as_posix()
+
+        chunk = _make_chunk(source_path=p, idx=0)
+        initialized_store.upsert_chunks([chunk])
+        initialized_store.record_file_indexed(p, "hash", 1)
+
+        # Delete the file from disk
+        file_a.unlink()
+
+        # Patch optimize to verify it gets called
+        original_table = initialized_store._table
+        with patch.object(original_table, "optimize") as mock_compact:
+            result = initialized_store.reconcile()
+
+        assert result["removed_count"] == 1
+        mock_compact.assert_called_once()
+
+    def test_reconcile_handles_compact_import_error(self, initialized_store, tmp_path):
+        """Reconcile succeeds even if optimize raises ImportError."""
+        file_a = tmp_path / "a.md"
+        file_a.write_text("Content")
+        p = Path(file_a).as_posix()
+
+        chunk = _make_chunk(source_path=p, idx=0)
+        initialized_store.upsert_chunks([chunk])
+        initialized_store.record_file_indexed(p, "hash", 1)
+
+        file_a.unlink()
+
+        # optimize raises ImportError (no pylance)
+        original_table = initialized_store._table
+        with patch.object(original_table, "optimize", side_effect=ImportError("no pylance")):
+            result = initialized_store.reconcile()
+
+        assert result["removed_count"] == 1
+        assert len(initialized_store.list_indexed_files()) == 0

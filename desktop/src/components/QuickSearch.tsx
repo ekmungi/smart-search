@@ -7,7 +7,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { Search, FileText, X } from "lucide-react";
-import { searchDocuments, type SearchHit } from "../lib/api";
+import { searchDocuments, fetchModelLoaded, type SearchHit } from "../lib/api";
 
 /** Debounce delay in milliseconds for search-as-you-type. */
 const DEBOUNCE_MS = 250;
@@ -20,9 +20,11 @@ export default function QuickSearch() {
   const [results, setResults] = useState<SearchHit[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [warmingUp, setWarmingUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warmupCheckedRef = useRef(false);
 
   /** Hide the overlay via Tauri command (more reliable than JS window API). */
   const hideWindow = useCallback(async () => {
@@ -62,6 +64,8 @@ export default function QuickSearch() {
         setResults([]);
         setSelectedIndex(0);
         setError(null);
+        setWarmingUp(false);
+        warmupCheckedRef.current = false;
         inputRef.current?.focus();
       } else {
         // Auto-hide on blur (Spotlight behavior)
@@ -73,6 +77,18 @@ export default function QuickSearch() {
       unlisten.then((fn) => fn());
     };
   }, [hideWindow]);
+
+  /** Check if the embedding model is loaded; show "Warming up..." if not. */
+  const checkModelWarmup = useCallback(async () => {
+    if (warmupCheckedRef.current) return;
+    warmupCheckedRef.current = true;
+    try {
+      const { loaded } = await fetchModelLoaded();
+      if (!loaded) setWarmingUp(true);
+    } catch {
+      // Backend unreachable -- doSearch will surface the error
+    }
+  }, []);
 
   /** Execute search against the backend API. */
   const doSearch = useCallback(async (q: string) => {
@@ -88,6 +104,8 @@ export default function QuickSearch() {
       const res = await searchDocuments(q, MAX_RESULTS);
       setResults(res.results);
       setSelectedIndex(0);
+      // Model is now loaded after a successful search
+      setWarmingUp(false);
     } catch {
       setError("Search failed -- is the backend running?");
       setResults([]);
@@ -99,6 +117,8 @@ export default function QuickSearch() {
   /** Update query and schedule debounced search. */
   const handleInputChange = (value: string) => {
     setQuery(value);
+    // Check model warmup status on first keystroke
+    if (value.trim().length === 1) checkModelWarmup();
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => doSearch(value), DEBOUNCE_MS);
   };
@@ -188,7 +208,13 @@ export default function QuickSearch() {
           <div className="px-4 py-3 text-sm text-accent-red">{error}</div>
         )}
 
-        {loading && results.length === 0 && (
+        {warmingUp && loading && results.length === 0 && (
+          <div className="px-4 py-3 text-sm text-text-muted">
+            Warming up... first search may take a moment
+          </div>
+        )}
+
+        {!warmingUp && loading && results.length === 0 && (
           <div className="px-4 py-3 text-sm text-text-muted">Searching...</div>
         )}
 

@@ -21,7 +21,7 @@ def _make_search_result(rank=1, score=0.95, text="Sample result text.", source="
         text=text,
         page_number=page,
         section_path=section_path,
-        embedding=[0.0] * 768,
+        embedding=[0.0] * 256,
         has_image=False,
         indexed_at="2026-03-05T00:00:00Z",
         model_name="nomic-ai/nomic-embed-text-v1.5",
@@ -216,7 +216,7 @@ def _make_chunk(
         content_type="text",
         text=text,
         section_path='["Test"]',
-        embedding=embedding or np.random.RandomState(42).rand(768).tolist(),
+        embedding=embedding or np.random.RandomState(42).rand(256).tolist(),
         indexed_at="2026-03-07T00:00:00",
         model_name="nomic-ai/nomic-embed-text-v1.5",
     )

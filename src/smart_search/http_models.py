@@ -23,6 +23,7 @@ class StatsResponse(BaseModel):
     chunk_count: int
     index_size_bytes: int
     index_size_mb: float
+    total_files: int = 0
     last_indexed_at: Optional[str] = None
     formats_indexed: List[str]
 
@@ -137,3 +138,36 @@ class ModelStatusResponse(BaseModel):
 
     cached: bool
     model_name: str
+
+
+class ModelLoadedResponse(BaseModel):
+    """Whether the embedding model is currently loaded in memory."""
+
+    loaded: bool
+
+
+class ModelInfoResponse(BaseModel):
+    """Metadata for a single curated embedding model."""
+
+    model_id: str
+    display_name: str
+    size_mb: int
+    mteb_retrieval: float
+    native_dims: int
+    mrl_dims: List[int]
+    default_dims: int
+    modalities: List[str]
+    description: str
+
+
+class ModelsResponse(BaseModel):
+    """List of available embedding models."""
+
+    models: List[ModelInfoResponse]
+
+
+class ConfigUpdateResponse(BaseModel):
+    """Result of a config update, with rebuild info."""
+
+    config: dict
+    requires_reindex: bool = False

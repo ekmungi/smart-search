@@ -10,10 +10,13 @@ from typing import Any, Dict, List
 # Default config values
 _DEFAULTS: Dict[str, Any] = {
     "watch_directories": [],
-    "embedding_model": "nomic-ai/nomic-embed-text-v1.5",
-    "embedding_dimensions": "256",
+    "embedding_model": "Snowflake/snowflake-arctic-embed-m-v2.0",
+    "embedding_dimensions": 256,
     "embedding_backend": "onnx",
+    "embedder_idle_timeout": 60,
     "exclude_patterns": [".git", ".obsidian", ".trash", "node_modules", ".smart-search"],
+    "relevance_threshold": 0.50,
+    "shortcut_key": "Ctrl+Space",
 }
 
 # Keys that can be overridden by SMART_SEARCH_ env vars
@@ -21,7 +24,10 @@ _ENV_OVERRIDABLE = [
     "embedding_model",
     "embedding_dimensions",
     "embedding_backend",
+    "embedder_idle_timeout",
     "watch_directories",
+    "relevance_threshold",
+    "shortcut_key",
 ]
 
 

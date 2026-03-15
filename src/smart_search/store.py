@@ -52,7 +52,7 @@ class ChunkStore:
                 pa.field("text", pa.string()),
                 pa.field("page_number", pa.int32()),
                 pa.field("section_path", pa.string()),
-                pa.field("embedding", pa.list_(pa.float32(), 768)),
+                pa.field("embedding", pa.list_(pa.float32(), self._config.embedding_dimensions)),
                 pa.field("has_image", pa.bool_()),
                 pa.field("image_path", pa.string()),
                 pa.field("entity_tags", pa.string()),
@@ -164,9 +164,9 @@ class ChunkStore:
         search_results = []
         for rank, row in enumerate(results, start=1):
             chunk = self._record_to_chunk(row)
-            # LanceDB returns _distance (lower = more similar for cosine)
+            # LanceDB cosine distance ranges 0..2; convert to 0..1 similarity
             distance = row.get("_distance", 0.0)
-            score = 1.0 - distance
+            score = max(0.0, 1.0 - distance)
             search_results.append(
                 SearchResult(rank=rank, score=score, chunk=chunk)
             )
@@ -218,10 +218,19 @@ class ChunkStore:
         # Calculate index size on disk
         index_size = self._calculate_index_size()
 
+        # Count total supported files across watch directories
+        total_files = 0
+        for watch_dir in self._config.watch_directories:
+            watch_path = Path(watch_dir)
+            if watch_path.is_dir():
+                for ext in self._config.supported_extensions:
+                    total_files += len(list(watch_path.rglob(f"*{ext}")))
+
         return IndexStats(
             document_count=doc_count,
             chunk_count=chunk_count,
             index_size_bytes=index_size,
+            total_files=total_files,
             last_indexed_at=last_indexed,
             formats_indexed=formats,
         )
@@ -320,6 +329,74 @@ class ChunkStore:
             self.delete_chunks_for_file(source_path)
             self.remove_file_record(source_path)
         return len(files)
+
+    def rebuild_table(self) -> None:
+        """Drop and recreate the LanceDB table with current config schema.
+
+        Also clears all indexed_files records from SQLite since the
+        embeddings are no longer valid after a model or dimension change.
+        """
+        # Drop existing LanceDB table
+        try:
+            self._db.drop_table(self._config.lancedb_table_name)
+        except Exception:
+            pass
+
+        # Recreate with current config dimensions
+        schema = pa.schema([
+            pa.field("id", pa.string()),
+            pa.field("source_path", pa.string()),
+            pa.field("source_type", pa.string()),
+            pa.field("content_type", pa.string()),
+            pa.field("text", pa.string()),
+            pa.field("page_number", pa.int32()),
+            pa.field("section_path", pa.string()),
+            pa.field("embedding", pa.list_(pa.float32(), self._config.embedding_dimensions)),
+            pa.field("has_image", pa.bool_()),
+            pa.field("image_path", pa.string()),
+            pa.field("entity_tags", pa.string()),
+            pa.field("source_title", pa.string()),
+            pa.field("source_date", pa.string()),
+            pa.field("indexed_at", pa.string()),
+            pa.field("model_name", pa.string()),
+        ])
+        self._table = self._db.create_table(
+            self._config.lancedb_table_name, schema=schema
+        )
+
+        # Clear SQLite records -- old embeddings are invalid
+        self._sqlite_conn.execute("DELETE FROM indexed_files")
+        self._sqlite_conn.commit()
+
+    def reconcile(self) -> dict:
+        """Remove chunks for files that no longer exist on disk.
+
+        Queries all unique source_path values from SQLite indexed_files,
+        checks if each file still exists via Path.exists(), removes
+        missing files' chunks from LanceDB and records from SQLite,
+        then compacts LanceDB.
+
+        Returns:
+            Dict with 'removed_count' (int) and 'removed_files' (list of paths).
+        """
+        cursor = self._sqlite_conn.execute(
+            "SELECT source_path FROM indexed_files"
+        )
+        all_paths = [row[0] for row in cursor.fetchall()]
+
+        removed_files = [p for p in all_paths if not Path(p).exists()]
+
+        for source_path in removed_files:
+            self.delete_chunks_for_file(source_path)
+            self.remove_file_record(source_path)
+
+        if removed_files:
+            try:
+                self._table.optimize()
+            except Exception:
+                pass  # optimize requires pylance; skip if unavailable
+
+        return {"removed_count": len(removed_files), "removed_files": list(removed_files)}
 
     def _chunk_to_record(self, chunk: Chunk) -> dict:
         """Convert a Chunk to a dict suitable for LanceDB insertion.

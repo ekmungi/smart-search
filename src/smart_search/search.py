@@ -15,9 +15,6 @@ if TYPE_CHECKING:
 # Maximum characters to display per chunk in results
 _MAX_TEXT_LENGTH = 500
 
-# Minimum relevance score (0-1) to include in results.
-# Cosine similarity below this with nomic-embed-v1.5 is noise.
-_MIN_RELEVANCE_SCORE = 0.50
 
 
 class SearchEngine:
@@ -71,7 +68,7 @@ class SearchEngine:
         results = self._store.vector_search(query_vec, limit=limit)
 
         # Filter out low-relevance noise (vector search always returns results)
-        results = [r for r in results if r.score >= _MIN_RELEVANCE_SCORE]
+        results = [r for r in results if r.score >= self._config.relevance_threshold]
 
         # Apply doc_types filter if specified
         if doc_types:

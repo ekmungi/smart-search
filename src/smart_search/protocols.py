@@ -36,6 +36,20 @@ class EmbedderProtocol(Protocol):
         """
         ...
 
+    def embed_image(self, image_path: str) -> List[float]:
+        """Generate embedding for an image file.
+
+        Args:
+            image_path: Path to the image file.
+
+        Returns:
+            Embedding vector.
+
+        Raises:
+            NotImplementedError: If the model does not support images.
+        """
+        ...
+
 
 @runtime_checkable
 class ChunkerProtocol(Protocol):

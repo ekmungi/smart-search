@@ -48,7 +48,22 @@ def create_app(
         Configured FastAPI application.
     """
     if config is None:
-        config = get_config()
+        # Merge persisted config.json values into runtime config
+        base = get_config()
+        mgr = ConfigManager(get_data_dir())
+        persisted = mgr.load()
+        if persisted:
+            # Build override dict from config.json, keeping only known fields
+            overrides = {}
+            for key, value in persisted.items():
+                if hasattr(base, key):
+                    overrides[key] = value
+            if overrides:
+                config = SmartSearchConfig(**overrides)
+            else:
+                config = base
+        else:
+            config = base
 
     # Mutable dict avoids nonlocal for start_time assignment in lifespan
     state = {"start_time": 0.0}
@@ -60,15 +75,27 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """Record startup time and clean up watcher on shutdown."""
+        """Run startup checks, record time, clean up on shutdown."""
+        import logging
+        _logger = logging.getLogger(__name__)
+
         state["start_time"] = time.time()
+
+        # Run startup checks (non-blocking, log-only)
+        try:
+            from smart_search.startup import check_index_compatibility, reconcile_orphans
+            check_index_compatibility(config, config.sqlite_path)
+            reconcile_orphans(get_store())
+        except Exception as e:
+            _logger.warning("Startup checks failed (non-fatal): %s", e)
+
         yield
         if _watcher is not None and getattr(_watcher, "is_running", False):
             _watcher.stop()
 
     app = FastAPI(
         title="Smart Search API",
-        version="0.4.0",
+        version="0.7.0",
         lifespan=lifespan,
     )
 

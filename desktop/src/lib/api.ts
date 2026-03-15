@@ -13,6 +13,7 @@ export interface StatsResponse {
   chunk_count: number;
   index_size_bytes: number;
   index_size_mb: number;
+  total_files: number;
   last_indexed_at: string | null;
   formats_indexed: string[];
 }
@@ -42,6 +43,31 @@ export interface ConfigResponse {
 export interface ModelStatusResponse {
   cached: boolean;
   model_name: string;
+}
+
+export interface ModelLoadedResponse {
+  loaded: boolean;
+}
+
+export interface ModelInfo {
+  model_id: string;
+  display_name: string;
+  size_mb: number;
+  mteb_retrieval: number;
+  native_dims: number;
+  mrl_dims: number[];
+  default_dims: number;
+  modalities: string[];
+  description: string;
+}
+
+export interface ModelsResponse {
+  models: ModelInfo[];
+}
+
+export interface ConfigUpdateResponse {
+  config: Record<string, unknown>;
+  requires_reindex: boolean;
 }
 
 export interface SearchHit {
@@ -144,15 +170,29 @@ export async function fetchModelStatus(): Promise<ModelStatusResponse> {
   return res.json();
 }
 
-/** Update configuration keys. */
+/** Update configuration keys. Returns whether re-indexing is needed. */
 export async function updateConfig(
   config: Record<string, unknown>,
-): Promise<ConfigResponse> {
+): Promise<ConfigUpdateResponse> {
   const res = await fetch(`${BASE_URL}/config`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ config }),
   });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Check if the embedding model is currently loaded in memory. */
+export async function fetchModelLoaded(): Promise<ModelLoadedResponse> {
+  const res = await fetch(`${BASE_URL}/model/loaded`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Fetch the list of available embedding models. */
+export async function fetchModels(): Promise<ModelsResponse> {
+  const res = await fetch(`${BASE_URL}/models`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

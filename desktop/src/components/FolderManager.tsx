@@ -8,25 +8,31 @@ import {
   RefreshCw,
   CheckCircle,
   AlertCircle,
+  Loader,
 } from "lucide-react";
 import {
   fetchFolders,
+  fetchStats,
   addFolder,
   removeFolder,
   reindexFolder,
   type FolderInfo,
+  type StatsResponse,
 } from "../lib/api";
 
 export default function FolderManager() {
   const [folders, setFolders] = useState<FolderInfo[]>([]);
+  const [stats, setStats] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [indexingPaths, setIndexingPaths] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetchFolders();
-      setFolders(res.folders);
+      const [fRes, sRes] = await Promise.all([fetchFolders(), fetchStats()]);
+      setFolders(fRes.folders);
+      setStats(sRes);
       setError(null);
     } catch {
       setError("Could not load folders");
@@ -37,16 +43,39 @@ export default function FolderManager() {
 
   useEffect(() => {
     refresh();
+    // Poll stats every 5s to update indexing progress
+    const interval = setInterval(async () => {
+      try {
+        const s = await fetchStats();
+        setStats(s);
+      } catch {
+        // Ignore poll errors
+      }
+    }, 5000);
+    return () => clearInterval(interval);
   }, [refresh]);
+
+  /** Whether indexing is currently active (fewer docs indexed than files on disk). */
+  const isIndexing = stats !== null && stats.total_files > 0 && stats.document_count < stats.total_files;
 
   const handleAdd = async () => {
     const selected = await open({ directory: true, multiple: false });
     if (!selected) return;
 
     setError(null);
+    const folderPath = selected as string;
+
+    // Mark this folder as indexing immediately
+    setIndexingPaths((prev) => new Set([...prev, folderPath]));
+
     // Fire-and-forget: start indexing in background, don't block the UI
-    addFolder(selected as string)
+    addFolder(folderPath)
       .then(async (result) => {
+        setIndexingPaths((prev) => {
+          const next = new Set(prev);
+          next.delete(folderPath);
+          return next;
+        });
         await refresh();
         setError(
           `Added ${result.path} -- ${result.indexed} indexed, ${result.skipped} skipped`,
@@ -54,6 +83,11 @@ export default function FolderManager() {
         setTimeout(() => setError(null), 4000);
       })
       .catch((e) => {
+        setIndexingPaths((prev) => {
+          const next = new Set(prev);
+          next.delete(folderPath);
+          return next;
+        });
         setError(e instanceof Error ? e.message : "Failed to add folder");
       });
 
@@ -98,6 +132,27 @@ export default function FolderManager() {
         </button>
       </div>
 
+      {/* Indexing progress summary */}
+      {stats && stats.total_files > 0 && (
+        <div className="bg-bg-surface rounded-lg p-3 mb-4 flex items-center gap-3">
+          {isIndexing ? (
+            <>
+              <Loader size={14} className="text-accent-blue animate-spin shrink-0" />
+              <span className="text-sm text-text-secondary">
+                Indexing {stats.document_count} of {stats.total_files} files ({stats.chunk_count} chunks)
+              </span>
+            </>
+          ) : (
+            <>
+              <CheckCircle size={14} className="text-accent-green shrink-0" />
+              <span className="text-sm text-text-secondary">
+                {stats.document_count} files indexed ({stats.chunk_count} chunks)
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
       {error && (
         <div className="bg-bg-surface border border-border rounded-lg p-3 mb-4 text-sm text-text-secondary">
           {error}
@@ -124,15 +179,21 @@ export default function FolderManager() {
             className="bg-bg-surface rounded-lg p-4 flex items-center justify-between"
           >
             <div className="flex items-center gap-3 min-w-0">
-              {folder.exists ? (
-                <CheckCircle size={16} className="text-accent-green shrink-0" />
-              ) : (
+              {!folder.exists ? (
                 <AlertCircle size={16} className="text-accent-red shrink-0" />
+              ) : indexingPaths.has(folder.path) ? (
+                <Loader size={16} className="text-accent-blue animate-spin shrink-0" />
+              ) : (
+                <CheckCircle size={16} className="text-accent-green shrink-0" />
               )}
               <div className="min-w-0">
                 <p className="text-sm truncate">{folder.path}</p>
                 <p className="text-xs text-text-muted">
-                  {folder.exists ? "Active" : "Missing"}
+                  {!folder.exists
+                    ? "Missing"
+                    : indexingPaths.has(folder.path)
+                      ? "Indexing..."
+                      : "Indexed"}
                 </p>
               </div>
             </div>

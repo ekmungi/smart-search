@@ -32,7 +32,7 @@ def _make_chunk(**overrides):
         "content_type": "text",
         "text": "Test chunk content about knowledge management",
         "section_path": '["Introduction"]',
-        "embedding": [0.1] * 768,
+        "embedding": [0.1] * 256,
         "indexed_at": "2026-03-14T10:00:00Z",
         "model_name": "nomic-ai/nomic-embed-text-v1.5",
     }

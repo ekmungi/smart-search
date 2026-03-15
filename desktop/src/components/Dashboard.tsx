@@ -11,12 +11,25 @@ import {
 } from "../lib/api";
 import StatsCard from "./StatsCard";
 
+/** Format seconds into human-readable duration (e.g. "2h 15m", "3d 4h"). */
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  const remainMins = mins % 60;
+  if (hours < 24) return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remainHours = hours % 24;
+  return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`;
+}
+
 export default function Dashboard() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modelCached, setModelCached] = useState<boolean | null>(null);
-
+  const [modelName, setModelName] = useState<string | null>(null);
   useEffect(() => {
     const poll = async () => {
       try {
@@ -25,6 +38,7 @@ export default function Dashboard() {
         setStats(s);
         setError(null);
       } catch {
+        setHealth(null);
         setError("Backend not reachable");
       }
     };
@@ -42,7 +56,10 @@ export default function Dashboard() {
     const checkModel = async () => {
       try {
         const status = await fetchModelStatus();
-        if (!cancelled) setModelCached(status.cached);
+        if (!cancelled) {
+          setModelCached(status.cached);
+          setModelName(status.model_name);
+        }
       } catch {
         // Backend not ready yet -- will retry
       }
@@ -86,6 +103,23 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Indexing in progress banner */}
+      {stats && stats.total_files > 0 && stats.document_count < stats.total_files && (
+        <div className="bg-bg-surface border border-accent-blue/30 rounded-lg p-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-4 h-4 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
+            <div>
+              <p className="text-sm font-medium text-text-primary">
+                Indexing documents... {stats.document_count} of {stats.total_files}
+              </p>
+              <p className="text-xs text-text-secondary mt-1">
+                {stats.chunk_count} chunks indexed so far
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Model download banner (first-launch UX) */}
       {health && modelCached === false && (
         <div className="bg-bg-surface border border-accent-amber/30 rounded-lg p-4 mb-6">
@@ -93,11 +127,10 @@ export default function Dashboard() {
             <div className="w-4 h-4 border-2 border-accent-amber border-t-transparent rounded-full animate-spin" />
             <div>
               <p className="text-sm font-medium text-text-primary">
-                Downloading embedding model...
+                Downloading {modelName ?? "embedding model"}...
               </p>
               <p className="text-xs text-text-secondary mt-1">
-                First-time setup (~250 MB). Search will be available once
-                complete.
+                First-time setup. Search will be available once complete.
               </p>
             </div>
           </div>
@@ -144,7 +177,7 @@ export default function Dashboard() {
                 key={fmt}
                 className="px-2 py-1 bg-bg-elevated rounded text-xs text-text-primary"
               >
-                .{fmt}
+                {fmt}
               </span>
             ))}
           </div>
@@ -161,7 +194,7 @@ export default function Dashboard() {
             <span className="text-text-secondary">
               Uptime:{" "}
               <span className="text-text-primary">
-                {Math.round(health.uptime_seconds)}s
+                {formatUptime(health.uptime_seconds)}
               </span>
             </span>
             <span className="text-text-secondary">

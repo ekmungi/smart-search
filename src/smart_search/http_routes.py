@@ -15,6 +15,7 @@ from smart_search.http_models import (
     AddFolderResponse,
     ConfigResponse,
     ConfigUpdateRequest,
+    ConfigUpdateResponse,
     FileInfo,
     FilesResponse,
     FolderInfo,
@@ -22,7 +23,10 @@ from smart_search.http_models import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    ModelInfoResponse,
+    ModelLoadedResponse,
     ModelStatusResponse,
+    ModelsResponse,
     RemoveFolderResponse,
     SearchHit,
     SearchResponse,
@@ -63,7 +67,7 @@ def create_router(
         """Server health check with version and uptime."""
         return HealthResponse(
             status="ok",
-            version="0.4.0",
+            version="0.7.0",
             uptime_seconds=round(get_uptime(), 1),
         )
 
@@ -77,6 +81,7 @@ def create_router(
             chunk_count=s.chunk_count,
             index_size_bytes=s.index_size_bytes,
             index_size_mb=round(s.index_size_bytes / (1024 * 1024), 2),
+            total_files=s.total_files,
             last_indexed_at=s.last_indexed_at,
             formats_indexed=s.formats_indexed,
         )
@@ -245,14 +250,54 @@ def create_router(
         mgr = get_config_mgr()
         return ConfigResponse(config=mgr.load())
 
-    @router.put("/config", response_model=ConfigResponse)
+    @router.put("/config", response_model=ConfigUpdateResponse)
     def update_config(req: ConfigUpdateRequest):
-        """Merge provided keys into the current configuration."""
+        """Merge provided keys into the current configuration.
+
+        If embedding_model or embedding_dimensions changed, triggers
+        a table rebuild (drops and recreates LanceDB table).
+        """
         mgr = get_config_mgr()
         current = mgr.load()
+        old_model = current.get("embedding_model")
+        old_dims = current.get("embedding_dimensions")
+
         current.update(req.config)
         mgr.save(current)
-        return ConfigResponse(config=current)
+
+        # Detect embedding config change requiring re-index
+        new_model = current.get("embedding_model")
+        new_dims = current.get("embedding_dimensions")
+        requires_reindex = (new_model != old_model) or (new_dims != old_dims)
+
+        if requires_reindex:
+            store = get_store()
+            store.rebuild_table()
+
+        return ConfigUpdateResponse(
+            config=current, requires_reindex=requires_reindex,
+        )
+
+    @router.get("/models", response_model=ModelsResponse)
+    def list_models():
+        """List all curated embedding models with metadata."""
+        from smart_search.model_registry import list_models as _list
+
+        models = [
+            ModelInfoResponse(
+                model_id=m.model_id,
+                display_name=m.display_name,
+                size_mb=m.size_mb,
+                mteb_retrieval=m.mteb_retrieval,
+                native_dims=m.native_dims,
+                mrl_dims=m.mrl_dims,
+                default_dims=m.default_dims,
+                modalities=m.modalities,
+                description=m.description,
+            )
+            for m in _list()
+        ]
+        return ModelsResponse(models=models)
 
     @router.get("/model/status", response_model=ModelStatusResponse)
     def model_status():
@@ -263,5 +308,12 @@ def create_router(
             cached=Embedder.is_model_cached(config.embedding_model),
             model_name=config.embedding_model,
         )
+
+    @router.get("/model/loaded", response_model=ModelLoadedResponse)
+    def model_loaded():
+        """Check whether the embedding model is currently loaded in memory."""
+        engine = get_engine()
+        is_loaded = getattr(engine._embedder, "is_loaded", True)
+        return ModelLoadedResponse(loaded=is_loaded)
 
     return router

@@ -1,4 +1,4 @@
-# Tests for Embedder: nomic-embed-text-v1.5 direct ONNX embedding generation.
+# Tests for Embedder: Matryoshka truncation, model-aware prefixes, ONNX inference.
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -7,12 +7,12 @@ import numpy as np
 import pytest
 
 from smart_search.config import SmartSearchConfig
-from smart_search.embedder import Embedder, _mean_pool, _l2_normalize
+from smart_search.embedder import Embedder, _mean_pool, _l2_normalize, _truncate
 
 
 @pytest.fixture
 def tmp_config(tmp_path):
-    """SmartSearchConfig with paths pointing to tmp_path."""
+    """SmartSearchConfig with paths pointing to tmp_path (snowflake default)."""
     return SmartSearchConfig(
         lancedb_path=str(tmp_path / "vectors"),
         sqlite_path=str(tmp_path / "meta.db"),
@@ -20,12 +20,22 @@ def tmp_config(tmp_path):
 
 
 @pytest.fixture
-def mock_embedder(tmp_config):
-    """Embedder with mocked ONNX session and tokenizer.
+def nomic_config(tmp_path):
+    """SmartSearchConfig configured for nomic model."""
+    return SmartSearchConfig(
+        lancedb_path=str(tmp_path / "vectors"),
+        sqlite_path=str(tmp_path / "meta.db"),
+        embedding_model="nomic-ai/nomic-embed-text-v1.5",
+        embedding_dimensions=256,
+    )
 
-    Bypasses _load_model entirely by patching it to return mock components.
+
+def _make_mock_embedder(config, hidden_dim=768):
+    """Create an Embedder with mocked ONNX session and tokenizer.
+
+    Since __init__ no longer calls _load_model (lazy loading), we
+    manually inject the mock components and set _loaded = True.
     """
-    # Mock tokenizer: returns numpy arrays like a real tokenizer
     mock_tokenizer = MagicMock()
     mock_tokenizer._last_texts = []
 
@@ -38,7 +48,6 @@ def mock_embedder(tmp_config):
 
     mock_tokenizer.side_effect = tokenize
 
-    # Mock ONNX session: returns deterministic token embeddings
     mock_session = MagicMock()
     mock_input_ids = MagicMock()
     mock_input_ids.name = "input_ids"
@@ -49,8 +58,6 @@ def mock_embedder(tmp_config):
     def mock_run(output_names, feeds):
         batch_size = feeds["input_ids"].shape[0]
         seq_len = feeds["input_ids"].shape[1]
-        hidden_dim = 768
-        # Return last_hidden_state: (batch, seq_len, hidden_dim)
         token_embs = np.random.RandomState(42).randn(
             batch_size, seq_len, hidden_dim
         ).astype(np.float32)
@@ -58,11 +65,25 @@ def mock_embedder(tmp_config):
 
     mock_session.run.side_effect = mock_run
 
-    # Bypass _load_model -- just return our mocks
-    with patch.object(Embedder, "_load_model", return_value=(mock_tokenizer, mock_session)):
-        embedder = Embedder(tmp_config)
+    # Create embedder (lazy — no model loaded) then inject mocks
+    embedder = Embedder(config)
+    embedder._tokenizer = mock_tokenizer
+    embedder._session = mock_session
+    embedder._loaded = True
 
     return embedder
+
+
+@pytest.fixture
+def mock_embedder(tmp_config):
+    """Embedder with mocked ONNX session (snowflake default config)."""
+    return _make_mock_embedder(tmp_config)
+
+
+@pytest.fixture
+def mock_nomic_embedder(nomic_config):
+    """Embedder with mocked ONNX session (nomic config)."""
+    return _make_mock_embedder(nomic_config)
 
 
 class TestMeanPool:
@@ -112,42 +133,70 @@ class TestL2Normalize:
         assert not np.any(np.isnan(result))
 
 
-class TestEmbedderFast:
-    """Fast tests using mocked model."""
+class TestTruncate:
+    """Tests for the _truncate Matryoshka helper function."""
 
-    def test_prefix_applied_to_documents(self, mock_embedder):
-        """Verify 'search_document: ' prefix is prepended before encoding."""
-        mock_embedder.embed_documents(["hello world"])
-        last_texts = mock_embedder._tokenizer._last_texts
-        assert last_texts[0].startswith("search_document: ")
+    def test_truncates_to_target(self):
+        """Should slice vectors to target dimensions."""
+        vectors = np.random.randn(2, 768).astype(np.float32)
+        vectors = _l2_normalize(vectors)
+        result = _truncate(vectors, 256)
+        assert result.shape == (2, 256)
 
-    def test_prefix_applied_to_query(self, mock_embedder):
-        """Verify 'search_query: ' prefix is prepended for queries."""
+    def test_renormalizes_after_truncation(self):
+        """Truncated vectors should have unit L2 norm."""
+        vectors = np.random.randn(3, 768).astype(np.float32)
+        vectors = _l2_normalize(vectors)
+        result = _truncate(vectors, 256)
+        norms = np.linalg.norm(result, axis=1)
+        np.testing.assert_allclose(norms, [1.0, 1.0, 1.0], atol=1e-6)
+
+    def test_no_op_when_dims_match(self):
+        """Should return input unchanged when dims >= native."""
+        vectors = np.random.randn(2, 256).astype(np.float32)
+        vectors = _l2_normalize(vectors)
+        result = _truncate(vectors, 256)
+        np.testing.assert_array_equal(result, vectors)
+
+
+class TestEmbedderSnowflake:
+    """Tests for snowflake model (default) — query-only prefix, 256 dims."""
+
+    def test_query_has_snowflake_prefix(self, mock_embedder):
+        """Snowflake queries get the retrieval instruction prefix."""
         mock_embedder.embed_query("test query")
         last_texts = mock_embedder._tokenizer._last_texts
-        assert last_texts[0].startswith("search_query: ")
+        assert last_texts[0].startswith(
+            "Represent this sentence for searching relevant passages: "
+        )
+
+    def test_document_has_no_prefix(self, mock_embedder):
+        """Snowflake documents should have NO prefix (raw text)."""
+        mock_embedder.embed_documents(["hello world"])
+        last_texts = mock_embedder._tokenizer._last_texts
+        assert last_texts[0] == "hello world"
+
+    def test_embed_query_returns_256_dims(self, mock_embedder):
+        """Query embedding should be 256-dimensional (MRL truncation)."""
+        result = mock_embedder.embed_query("test")
+        assert len(result) == 256
+
+    def test_embed_documents_returns_256_dims(self, mock_embedder):
+        """Document embeddings should be 256-dimensional."""
+        result = mock_embedder.embed_documents(["a", "b"])
+        assert len(result) == 2
+        assert all(len(vec) == 256 for vec in result)
 
     def test_embed_documents_returns_list_of_lists(self, mock_embedder):
         """embed_documents returns a list of float lists."""
         result = mock_embedder.embed_documents(["a", "b"])
         assert isinstance(result, list)
-        assert len(result) == 2
         assert isinstance(result[0], list)
-
-    def test_embed_documents_768_dims(self, mock_embedder):
-        """Each embedding vector should be 768-dimensional."""
-        result = mock_embedder.embed_documents(["test"])
-        assert len(result[0]) == 768
 
     def test_embed_query_returns_list(self, mock_embedder):
         """embed_query returns a flat list of floats."""
         result = mock_embedder.embed_query("test")
         assert isinstance(result, list)
-        assert len(result) == 768
-
-    def test_model_name_matches_config(self, mock_embedder):
-        """get_model_name returns the configured model ID."""
-        assert mock_embedder.get_model_name() == "nomic-ai/nomic-embed-text-v1.5"
 
     def test_embeddings_are_normalized(self, mock_embedder):
         """Output embeddings should have approximately unit L2 norm."""
@@ -155,6 +204,35 @@ class TestEmbedderFast:
         vec = np.array(result[0])
         norm = np.linalg.norm(vec)
         assert abs(norm - 1.0) < 0.01
+
+    def test_model_name_matches_config(self, mock_embedder):
+        """get_model_name returns the configured model ID."""
+        assert mock_embedder.get_model_name() == "Snowflake/snowflake-arctic-embed-m-v2.0"
+
+
+class TestEmbedderNomic:
+    """Tests for nomic model — dual prefix, backward compat."""
+
+    def test_query_has_nomic_prefix(self, mock_nomic_embedder):
+        """Nomic queries get 'search_query: ' prefix."""
+        mock_nomic_embedder.embed_query("test query")
+        last_texts = mock_nomic_embedder._tokenizer._last_texts
+        assert last_texts[0].startswith("search_query: ")
+
+    def test_document_has_nomic_prefix(self, mock_nomic_embedder):
+        """Nomic documents get 'search_document: ' prefix."""
+        mock_nomic_embedder.embed_documents(["hello world"])
+        last_texts = mock_nomic_embedder._tokenizer._last_texts
+        assert last_texts[0].startswith("search_document: ")
+
+
+class TestEmbedImage:
+    """Tests for the multimodal-ready embed_image stub."""
+
+    def test_embed_image_raises_not_implemented(self, mock_embedder):
+        """Text-only embedder should raise NotImplementedError."""
+        with pytest.raises(NotImplementedError, match="Text-only model"):
+            mock_embedder.embed_image("some/image.png")
 
 
 class TestIsModelCached:
@@ -181,24 +259,24 @@ class TestIsModelCached:
 
 @pytest.mark.slow
 class TestEmbedderSlow:
-    """Slow tests that load the real nomic-embed model."""
+    """Slow tests that load the real embedding model."""
 
     @pytest.fixture(autouse=True)
     def real_embedder(self, tmp_config):
-        """Load actual nomic-embed-text-v1.5 model."""
+        """Load actual embedding model."""
         self.embedder = Embedder(tmp_config)
 
-    def test_embed_query_returns_768_dims(self):
-        """Query embedding has 768 dimensions."""
+    def test_embed_query_returns_configured_dims(self):
+        """Query embedding has configured dimensions (256)."""
         vec = self.embedder.embed_query("What is machine learning?")
-        assert len(vec) == 768
+        assert len(vec) == 256
 
     def test_embed_documents_batch(self):
         """Three texts produce three vectors."""
         texts = ["First doc.", "Second doc.", "Third doc."]
         vecs = self.embedder.embed_documents(texts)
         assert len(vecs) == 3
-        assert all(len(v) == 768 for v in vecs)
+        assert all(len(v) == 256 for v in vecs)
 
     def test_embed_documents_consistent(self):
         """Same input produces same output (deterministic)."""

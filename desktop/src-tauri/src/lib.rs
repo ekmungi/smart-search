@@ -14,13 +14,21 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{
-    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState as ShortcutState2,
 };
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
 /// Default port for the smart-search HTTP backend.
 const BACKEND_PORT: u16 = 9742;
+
+/// Default shortcut when config is missing or unparseable.
+const DEFAULT_SHORTCUT: &str = "Ctrl+Space";
+
+/// Holds the currently active shortcut string for rollback on update failure.
+struct ShortcutState {
+    current: Mutex<String>,
+}
 
 /// Holds the managed backend child process handle.
 struct BackendState {
@@ -121,6 +129,136 @@ async fn register_mcp() -> Result<String, String> {
     })
     .await
     .unwrap_or(Err("MCP registration task failed".into()))
+}
+
+/// Parse a shortcut string like "Ctrl+Shift+K" into a tauri global-shortcut Shortcut.
+///
+/// Supports modifiers: Ctrl, Shift, Alt, Super/Meta/Cmd.
+/// Supports keys: A-Z, 0-9, F1-F24, Space, Enter, Tab, Escape, arrows, etc.
+fn parse_shortcut(s: &str) -> Result<Shortcut, String> {
+    let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
+    if parts.is_empty() {
+        return Err("Empty shortcut string".to_string());
+    }
+
+    let mut modifiers = Modifiers::empty();
+    let mut key_str = "";
+
+    for (i, part) in parts.iter().enumerate() {
+        if i == parts.len() - 1 {
+            // Last part is the key
+            key_str = part;
+        } else {
+            match part.to_lowercase().as_str() {
+                "ctrl" | "control" => modifiers |= Modifiers::CONTROL,
+                "shift" => modifiers |= Modifiers::SHIFT,
+                "alt" | "option" => modifiers |= Modifiers::ALT,
+                "super" | "meta" | "cmd" | "command" => modifiers |= Modifiers::SUPER,
+                _ => return Err(format!("Unknown modifier: {}", part)),
+            }
+        }
+    }
+
+    let code = match key_str.to_lowercase().as_str() {
+        "space" => Code::Space,
+        "enter" | "return" => Code::Enter,
+        "tab" => Code::Tab,
+        "escape" | "esc" => Code::Escape,
+        "backspace" => Code::Backspace,
+        "delete" | "del" => Code::Delete,
+        "up" | "arrowup" => Code::ArrowUp,
+        "down" | "arrowdown" => Code::ArrowDown,
+        "left" | "arrowleft" => Code::ArrowLeft,
+        "right" | "arrowright" => Code::ArrowRight,
+        "a" => Code::KeyA, "b" => Code::KeyB, "c" => Code::KeyC,
+        "d" => Code::KeyD, "e" => Code::KeyE, "f" if key_str.len() == 1 => Code::KeyF,
+        "g" => Code::KeyG, "h" => Code::KeyH, "i" => Code::KeyI,
+        "j" => Code::KeyJ, "k" => Code::KeyK, "l" => Code::KeyL,
+        "m" => Code::KeyM, "n" => Code::KeyN, "o" => Code::KeyO,
+        "p" => Code::KeyP, "q" => Code::KeyQ, "r" => Code::KeyR,
+        "s" => Code::KeyS, "t" => Code::KeyT, "u" => Code::KeyU,
+        "v" => Code::KeyV, "w" => Code::KeyW, "x" => Code::KeyX,
+        "y" => Code::KeyY, "z" => Code::KeyZ,
+        "0" => Code::Digit0, "1" => Code::Digit1, "2" => Code::Digit2,
+        "3" => Code::Digit3, "4" => Code::Digit4, "5" => Code::Digit5,
+        "6" => Code::Digit6, "7" => Code::Digit7, "8" => Code::Digit8,
+        "9" => Code::Digit9,
+        "f1" => Code::F1, "f2" => Code::F2, "f3" => Code::F3,
+        "f4" => Code::F4, "f5" => Code::F5, "f6" => Code::F6,
+        "f7" => Code::F7, "f8" => Code::F8, "f9" => Code::F9,
+        "f10" => Code::F10, "f11" => Code::F11, "f12" => Code::F12,
+        "f13" => Code::F13, "f14" => Code::F14, "f15" => Code::F15,
+        "f16" => Code::F16, "f17" => Code::F17, "f18" => Code::F18,
+        "f19" => Code::F19, "f20" => Code::F20, "f21" => Code::F21,
+        "f22" => Code::F22, "f23" => Code::F23, "f24" => Code::F24,
+        _ => return Err(format!("Unknown key: {}", key_str)),
+    };
+
+    let mods = if modifiers.is_empty() { None } else { Some(modifiers) };
+    Ok(Shortcut::new(mods, code))
+}
+
+/// Read the shortcut_key from config.json in the OS data directory.
+///
+/// On Windows: %LOCALAPPDATA%\smart-search\config.json
+/// Falls back to DEFAULT_SHORTCUT if file is missing or key is absent.
+fn read_shortcut_from_config() -> String {
+    let config_path = dirs_next::data_local_dir()
+        .map(|d| d.join("smart-search").join("config.json"));
+
+    let path = match config_path {
+        Some(p) if p.exists() => p,
+        _ => return DEFAULT_SHORTCUT.to_string(),
+    };
+
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return DEFAULT_SHORTCUT.to_string(),
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        Err(_) => return DEFAULT_SHORTCUT.to_string(),
+    };
+
+    json.get("shortcut_key")
+        .and_then(|v| v.as_str())
+        .unwrap_or(DEFAULT_SHORTCUT)
+        .to_string()
+}
+
+/// Update the global shortcut at runtime from the frontend.
+///
+/// Parses the new shortcut string, unregisters the old one, registers the new one.
+/// The handler from `setup_global_shortcut` (via `with_handler`) applies to all
+/// registered shortcuts, so we only need register/unregister here.
+/// On failure, rolls back to the previous shortcut.
+#[tauri::command]
+async fn update_shortcut(app: AppHandle, shortcut: String) -> Result<String, String> {
+    let new_sc = parse_shortcut(&shortcut)?;
+
+    let state = app.state::<ShortcutState>();
+    let old_shortcut_str = state.current.lock().unwrap().clone();
+    let old_sc = parse_shortcut(&old_shortcut_str)
+        .map_err(|e| format!("Failed to parse old shortcut: {}", e))?;
+
+    let gs = app.global_shortcut();
+
+    // Unregister the old shortcut
+    gs.unregister(old_sc)
+        .map_err(|e| format!("Failed to unregister old shortcut: {}", e))?;
+
+    // Register the new shortcut (handler is already set globally via with_handler)
+    if let Err(e) = gs.register(new_sc) {
+        // Rollback: re-register old shortcut
+        let _ = gs.register(old_sc);
+        return Err(format!("Failed to register new shortcut: {}", e));
+    }
+
+    // Update tracked state
+    *state.current.lock().unwrap() = shortcut.clone();
+
+    Ok(format!("Shortcut updated to {}", shortcut))
 }
 
 /// Toggle the quick search overlay window visibility.
@@ -306,14 +444,29 @@ fn auto_register_mcp_if_needed() {
     }
 }
 
-/// Register the global Ctrl+Space shortcut for quick search.
+/// Register the global shortcut for quick search, reading from config.json.
+///
+/// Falls back to Ctrl+Space if the config file is missing or the key is invalid.
+/// Stores the active shortcut string in ShortcutState for runtime updates.
 fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Space);
+    let shortcut_str = read_shortcut_from_config();
+    let shortcut = parse_shortcut(&shortcut_str).unwrap_or_else(|e| {
+        log::warn!("Invalid shortcut '{}': {}. Using default.", shortcut_str, e);
+        parse_shortcut(DEFAULT_SHORTCUT).unwrap()
+    });
+
+    // Store the active shortcut string for runtime updates
+    let effective = if parse_shortcut(&shortcut_str).is_ok() {
+        shortcut_str
+    } else {
+        DEFAULT_SHORTCUT.to_string()
+    };
+    *app.state::<ShortcutState>().current.lock().unwrap() = effective;
 
     app.handle().plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
+                if event.state == ShortcutState2::Pressed {
                     toggle_search_window(app);
                 }
             })
@@ -332,6 +485,9 @@ pub fn run() {
         .manage(BackendState {
             child: Mutex::new(None),
             dev_child: Mutex::new(None),
+        })
+        .manage(ShortcutState {
+            current: Mutex::new(DEFAULT_SHORTCUT.to_string()),
         })
         .setup(|app| {
             let state = app.state::<BackendState>();
@@ -372,9 +528,9 @@ pub fn run() {
             // Set up system tray
             setup_tray(app)?;
 
-            // Register global shortcut (Ctrl+Space) -- non-fatal if already taken
+            // Register global shortcut from config -- non-fatal if already taken
             if let Err(e) = setup_global_shortcut(app) {
-                log::warn!("Could not register Ctrl+Space shortcut: {}", e);
+                log::warn!("Could not register global shortcut: {}", e);
             }
 
             // Plugins
@@ -408,6 +564,7 @@ pub fn run() {
             open_file,
             check_mcp_registered,
             register_mcp,
+            update_shortcut,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -20,9 +20,10 @@ class SmartSearchConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SMART_SEARCH_")
 
     # Embedding settings
-    embedding_model: str = "nomic-ai/nomic-embed-text-v1.5"
-    embedding_dimensions: int = 768
+    embedding_model: str = "Snowflake/snowflake-arctic-embed-m-v2.0"
+    embedding_dimensions: int = 256
     embedding_backend: str = "onnx"
+    embedder_idle_timeout: float = 60.0
 
     # Chunking settings
     chunk_max_tokens: int = 512
@@ -53,6 +54,10 @@ class SmartSearchConfig(BaseSettings):
     # Search settings
     search_default_limit: int = 10
     search_default_mode: str = "hybrid"
+    relevance_threshold: float = 0.30
+
+    # Global shortcut for Quick Search overlay
+    shortcut_key: str = "Ctrl+Space"
 
     # nomic-embed task prefixes
     nomic_document_prefix: str = "search_document: "

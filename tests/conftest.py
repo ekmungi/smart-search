@@ -93,17 +93,19 @@ def sample_docx_path(tmp_path):
 
 @pytest.fixture
 def mock_embedder(tmp_config):
-    """Mock Embedder producing deterministic 768-dim vectors."""
+    """Mock Embedder producing deterministic vectors matching config dims."""
     mock = MagicMock()
     rng = np.random.RandomState(42)
+    dims = tmp_config.embedding_dimensions
 
     def fake_embed_documents(texts):
-        return [rng.randn(768).tolist() for _ in texts]
+        return [rng.randn(dims).tolist() for _ in texts]
 
     def fake_embed_query(query):
-        return rng.randn(768).tolist()
+        return rng.randn(dims).tolist()
 
     mock.embed_documents.side_effect = fake_embed_documents
     mock.embed_query.side_effect = fake_embed_query
-    mock.get_model_name.return_value = "nomic-ai/nomic-embed-text-v1.5"
+    mock.get_model_name.return_value = tmp_config.embedding_model
+    mock.is_loaded = True
     return mock

@@ -18,7 +18,7 @@ def _make_chunk(**overrides):
         "text": "Sample chunk text for testing.",
         "page_number": 1,
         "section_path": '["Chapter 1", "Section 1.2"]',
-        "embedding": [0.0] * 768,
+        "embedding": [0.0] * 256,
         "has_image": False,
         "image_path": None,
         "entity_tags": None,
