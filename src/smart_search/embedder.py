@@ -30,6 +30,10 @@ _MODEL_PREFIXES = {
 # Default prefix style for unknown models: query-only (safest assumption)
 _DEFAULT_PREFIXES = (None, "Represent this sentence for searching relevant passages: ")
 
+# Maximum texts per ONNX inference call. Larger batches cause O(n) VRAM/RAM
+# growth; 32 is a practical cap that keeps peak memory bounded during indexing.
+_EMBED_BATCH_SIZE = 32
+
 
 def _mean_pool(token_embeddings: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
     """Mean-pool token embeddings using the attention mask.
@@ -283,9 +287,12 @@ class Embedder:
         return truncated
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for document chunks.
+        """Generate embeddings for document chunks in bounded memory batches.
 
-        Applies model-specific document prefix if configured.
+        Applies model-specific document prefix if configured, then processes
+        texts in batches of _EMBED_BATCH_SIZE to cap peak RAM usage. Without
+        batching, large files with hundreds of chunks allocate a single large
+        tokenization matrix and ONNX output tensor (bug B24: 17 GB peak).
 
         Args:
             texts: List of document text strings to embed.
@@ -297,8 +304,13 @@ class Embedder:
             prefixed = [f"{self._doc_prefix}{t}" for t in texts]
         else:
             prefixed = list(texts)
-        embeddings = self._encode(prefixed)
-        return [vec.tolist() for vec in embeddings]
+
+        all_embeddings: List[List[float]] = []
+        for i in range(0, len(prefixed), _EMBED_BATCH_SIZE):
+            batch = prefixed[i : i + _EMBED_BATCH_SIZE]
+            batch_embeddings = self._encode(batch)
+            all_embeddings.extend(vec.tolist() for vec in batch_embeddings)
+        return all_embeddings
 
     def embed_query(self, query: str) -> List[float]:
         """Generate embedding for a search query.

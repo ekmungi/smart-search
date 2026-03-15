@@ -1,10 +1,13 @@
 # Document ingestion pipeline: file -> chunks -> embeddings -> store.
 
 import hashlib
+import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, List, Optional
+
+_logger = logging.getLogger(__name__)
 
 from smart_search.config import SmartSearchConfig
 from smart_search.markdown_chunker import MarkdownChunker
@@ -93,6 +96,9 @@ class DocumentIndexer:
         """
         path = Path(file_path).resolve()
 
+        # Capture file size for debug logging before any processing.
+        file_size_kb = path.stat().st_size // 1024
+
         # Validate extension
         if path.suffix.lower() not in self._config.supported_extensions:
             return IndexFileResult(
@@ -149,6 +155,12 @@ class DocumentIndexer:
                 source_path, file_hash, len(embedded_chunks)
             )
 
+            _logger.debug(
+                "Indexed %s: %d chunks from %d KB file",
+                file_path,
+                len(embedded_chunks),
+                file_size_kb,
+            )
             return IndexFileResult(
                 file_path=str(path),
                 status="indexed",
