@@ -1,7 +1,7 @@
 // Quick search overlay: global hotkey (Ctrl+Space) opens this floating search bar.
 //
 // Debounced search-as-you-type with keyboard navigation (arrow keys,
-// Enter to open, ESC to dismiss). Auto-hides when focus leaves the window.
+// Enter to open, ESC to dismiss). Uses Tauri IPC for reliable window hiding.
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -24,6 +24,32 @@ export default function QuickSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /** Hide the overlay via Tauri command (more reliable than JS window API). */
+  const hideWindow = useCallback(async () => {
+    try {
+      await invoke("hide_search_window");
+    } catch {
+      // Fallback to direct window API
+      try {
+        await getCurrentWindow().hide();
+      } catch {
+        // Window may already be hidden
+      }
+    }
+  }, []);
+
+  // Global ESC listener (fires even if React loses focus within the window)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        hideWindow();
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [hideWindow]);
+
   // Auto-focus input and handle window focus/blur events.
   useEffect(() => {
     inputRef.current?.focus();
@@ -35,14 +61,14 @@ export default function QuickSearch() {
         inputRef.current?.select();
       } else {
         // Auto-hide on blur (Spotlight behavior)
-        currentWindow.hide();
+        hideWindow();
       }
     });
 
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [hideWindow]);
 
   /** Execute search against the backend API. */
   const doSearch = useCallback(async (q: string) => {
@@ -71,11 +97,6 @@ export default function QuickSearch() {
     setQuery(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => doSearch(value), DEBOUNCE_MS);
-  };
-
-  /** Hide the overlay window. */
-  const hideWindow = async () => {
-    await getCurrentWindow().hide();
   };
 
   /** Open a search result in the default application. */
@@ -112,7 +133,7 @@ export default function QuickSearch() {
     }
   };
 
-  /** Format file extension for display badge (e.g., ".pdf" -> "PDF"). */
+  /** Format file extension for display badge. */
   const formatType = (sourceType: string) => {
     return sourceType.replace(".", "").toUpperCase();
   };
@@ -147,17 +168,14 @@ export default function QuickSearch() {
           className="flex-1 bg-transparent text-text-primary text-base outline-none placeholder:text-text-muted"
           autoFocus
         />
-        {query && (
-          <button
-            onClick={() => {
-              setQuery("");
-              setResults([]);
-            }}
-            className="text-text-muted hover:text-text-secondary"
-          >
-            <X size={16} />
-          </button>
-        )}
+        {/* Close button -- always visible */}
+        <button
+          onClick={hideWindow}
+          className="text-text-muted hover:text-text-secondary"
+          title="Close (Esc)"
+        >
+          <X size={16} />
+        </button>
       </div>
 
       {/* Results list */}

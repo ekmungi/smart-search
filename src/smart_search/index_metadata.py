@@ -23,7 +23,7 @@ class IndexMetadata:
 
     def initialize(self) -> None:
         """Create the index_metadata table if it does not exist."""
-        self._conn = sqlite3.connect(self._db_path)
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.execute(
             """CREATE TABLE IF NOT EXISTS index_metadata (
                 key        TEXT PRIMARY KEY,

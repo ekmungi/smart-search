@@ -35,6 +35,14 @@ fn get_backend_url() -> String {
     format!("http://127.0.0.1:{}/api", BACKEND_PORT)
 }
 
+/// Hide the quick search window from any context.
+#[tauri::command]
+fn hide_search_window(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("search") {
+        let _ = window.hide();
+    }
+}
+
 /// Open a file in the user's default application.
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
@@ -307,17 +315,34 @@ pub fn run() {
         .setup(|app| {
             let state = app.state::<BackendState>();
 
-            // Try sidecar first (production), fall back to Python (dev)
-            if let Some(child) = start_sidecar(app.handle()) {
-                *state.child.lock().unwrap() = Some(child);
-                log::info!("Backend started via sidecar on port {}", BACKEND_PORT);
-            } else if let Some(child) = start_dev_backend() {
-                *state.dev_child.lock().unwrap() = Some(child);
-                log::info!("Backend started via Python on port {}", BACKEND_PORT);
+            // Start the backend: check if already running, then try appropriate method
+            let backend_alive = std::net::TcpStream::connect(
+                format!("127.0.0.1:{}", BACKEND_PORT)
+            ).is_ok();
+
+            if backend_alive {
+                log::info!("Backend already running on port {}", BACKEND_PORT);
+            } else if cfg!(debug_assertions) {
+                // Dev mode: prefer Python directly (sidecar binary may be stale)
+                if let Some(child) = start_dev_backend() {
+                    *state.dev_child.lock().unwrap() = Some(child);
+                    log::info!("Backend started via Python on port {}", BACKEND_PORT);
+                } else {
+                    log::warn!("Could not start Python backend");
+                }
             } else {
-                log::warn!(
-                    "Could not start backend -- start manually with: smart-search serve"
-                );
+                // Production: use sidecar, fall back to Python
+                if let Some(child) = start_sidecar(app.handle()) {
+                    *state.child.lock().unwrap() = Some(child);
+                    log::info!("Backend started via sidecar on port {}", BACKEND_PORT);
+                } else if let Some(child) = start_dev_backend() {
+                    *state.dev_child.lock().unwrap() = Some(child);
+                    log::info!("Backend started via Python on port {}", BACKEND_PORT);
+                } else {
+                    log::warn!(
+                        "Could not start backend -- start manually with: smart-search serve"
+                    );
+                }
             }
 
             // Auto-register MCP on first production launch
@@ -349,6 +374,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_backend_url,
+            hide_search_window,
             open_file,
             check_mcp_registered,
             register_mcp,

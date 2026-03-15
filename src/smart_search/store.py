@@ -67,7 +67,9 @@ class ChunkStore:
 
         # SQLite setup
         Path(self._config.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
-        self._sqlite_conn = sqlite3.connect(self._config.sqlite_path)
+        self._sqlite_conn = sqlite3.connect(
+            self._config.sqlite_path, check_same_thread=False
+        )
         self._sqlite_conn.execute(
             """CREATE TABLE IF NOT EXISTS indexed_files (
                 source_path TEXT PRIMARY KEY,

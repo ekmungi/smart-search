@@ -1,6 +1,6 @@
 // HTTP client for the smart-search backend REST API.
 
-const BASE_URL = "http://localhost:9742/api";
+const BASE_URL = "http://127.0.0.1:9742/api";
 
 export interface HealthResponse {
   status: string;
