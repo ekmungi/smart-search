@@ -22,6 +22,7 @@ from smart_search.http_models import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    ModelStatusResponse,
     RemoveFolderResponse,
     SearchHit,
     SearchResponse,
@@ -252,5 +253,15 @@ def create_router(
         current.update(req.config)
         mgr.save(current)
         return ConfigResponse(config=current)
+
+    @router.get("/model/status", response_model=ModelStatusResponse)
+    def model_status():
+        """Check whether the embedding model is cached locally."""
+        from smart_search.embedder import Embedder
+
+        return ModelStatusResponse(
+            cached=Embedder.is_model_cached(config.embedding_model),
+            model_name=config.embedding_model,
+        )
 
     return router

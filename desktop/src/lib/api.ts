@@ -39,6 +39,11 @@ export interface ConfigResponse {
   config: Record<string, unknown>;
 }
 
+export interface ModelStatusResponse {
+  cached: boolean;
+  model_name: string;
+}
+
 export interface SearchHit {
   rank: number;
   score: number;
@@ -128,6 +133,13 @@ export async function searchDocuments(
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   if (folder) params.set("folder", folder);
   const res = await fetch(`${BASE_URL}/search?${params}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Check if the embedding model is cached locally. */
+export async function fetchModelStatus(): Promise<ModelStatusResponse> {
+  const res = await fetch(`${BASE_URL}/model/status`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

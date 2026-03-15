@@ -6,6 +6,9 @@
 #
 # The ONNX embedding model is NOT bundled -- it downloads on first run
 # via HuggingFace cache (~250MB). This keeps the installer small.
+#
+# Torch-free: uses direct onnxruntime + huggingface-hub + transformers
+# for ~500MB savings over the sentence-transformers stack.
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -21,7 +24,6 @@ _collect_packages = [
     "lancedb",
     "pyarrow",
     "onnxruntime",
-    "sentence_transformers",
     "transformers",
     "tokenizers",
     "markitdown",
@@ -75,12 +77,9 @@ hiddenimports += [
     "uvicorn.protocols.websockets.auto",
     "uvicorn.lifespan",
     "uvicorn.lifespan.on",
-    # ML/embedding stack
-    "einops",
+    # ML/embedding stack (torch-free)
     "numpy",
-    "scipy",
-    "sklearn",
-    "sklearn.utils",
+    "huggingface_hub",
     # File watching
     "watchdog",
     "watchdog.observers",
@@ -110,6 +109,15 @@ excludes = [
     "speech_recognition",
     "pydub",
     "audioop",
+    # Torch stack -- not needed with direct ONNX inference
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "sentence_transformers",
+    "optimum",
+    "scipy",
+    "sklearn",
+    "einops",
 ]
 
 # ── Analysis ─────────────────────────────────────────────────────────
@@ -128,14 +136,18 @@ a = Analysis(
     noarchive=False,
 )
 
-# ── Bundle ───────────────────────────────────────────────────────────
+# ── Bundle (one-file mode for Tauri sidecar) ────────────────────────
+# One-file produces a single smart-search.exe that self-extracts at runtime.
+# This is required for Tauri externalBin sidecar bundling.
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="smart-search",
     debug=False,
     bootloader_ignore_signals=False,
@@ -143,15 +155,4 @@ exe = EXE(
     upx=False,
     console=True,
     icon=None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name="smart-search",
 )

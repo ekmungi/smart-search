@@ -5,6 +5,7 @@ import { FileText, Layers, HardDrive, Clock } from "lucide-react";
 import {
   fetchHealth,
   fetchStats,
+  fetchModelStatus,
   type HealthResponse,
   type StatsResponse,
 } from "../lib/api";
@@ -14,6 +15,7 @@ export default function Dashboard() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [modelCached, setModelCached] = useState<boolean | null>(null);
 
   useEffect(() => {
     const poll = async () => {
@@ -31,6 +33,33 @@ export default function Dashboard() {
     const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Poll model status until cached (first-launch download UX)
+  useEffect(() => {
+    if (!health) return;
+
+    let cancelled = false;
+    const checkModel = async () => {
+      try {
+        const status = await fetchModelStatus();
+        if (!cancelled) setModelCached(status.cached);
+      } catch {
+        // Backend not ready yet -- will retry
+      }
+    };
+
+    checkModel();
+
+    // Poll every 3s while model is downloading, stop once cached
+    if (modelCached !== true) {
+      const interval = setInterval(checkModel, 3000);
+      return () => {
+        cancelled = true;
+        clearInterval(interval);
+      };
+    }
+    return () => { cancelled = true; };
+  }, [health, modelCached]);
 
   return (
     <div>
@@ -54,6 +83,24 @@ export default function Dashboard() {
         <div className="bg-bg-surface border border-accent-red/30 rounded-lg p-4 mb-6 text-sm text-accent-red">
           {error} &mdash; Start the backend with:{" "}
           <code className="text-text-primary">smart-search serve</code>
+        </div>
+      )}
+
+      {/* Model download banner (first-launch UX) */}
+      {health && modelCached === false && (
+        <div className="bg-bg-surface border border-accent-amber/30 rounded-lg p-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-4 h-4 border-2 border-accent-amber border-t-transparent rounded-full animate-spin" />
+            <div>
+              <p className="text-sm font-medium text-text-primary">
+                Downloading embedding model...
+              </p>
+              <p className="text-xs text-text-secondary mt-1">
+                First-time setup (~250 MB). Search will be available once
+                complete.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 

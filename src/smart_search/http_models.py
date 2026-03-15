@@ -130,3 +130,10 @@ class ConfigUpdateRequest(BaseModel):
     """Request body to update configuration keys."""
 
     config: dict
+
+
+class ModelStatusResponse(BaseModel):
+    """Embedding model cache status."""
+
+    cached: bool
+    model_name: str

@@ -1,23 +1,32 @@
-// Tauri app setup: system tray, backend process management, global shortcuts,
+// Tauri app setup: system tray, sidecar backend management, global shortcuts,
 // autostart, MCP registration, and commands.
 //
-// Starts the smart-search HTTP backend as a child process, registers a global
-// hotkey (Ctrl+Space) for quick search, and exposes a system tray with context menu.
+// In production: launches the PyInstaller-bundled smart-search sidecar via
+// tauri-plugin-shell. In dev: falls back to Python module invocation.
+// Registers a global hotkey (Ctrl+Space) for quick search and exposes a
+// system tray with context menu.
 
-use std::process::{Child, Command, Stdio};
+use std::process::Command as StdCommand;
+use std::process::Stdio;
 use std::sync::Mutex;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{
+    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+};
+use tauri_plugin_shell::ShellExt;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
 /// Default port for the smart-search HTTP backend.
 const BACKEND_PORT: u16 = 9742;
 
-/// Holds the managed backend child process.
+/// Holds the managed backend child process handle.
 struct BackendState {
-    process: Mutex<Option<Child>>,
+    child: Mutex<Option<CommandChild>>,
+    /// Fallback: std::process::Child for dev mode (Python invocation).
+    dev_child: Mutex<Option<std::process::Child>>,
 }
 
 /// Returns the backend API base URL for the frontend to use.
@@ -35,7 +44,7 @@ fn open_file(path: String) -> Result<(), String> {
 /// Check whether smart-search is registered as an MCP server with Claude Code.
 #[tauri::command]
 fn check_mcp_registered() -> bool {
-    Command::new("claude")
+    StdCommand::new("claude")
         .args(["mcp", "list"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -46,30 +55,31 @@ fn check_mcp_registered() -> bool {
 
 /// Register smart-search as an MCP server with Claude Code.
 ///
-/// Tries the bundled exe path first, falls back to the Python module command.
+/// Uses the sidecar exe path in production, Python module in dev.
 #[tauri::command]
 fn register_mcp() -> Result<String, String> {
-    // Try to find bundled smart-search exe next to this binary
     let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
-    let bundled = exe_dir.join("smart-search.exe");
 
-    let (cmd, args): (&str, Vec<String>) = if bundled.exists() {
-        let path_str = bundled.to_string_lossy().to_string();
-        ("claude", vec![
+    // In production the sidecar is next to the Tauri binary
+    let sidecar = exe_dir.join("smart-search.exe");
+
+    let args: Vec<String> = if sidecar.exists() {
+        let path_str = sidecar.to_string_lossy().to_string();
+        vec![
             "mcp".into(), "add".into(), "-s".into(), "user".into(),
             "smart-search".into(), "--".into(), path_str, "mcp".into(),
-        ])
+        ]
     } else {
-        // Fall back to Python module (development mode)
-        ("claude", vec![
+        // Dev mode fallback: register via Python module
+        vec![
             "mcp".into(), "add".into(), "-s".into(), "user".into(),
             "smart-search".into(), "--".into(),
             "python".into(), "-m".into(), "smart_search.server".into(),
-        ])
+        ]
     };
 
-    let output = Command::new(cmd)
+    let output = StdCommand::new("claude")
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -97,33 +107,75 @@ fn toggle_search_window(app: &AppHandle) {
     }
 }
 
-/// Attempt to start the smart-search HTTP backend.
+/// Attempt to start the backend via Tauri sidecar (production).
 ///
-/// Tries the bundled exe first, then falls back to the Python module.
-/// Returns None if both fail (user must start manually).
-fn start_backend() -> Option<Child> {
+/// Returns the CommandChild handle on success.
+fn start_sidecar(app: &AppHandle) -> Option<CommandChild> {
     let port = BACKEND_PORT.to_string();
+    let shell = app.shell();
 
-    // Try bundled smart-search.exe first
-    Command::new("smart-search")
-        .args(["serve", "--port", &port])
+    let result = shell
+        .sidecar("smart-search")
+        .map(|cmd| cmd.args(["serve", "--port", &port]));
+
+    match result {
+        Ok(command) => {
+            match command.spawn() {
+                Ok((mut rx, child)) => {
+                    // Spawn a task to consume stdout/stderr so the pipe doesn't block
+                    tauri::async_runtime::spawn(async move {
+                        while let Some(event) = rx.recv().await {
+                            match event {
+                                CommandEvent::Stderr(line) => {
+                                    log::debug!("backend stderr: {}", String::from_utf8_lossy(&line));
+                                }
+                                CommandEvent::Stdout(line) => {
+                                    log::debug!("backend stdout: {}", String::from_utf8_lossy(&line));
+                                }
+                                CommandEvent::Terminated(payload) => {
+                                    log::info!("backend exited with code {:?}", payload.code);
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    });
+                    Some(child)
+                }
+                Err(e) => {
+                    log::warn!("Failed to spawn sidecar: {}", e);
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("Sidecar not available: {}", e);
+            None
+        }
+    }
+}
+
+/// Attempt to start the backend via Python module (dev mode fallback).
+fn start_dev_backend() -> Option<std::process::Child> {
+    let port = BACKEND_PORT.to_string();
+    StdCommand::new("python")
+        .args(["-m", "smart_search.cli", "serve", "--port", &port])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .or_else(|_| {
-            // Fall back to Python module (development mode)
-            Command::new("python")
-                .args(["-m", "smart_search.cli", "serve", "--port", &port])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-        })
         .ok()
 }
 
 /// Kill the backend child process if it is running.
 fn stop_backend(state: &BackendState) {
-    if let Ok(mut guard) = state.process.lock() {
+    // Stop sidecar child
+    if let Ok(mut guard) = state.child.lock() {
+        if let Some(child) = guard.take() {
+            let _ = child.kill();
+        }
+    }
+    // Stop dev child
+    if let Ok(mut guard) = state.dev_child.lock() {
         if let Some(ref mut child) = *guard {
             let _ = child.kill();
             let _ = child.wait();
@@ -180,6 +232,51 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Auto-register MCP on first launch if sidecar is available.
+///
+/// Checks for a `.mcp_registered` flag file in %LOCALAPPDATA%\smart-search.
+/// If missing and the sidecar exe exists, registers and writes the flag.
+fn auto_register_mcp_if_needed() {
+    let flag_dir = dirs_next::data_local_dir()
+        .map(|d| d.join("smart-search"))
+        .unwrap_or_default();
+    let flag_file = flag_dir.join(".mcp_registered");
+
+    if flag_file.exists() {
+        return;
+    }
+
+    // Only auto-register if the sidecar exe is present (production install)
+    let exe_path = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
+    let sidecar = exe_dir.join("smart-search.exe");
+
+    if !sidecar.exists() {
+        return;
+    }
+
+    let path_str = sidecar.to_string_lossy().to_string();
+    let result = StdCommand::new("claude")
+        .args([
+            "mcp", "add", "-s", "user",
+            "smart-search", "--", &path_str, "mcp",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    if let Ok(status) = result {
+        if status.success() {
+            let _ = std::fs::create_dir_all(&flag_dir);
+            let _ = std::fs::write(&flag_file, "registered");
+            log::info!("MCP auto-registered on first launch");
+        }
+    }
+}
+
 /// Register the global Ctrl+Space shortcut for quick search.
 fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Space);
@@ -202,18 +299,29 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .manage(BackendState {
-            process: Mutex::new(None),
+            child: Mutex::new(None),
+            dev_child: Mutex::new(None),
         })
         .setup(|app| {
-            // Start the Python backend process
             let state = app.state::<BackendState>();
-            if let Some(child) = start_backend() {
-                *state.process.lock().unwrap() = Some(child);
-                log::info!("Backend started on port {}", BACKEND_PORT);
+
+            // Try sidecar first (production), fall back to Python (dev)
+            if let Some(child) = start_sidecar(app.handle()) {
+                *state.child.lock().unwrap() = Some(child);
+                log::info!("Backend started via sidecar on port {}", BACKEND_PORT);
+            } else if let Some(child) = start_dev_backend() {
+                *state.dev_child.lock().unwrap() = Some(child);
+                log::info!("Backend started via Python on port {}", BACKEND_PORT);
             } else {
-                log::warn!("Could not start backend -- start manually with: smart-search serve");
+                log::warn!(
+                    "Could not start backend -- start manually with: smart-search serve"
+                );
             }
+
+            // Auto-register MCP on first production launch
+            auto_register_mcp_if_needed();
 
             // Set up system tray
             setup_tray(app)?;

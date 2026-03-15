@@ -1,11 +1,13 @@
-# Tests for Embedder: nomic-embed-text-v1.5 ONNX embedding generation.
+# Tests for Embedder: nomic-embed-text-v1.5 direct ONNX embedding generation.
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from smart_search.config import SmartSearchConfig
-from smart_search.embedder import Embedder
+from smart_search.embedder import Embedder, _mean_pool, _l2_normalize
 
 
 @pytest.fixture
@@ -19,20 +21,95 @@ def tmp_config(tmp_path):
 
 @pytest.fixture
 def mock_embedder(tmp_config):
-    """Embedder with a mocked SentenceTransformer model."""
-    import numpy as np
+    """Embedder with mocked ONNX session and tokenizer.
 
-    mock_model = MagicMock()
-    # Return deterministic 768-dim vectors based on input length
-    mock_model.encode.side_effect = lambda texts, **kwargs: np.array(
-        [[float(i) / 768] * 768 for i in range(len(texts))]
-    )
-    mock_model.get_sentence_embedding_dimension.return_value = 768
+    Bypasses _load_model entirely by patching it to return mock components.
+    """
+    # Mock tokenizer: returns numpy arrays like a real tokenizer
+    mock_tokenizer = MagicMock()
+    mock_tokenizer._last_texts = []
 
-    with patch("smart_search.embedder.SentenceTransformer", return_value=mock_model):
+    def tokenize(texts, **kwargs):
+        mock_tokenizer._last_texts = texts
+        return {
+            "input_ids": np.ones((len(texts), 10), dtype=np.int64),
+            "attention_mask": np.ones((len(texts), 10), dtype=np.int64),
+        }
+
+    mock_tokenizer.side_effect = tokenize
+
+    # Mock ONNX session: returns deterministic token embeddings
+    mock_session = MagicMock()
+    mock_input_ids = MagicMock()
+    mock_input_ids.name = "input_ids"
+    mock_attn = MagicMock()
+    mock_attn.name = "attention_mask"
+    mock_session.get_inputs.return_value = [mock_input_ids, mock_attn]
+
+    def mock_run(output_names, feeds):
+        batch_size = feeds["input_ids"].shape[0]
+        seq_len = feeds["input_ids"].shape[1]
+        hidden_dim = 768
+        # Return last_hidden_state: (batch, seq_len, hidden_dim)
+        token_embs = np.random.RandomState(42).randn(
+            batch_size, seq_len, hidden_dim
+        ).astype(np.float32)
+        return [token_embs]
+
+    mock_session.run.side_effect = mock_run
+
+    # Bypass _load_model -- just return our mocks
+    with patch.object(Embedder, "_load_model", return_value=(mock_tokenizer, mock_session)):
         embedder = Embedder(tmp_config)
 
     return embedder
+
+
+class TestMeanPool:
+    """Tests for the _mean_pool helper function."""
+
+    def test_uniform_mask(self):
+        """All-ones mask should produce a simple mean."""
+        tokens = np.array([[[1.0, 2.0], [3.0, 4.0]]])
+        mask = np.array([[1.0, 1.0]])
+        result = _mean_pool(tokens, mask)
+        expected = np.array([[2.0, 3.0]])
+        np.testing.assert_allclose(result, expected)
+
+    def test_partial_mask(self):
+        """Masked tokens should be excluded from the mean."""
+        tokens = np.array([[[1.0, 2.0], [3.0, 4.0]]])
+        mask = np.array([[1.0, 0.0]])
+        result = _mean_pool(tokens, mask)
+        expected = np.array([[1.0, 2.0]])
+        np.testing.assert_allclose(result, expected)
+
+    def test_batch_dimension(self):
+        """Should handle batches correctly."""
+        tokens = np.array([
+            [[1.0, 0.0], [0.0, 1.0]],
+            [[2.0, 0.0], [0.0, 2.0]],
+        ])
+        mask = np.array([[1.0, 1.0], [1.0, 1.0]])
+        result = _mean_pool(tokens, mask)
+        assert result.shape == (2, 2)
+
+
+class TestL2Normalize:
+    """Tests for the _l2_normalize helper function."""
+
+    def test_unit_length(self):
+        """Output vectors should have unit L2 norm."""
+        vectors = np.array([[3.0, 4.0], [1.0, 0.0]])
+        result = _l2_normalize(vectors)
+        norms = np.linalg.norm(result, axis=1)
+        np.testing.assert_allclose(norms, [1.0, 1.0], atol=1e-6)
+
+    def test_zero_vector_safe(self):
+        """Near-zero vectors should not produce NaN."""
+        vectors = np.array([[0.0, 0.0]])
+        result = _l2_normalize(vectors)
+        assert not np.any(np.isnan(result))
 
 
 class TestEmbedderFast:
@@ -40,18 +117,15 @@ class TestEmbedderFast:
 
     def test_prefix_applied_to_documents(self, mock_embedder):
         """Verify 'search_document: ' prefix is prepended before encoding."""
-        texts = ["hello world"]
-        mock_embedder.embed_documents(texts)
-        call_args = mock_embedder._model.encode.call_args
-        actual_texts = call_args[0][0]
-        assert actual_texts[0].startswith("search_document: ")
+        mock_embedder.embed_documents(["hello world"])
+        last_texts = mock_embedder._tokenizer._last_texts
+        assert last_texts[0].startswith("search_document: ")
 
     def test_prefix_applied_to_query(self, mock_embedder):
         """Verify 'search_query: ' prefix is prepended for queries."""
         mock_embedder.embed_query("test query")
-        call_args = mock_embedder._model.encode.call_args
-        actual_texts = call_args[0][0]
-        assert actual_texts[0].startswith("search_query: ")
+        last_texts = mock_embedder._tokenizer._last_texts
+        assert last_texts[0].startswith("search_query: ")
 
     def test_embed_documents_returns_list_of_lists(self, mock_embedder):
         """embed_documents returns a list of float lists."""
@@ -60,9 +134,49 @@ class TestEmbedderFast:
         assert len(result) == 2
         assert isinstance(result[0], list)
 
+    def test_embed_documents_768_dims(self, mock_embedder):
+        """Each embedding vector should be 768-dimensional."""
+        result = mock_embedder.embed_documents(["test"])
+        assert len(result[0]) == 768
+
+    def test_embed_query_returns_list(self, mock_embedder):
+        """embed_query returns a flat list of floats."""
+        result = mock_embedder.embed_query("test")
+        assert isinstance(result, list)
+        assert len(result) == 768
+
     def test_model_name_matches_config(self, mock_embedder):
         """get_model_name returns the configured model ID."""
         assert mock_embedder.get_model_name() == "nomic-ai/nomic-embed-text-v1.5"
+
+    def test_embeddings_are_normalized(self, mock_embedder):
+        """Output embeddings should have approximately unit L2 norm."""
+        result = mock_embedder.embed_documents(["normalize me"])
+        vec = np.array(result[0])
+        norm = np.linalg.norm(vec)
+        assert abs(norm - 1.0) < 0.01
+
+
+class TestIsModelCached:
+    """Tests for the static is_model_cached method."""
+
+    def test_returns_false_when_not_cached(self):
+        """Should return False when model is not in HF cache."""
+        with patch("huggingface_hub.try_to_load_from_cache", return_value=None):
+            assert Embedder.is_model_cached("fake/model") is False
+
+    def test_returns_true_when_cached(self, tmp_path):
+        """Should return True when model files exist in cache."""
+        fake_onnx = tmp_path / "onnx" / "model.onnx"
+        fake_onnx.parent.mkdir(parents=True)
+        fake_onnx.write_bytes(b"fake")
+        with patch("huggingface_hub.try_to_load_from_cache", return_value=str(fake_onnx)):
+            assert Embedder.is_model_cached("fake/model") is True
+
+    def test_handles_exception_gracefully(self):
+        """Should return False on any exception, not crash."""
+        with patch("huggingface_hub.try_to_load_from_cache", side_effect=Exception("boom")):
+            assert Embedder.is_model_cached("fake/model") is False
 
 
 @pytest.mark.slow
@@ -95,8 +209,6 @@ class TestEmbedderSlow:
 
     def test_query_document_similarity(self):
         """Related texts have higher cosine similarity than unrelated."""
-        import numpy as np
-
         doc_vecs = self.embedder.embed_documents([
             "Machine learning is a subset of artificial intelligence.",
             "The weather in Paris is sunny today.",
@@ -110,3 +222,7 @@ class TestEmbedderSlow:
         sim_related = cosine_sim(query_vec, doc_vecs[0])
         sim_unrelated = cosine_sim(query_vec, doc_vecs[1])
         assert sim_related > sim_unrelated
+
+    def test_is_model_cached_after_load(self):
+        """After loading the model, is_model_cached should return True."""
+        assert Embedder.is_model_cached() is True
