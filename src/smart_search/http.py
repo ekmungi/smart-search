@@ -15,6 +15,7 @@ from smart_search.config import SmartSearchConfig, get_config
 from smart_search.config_manager import ConfigManager
 from smart_search.data_dir import get_data_dir
 from smart_search.http_routes import create_router
+from smart_search.indexing_task import IndexingTaskManager
 
 if TYPE_CHECKING:
     from smart_search.indexer import DocumentIndexer
@@ -30,6 +31,7 @@ def create_app(
     indexer: Optional["DocumentIndexer"] = None,
     config_manager: Optional[ConfigManager] = None,
     watcher: Optional["FileWatcher"] = None,
+    task_manager: Optional[IndexingTaskManager] = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -43,6 +45,7 @@ def create_app(
         indexer: Optional DocumentIndexer instance.
         config_manager: Optional ConfigManager instance.
         watcher: Optional FileWatcher instance.
+        task_manager: Optional IndexingTaskManager instance.
 
     Returns:
         Configured FastAPI application.
@@ -72,6 +75,7 @@ def create_app(
     _indexer = indexer
     _config_mgr = config_manager
     _watcher = watcher
+    _task_mgr = task_manager
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -92,6 +96,8 @@ def create_app(
         yield
         if _watcher is not None and getattr(_watcher, "is_running", False):
             _watcher.stop()
+        if _task_mgr is not None:
+            _task_mgr.shutdown()
 
     app = FastAPI(
         title="Smart Search API",
@@ -154,6 +160,13 @@ def create_app(
             _watcher = _FW(config, get_indexer(), get_store())
         return _watcher
 
+    def get_task_mgr():
+        """Get or create the IndexingTaskManager singleton."""
+        nonlocal _task_mgr
+        if _task_mgr is None:
+            _task_mgr = IndexingTaskManager()
+        return _task_mgr
+
     def get_uptime():
         """Return seconds since server started."""
         return time.time() - state["start_time"]
@@ -166,6 +179,7 @@ def create_app(
         get_config_mgr=get_config_mgr,
         get_watcher=get_watcher,
         get_uptime=get_uptime,
+        get_task_mgr=get_task_mgr,
         config=config,
     )
     app.include_router(router)

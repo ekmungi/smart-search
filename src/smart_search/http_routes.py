@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from fastapi import APIRouter, HTTPException, Query
+from starlette.responses import JSONResponse
 
 from smart_search.config import SmartSearchConfig
 from smart_search.http_models import (
@@ -21,6 +22,8 @@ from smart_search.http_models import (
     FolderInfo,
     FoldersResponse,
     HealthResponse,
+    IndexingStatusResponse,
+    IndexingTaskStatus,
     IngestRequest,
     IngestResponse,
     ModelInfoResponse,
@@ -41,6 +44,7 @@ def create_router(
     get_config_mgr: Callable,
     get_watcher: Callable,
     get_uptime: Callable,
+    get_task_mgr: Callable,
     config: SmartSearchConfig,
 ) -> APIRouter:
     """Create an APIRouter with all REST endpoints.
@@ -55,6 +59,7 @@ def create_router(
         get_config_mgr: Returns ConfigManager instance.
         get_watcher: Returns FileWatcher instance.
         get_uptime: Returns server uptime in seconds.
+        get_task_mgr: Returns IndexingTaskManager instance.
         config: SmartSearchConfig instance.
 
     Returns:
@@ -135,9 +140,13 @@ def create_router(
         ]
         return FoldersResponse(total=len(folders), folders=folders)
 
-    @router.post("/folders", response_model=AddFolderResponse)
+    @router.post("/folders")
     def add_folder(req: AddFolderRequest):
-        """Add a folder to the watch list and trigger initial indexing."""
+        """Add a folder to the watch list and submit background indexing.
+
+        Returns 202 Accepted immediately. Use GET /api/indexing/status
+        to poll for progress.
+        """
         path = Path(req.path).resolve()
         if not path.is_dir():
             raise HTTPException(
@@ -153,14 +162,15 @@ def create_router(
             watcher.start()
         watcher.add_directory(str(path))
 
-        indexer = get_indexer()
-        result = indexer.index_folder(str(path))
+        task_id = get_task_mgr().submit(str(path), get_indexer())
 
-        return AddFolderResponse(
-            path=path.as_posix(),
-            indexed=result.indexed,
-            skipped=result.skipped,
-            failed=result.failed,
+        return JSONResponse(
+            status_code=202,
+            content={
+                "path": path.as_posix(),
+                "task_id": task_id,
+                "status": "accepted",
+            },
         )
 
     @router.delete("/folders", response_model=RemoveFolderResponse)
@@ -168,9 +178,15 @@ def create_router(
         path: str = Query(..., description="Folder path to remove"),
         remove_data: bool = Query(False),
     ):
-        """Remove a folder from the watch list, optionally deleting data."""
+        """Remove a folder from the watch list, optionally deleting data.
+
+        Cancels any active background indexing task for the folder first.
+        """
         resolved = Path(path).resolve()
         path_posix = resolved.as_posix()
+
+        # Cancel any active indexing for this folder before removal
+        get_task_mgr().cancel_folder(path_posix)
 
         mgr = get_config_mgr()
         mgr.remove_watch_dir(str(resolved))
@@ -214,9 +230,13 @@ def create_router(
         ]
         return FilesResponse(total=len(file_infos), files=file_infos)
 
-    @router.post("/ingest", response_model=IngestResponse)
+    @router.post("/ingest")
     def ingest(req: IngestRequest):
-        """Trigger indexing of a file or folder."""
+        """Trigger indexing of a file or folder.
+
+        Single files are indexed synchronously (fast). Directories are
+        submitted as background tasks and return 202 Accepted immediately.
+        """
         target = Path(req.path).resolve()
         indexer = get_indexer()
 
@@ -230,19 +250,44 @@ def create_router(
                 error=result.error,
             )
         elif target.is_dir():
-            result = indexer.index_folder(str(target), force=req.force)
-            return IngestResponse(
-                path=str(target),
-                status="completed",
-                indexed=result.indexed,
-                skipped=result.skipped,
-                failed=result.failed,
+            task_id = get_task_mgr().submit(str(target), indexer)
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "path": target.as_posix(),
+                    "task_id": task_id,
+                    "status": "accepted",
+                },
             )
         else:
             raise HTTPException(
                 status_code=404,
                 detail=f"Path not found: {req.path}",
             )
+
+    @router.get("/indexing/status", response_model=IndexingStatusResponse)
+    def indexing_status():
+        """Get status of all indexing tasks, including active ones.
+
+        Returns a list of all tracked tasks with state, folder, and counts.
+        Use this endpoint to poll for background indexing progress.
+        """
+        task_mgr = get_task_mgr()
+        all_tasks = list(task_mgr._tasks.values())
+        active_count = sum(1 for t in all_tasks if t.state == "running")
+        task_statuses = [
+            IndexingTaskStatus(
+                task_id=t.task_id,
+                folder=t.folder,
+                state=t.state,
+                indexed=t.indexed,
+                skipped=t.skipped,
+                failed=t.failed,
+                error=t.error,
+            )
+            for t in all_tasks
+        ]
+        return IndexingStatusResponse(active=active_count, tasks=task_statuses)
 
     @router.get("/config", response_model=ConfigResponse)
     def get_config():

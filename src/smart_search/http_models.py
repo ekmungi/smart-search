@@ -72,12 +72,11 @@ class AddFolderRequest(BaseModel):
 
 
 class AddFolderResponse(BaseModel):
-    """Result of adding and initially indexing a folder."""
+    """Result of submitting a folder for background indexing."""
 
     path: str
-    indexed: int
-    skipped: int
-    failed: int
+    task_id: str
+    status: str = "accepted"
 
 
 class RemoveFolderResponse(BaseModel):
@@ -164,6 +163,25 @@ class ModelsResponse(BaseModel):
     """List of available embedding models."""
 
     models: List[ModelInfoResponse]
+
+
+class IndexingTaskStatus(BaseModel):
+    """Status of a single indexing task."""
+
+    task_id: str
+    folder: str
+    state: str
+    indexed: int = 0
+    skipped: int = 0
+    failed: int = 0
+    error: Optional[str] = None
+
+
+class IndexingStatusResponse(BaseModel):
+    """Response for GET /api/indexing/status."""
+
+    active: int
+    tasks: List[IndexingTaskStatus]
 
 
 class ConfigUpdateResponse(BaseModel):
