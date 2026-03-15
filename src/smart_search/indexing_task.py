@@ -118,6 +118,14 @@ class IndexingTaskManager:
         """
         return self._tasks.get(task_id)
 
+    def get_all_tasks(self) -> List[IndexingStatus]:
+        """Get all tracked tasks (any state).
+
+        Returns:
+            List of all IndexingStatus objects.
+        """
+        return list(self._tasks.values())
+
     def get_all_active(self) -> List[IndexingStatus]:
         """Get all tasks that are currently running.
 

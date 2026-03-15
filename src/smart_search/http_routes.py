@@ -273,7 +273,7 @@ def create_router(
         Use this endpoint to poll for background indexing progress.
         """
         task_mgr = get_task_mgr()
-        all_tasks = list(task_mgr._tasks.values())
+        all_tasks = task_mgr.get_all_tasks()
         active_count = sum(1 for t in all_tasks if t.state == "running")
         task_statuses = [
             IndexingTaskStatus(
