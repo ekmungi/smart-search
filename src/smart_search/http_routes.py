@@ -78,9 +78,14 @@ def create_router(
 
     @router.get("/stats", response_model=StatsResponse)
     def stats():
-        """Get index statistics: document count, chunks, size, formats."""
+        """Get index statistics: document count, chunks, size, formats.
+
+        Uses live watch_directories from ConfigManager so stats reflect
+        folders added/removed since server start (B22).
+        """
         store = get_store()
-        s = store.get_stats()
+        live_dirs = get_config_mgr().list_watch_dirs()
+        s = store.get_stats(watch_directories=live_dirs)
         return StatsResponse(
             document_count=s.document_count,
             chunk_count=s.chunk_count,

@@ -173,11 +173,16 @@ class ChunkStore:
 
         return search_results
 
-    def get_stats(self) -> IndexStats:
+    def get_stats(self, watch_directories: list[str] | None = None) -> IndexStats:
         """Get statistics about the indexed knowledge base.
 
         Uses count_rows() and SQLite queries instead of loading all data
         into memory, keeping RAM usage constant regardless of index size.
+
+        Args:
+            watch_directories: Optional override for watch dirs. When provided,
+                uses these instead of the startup config dirs. Enables live
+                config (B22) — stats reflect current ConfigManager state.
 
         Returns:
             IndexStats with document count, chunk count, size, formats.
@@ -219,8 +224,10 @@ class ChunkStore:
         index_size = self._calculate_index_size()
 
         # Count total supported files across watch directories
+        # Use override if provided, else fall back to startup config
+        dirs = watch_directories if watch_directories is not None else self._config.watch_directories
         total_files = 0
-        for watch_dir in self._config.watch_directories:
+        for watch_dir in dirs:
             watch_path = Path(watch_dir)
             if watch_path.is_dir():
                 for ext in self._config.supported_extensions:
