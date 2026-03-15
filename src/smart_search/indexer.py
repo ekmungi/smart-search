@@ -1,6 +1,7 @@
 # Document ingestion pipeline: file -> chunks -> embeddings -> store.
 
 import hashlib
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, List, Optional
@@ -165,6 +166,7 @@ class DocumentIndexer:
         recursive: bool = True,
         force: bool = False,
         on_progress: Optional[Callable[[str, "IndexFileResult"], None]] = None,
+        cancel_event: threading.Event | None = None,
     ) -> IndexFolderResult:
         """Index all supported documents in a folder.
 
@@ -174,6 +176,8 @@ class DocumentIndexer:
             force: If True, re-index all files regardless of hash.
             on_progress: Optional callback invoked after each file with
                 (file_path, IndexFileResult). Used by CLI for progress bars.
+            cancel_event: Optional threading.Event. When set, the loop stops
+                processing further files and returns accumulated counts.
 
         Returns:
             IndexFolderResult with counts and per-file results.
@@ -192,6 +196,8 @@ class DocumentIndexer:
         )
 
         for path in files:
+            if cancel_event is not None and cancel_event.is_set():
+                break
             result = self.index_file(str(path), force=force)
             results.append(result)
             if result.status == "indexed":
