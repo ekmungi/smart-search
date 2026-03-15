@@ -1,14 +1,15 @@
-// Tauri app setup: system tray, backend process management, and commands.
+// Tauri app setup: system tray, backend process management, global shortcuts, and commands.
 //
-// Starts the smart-search HTTP backend as a child process and exposes
-// a system tray with status indicator and context menu.
+// Starts the smart-search HTTP backend as a child process, registers a global
+// hotkey (Ctrl+Space) for quick search, and exposes a system tray with context menu.
 
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 /// Default port for the smart-search HTTP backend.
 const BACKEND_PORT: u16 = 9742;
@@ -22,6 +23,25 @@ struct BackendState {
 #[tauri::command]
 fn get_backend_url() -> String {
     format!("http://127.0.0.1:{}/api", BACKEND_PORT)
+}
+
+/// Open a file in the user's default application.
+#[tauri::command]
+fn open_file(path: String) -> Result<(), String> {
+    open::that(&path).map_err(|e| format!("Failed to open {}: {}", path, e))
+}
+
+/// Toggle the quick search overlay window visibility.
+fn toggle_search_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("search") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+        } else {
+            let _ = window.center();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
 }
 
 /// Attempt to start the smart-search HTTP backend.
@@ -62,9 +82,10 @@ fn stop_backend(state: &BackendState) {
 /// Build the system tray with context menu and event handlers.
 fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open = MenuItem::with_id(app, "open", "Open Dashboard", true, None::<&str>)?;
+    let search = MenuItem::with_id(app, "search", "Quick Search", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Smart Search", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &search, &separator, &quit])?;
 
     let _tray = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
@@ -81,6 +102,9 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
+            }
+            "search" => {
+                toggle_search_window(app);
             }
             _ => {}
         })
@@ -99,6 +123,25 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             }
         })
         .build(app)?;
+
+    Ok(())
+}
+
+/// Register the global Ctrl+Space shortcut for quick search.
+fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Space);
+
+    app.handle().plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    toggle_search_window(app);
+                }
+            })
+            .build(),
+    )?;
+
+    app.global_shortcut().register(shortcut)?;
 
     Ok(())
 }
@@ -122,6 +165,9 @@ pub fn run() {
             // Set up system tray
             setup_tray(app)?;
 
+            // Register global shortcut (Ctrl+Space)
+            setup_global_shortcut(app)?;
+
             // Plugins
             app.handle().plugin(tauri_plugin_dialog::init())?;
             if cfg!(debug_assertions) {
@@ -134,7 +180,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_backend_url])
+        .invoke_handler(tauri::generate_handler![get_backend_url, open_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

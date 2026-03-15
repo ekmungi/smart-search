@@ -39,6 +39,22 @@ export interface ConfigResponse {
   config: Record<string, unknown>;
 }
 
+export interface SearchHit {
+  rank: number;
+  score: number;
+  source_path: string;
+  source_type: string;
+  text: string;
+  page_number: number | null;
+}
+
+export interface SearchResponse {
+  query: string;
+  mode: string;
+  total: number;
+  results: SearchHit[];
+}
+
 /** Fetch server health status. */
 export async function fetchHealth(): Promise<HealthResponse> {
   const res = await fetch(`${BASE_URL}/health`);
@@ -99,6 +115,19 @@ export async function reindexFolder(path: string): Promise<void> {
 /** Fetch current configuration. */
 export async function fetchConfig(): Promise<ConfigResponse> {
   const res = await fetch(`${BASE_URL}/config`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Search indexed documents with optional folder filter. */
+export async function searchDocuments(
+  query: string,
+  limit = 10,
+  folder?: string,
+): Promise<SearchResponse> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  if (folder) params.set("folder", folder);
+  const res = await fetch(`${BASE_URL}/search?${params}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

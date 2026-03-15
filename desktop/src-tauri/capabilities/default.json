@@ -3,11 +3,14 @@
   "identifier": "default",
   "description": "enables the default permissions",
   "windows": [
-    "main"
+    "main",
+    "search"
   ],
   "permissions": [
     "core:default",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "global-shortcut:default",
+    "global-shortcut:allow-register"
   ]
 }
