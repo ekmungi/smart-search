@@ -326,8 +326,10 @@ pub fn run() {
             // Set up system tray
             setup_tray(app)?;
 
-            // Register global shortcut (Ctrl+Space)
-            setup_global_shortcut(app)?;
+            // Register global shortcut (Ctrl+Space) -- non-fatal if already taken
+            if let Err(e) = setup_global_shortcut(app) {
+                log::warn!("Could not register Ctrl+Space shortcut: {}", e);
+            }
 
             // Plugins
             app.handle().plugin(tauri_plugin_dialog::init())?;
