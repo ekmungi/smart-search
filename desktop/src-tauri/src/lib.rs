@@ -1,4 +1,5 @@
-// Tauri app setup: system tray, backend process management, global shortcuts, and commands.
+// Tauri app setup: system tray, backend process management, global shortcuts,
+// autostart, MCP registration, and commands.
 //
 // Starts the smart-search HTTP backend as a child process, registers a global
 // hotkey (Ctrl+Space) for quick search, and exposes a system tray with context menu.
@@ -29,6 +30,58 @@ fn get_backend_url() -> String {
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
     open::that(&path).map_err(|e| format!("Failed to open {}: {}", path, e))
+}
+
+/// Check whether smart-search is registered as an MCP server with Claude Code.
+#[tauri::command]
+fn check_mcp_registered() -> bool {
+    Command::new("claude")
+        .args(["mcp", "list"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("smart-search"))
+        .unwrap_or(false)
+}
+
+/// Register smart-search as an MCP server with Claude Code.
+///
+/// Tries the bundled exe path first, falls back to the Python module command.
+#[tauri::command]
+fn register_mcp() -> Result<String, String> {
+    // Try to find bundled smart-search exe next to this binary
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
+    let bundled = exe_dir.join("smart-search.exe");
+
+    let (cmd, args): (&str, Vec<String>) = if bundled.exists() {
+        let path_str = bundled.to_string_lossy().to_string();
+        ("claude", vec![
+            "mcp".into(), "add".into(), "-s".into(), "user".into(),
+            "smart-search".into(), "--".into(), path_str, "mcp".into(),
+        ])
+    } else {
+        // Fall back to Python module (development mode)
+        ("claude", vec![
+            "mcp".into(), "add".into(), "-s".into(), "user".into(),
+            "smart-search".into(), "--".into(),
+            "python".into(), "-m".into(), "smart_search.server".into(),
+        ])
+    };
+
+    let output = Command::new(cmd)
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("Failed to run claude CLI: {}", e))?;
+
+    if output.status.success() {
+        Ok("MCP server registered successfully".into())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("Registration failed: {}", stderr))
+    }
 }
 
 /// Toggle the quick search overlay window visibility.
@@ -170,6 +223,10 @@ pub fn run() {
 
             // Plugins
             app.handle().plugin(tauri_plugin_dialog::init())?;
+            app.handle().plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ))?;
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -180,7 +237,12 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_backend_url, open_file])
+        .invoke_handler(tauri::generate_handler![
+            get_backend_url,
+            open_file,
+            check_mcp_registered,
+            register_mcp,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
