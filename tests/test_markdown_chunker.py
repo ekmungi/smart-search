@@ -137,6 +137,56 @@ class TestMarkdownChunkerFast:
         assert json.loads(chunks[0].section_path) == []
 
 
+class TestParagraphFallback:
+    """Tests for paragraph-based fallback chunking (B17 fix)."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, tmp_config):
+        cfg = tmp_config.model_copy(update={"min_chunk_length": 0})
+        self.chunker = MarkdownChunker(cfg)
+
+    def test_long_headingless_text_splits_by_paragraphs(self):
+        """Text without headings exceeding threshold splits on paragraph boundaries."""
+        paragraphs = [f"Paragraph {i} with enough content to be meaningful. " * 3 for i in range(10)]
+        text = "\n\n".join(paragraphs)
+        chunks = self.chunker.chunk_text(text, source_path="/test/doc.pdf", source_type="pdf")
+        assert len(chunks) > 1
+        # All original content should be present across chunks
+        combined = " ".join(c.text for c in chunks)
+        assert "Paragraph 0" in combined
+        assert "Paragraph 9" in combined
+
+    def test_short_headingless_text_stays_single_chunk(self):
+        """Short text without headings remains a single chunk (below threshold)."""
+        text = "A short document with no headings."
+        chunks = self.chunker.chunk_text(text, source_path="/test/doc.pdf", source_type="pdf")
+        assert len(chunks) == 1
+
+    def test_text_with_headings_uses_heading_split(self):
+        """When headings exist, heading-based splitting is preferred over paragraph fallback."""
+        text = "# Section 1\nContent one.\n\n# Section 2\nContent two."
+        chunks = self.chunker.chunk_text(text, source_path="/test/doc.pdf", source_type="pdf")
+        assert len(chunks) == 2
+        assert "Content one" in chunks[0].text
+        assert "Content two" in chunks[1].text
+
+    def test_paragraph_chunks_have_empty_section_path(self):
+        """Paragraph-based chunks have empty section_path since there are no headings."""
+        paragraphs = [f"Long paragraph {i} with substantial content here. " * 5 for i in range(6)]
+        text = "\n\n".join(paragraphs)
+        chunks = self.chunker.chunk_text(text, source_path="/test/doc.pdf", source_type="pdf")
+        assert len(chunks) > 1
+        for c in chunks:
+            assert json.loads(c.section_path) == []
+
+    def test_paragraph_chunks_preserve_source_type(self):
+        """Paragraph-based chunks retain the source_type from the caller."""
+        paragraphs = [f"Content block {i} with enough text to matter for chunking. " * 4 for i in range(8)]
+        text = "\n\n".join(paragraphs)
+        chunks = self.chunker.chunk_text(text, source_path="/test/slides.pptx", source_type="pptx")
+        assert all(c.source_type == "pptx" for c in chunks)
+
+
 class TestChunkText:
     """Tests for MarkdownChunker.chunk_text() method."""
 

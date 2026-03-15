@@ -97,6 +97,15 @@ class MarkdownChunker:
             )
 
         sections = _split_by_headings(body)
+
+        # Paragraph fallback: if headings produced a single section and the
+        # text is long enough, re-split on paragraph boundaries (B17 fix).
+        if (
+            len(sections) == 1
+            and len(body) > _PARAGRAPH_SPLIT_THRESHOLD
+        ):
+            sections = _split_by_paragraphs(body)
+
         # Filter empty sections and those below minimum length threshold
         min_len = max(self._config.min_chunk_length, 1)
         sections = [
@@ -189,6 +198,60 @@ def _strip_frontmatter(text: str) -> Tuple[Dict[str, str], str]:
             metadata[key.strip()] = value.strip()
 
     return metadata, body
+
+
+# Threshold (chars) above which headingless text triggers paragraph fallback
+_PARAGRAPH_SPLIT_THRESHOLD = 1000
+
+# Target size (chars) for merged paragraph chunks
+_PARAGRAPH_TARGET_SIZE = 500
+
+
+def _split_by_paragraphs(body: str, target_size: int = _PARAGRAPH_TARGET_SIZE) -> List[Dict]:
+    """Split text into chunks on paragraph boundaries (double-newline).
+
+    Used as a fallback when no ATX headings are present and the text exceeds
+    the split threshold. Consecutive small paragraphs are merged until they
+    approach *target_size* characters. Never splits mid-paragraph.
+
+    Args:
+        body: Plain or Markdown text with no headings.
+        target_size: Desired chunk size in characters.
+
+    Returns:
+        List of dicts: {"text": str, "section_path": []}.
+    """
+    paragraphs = [p.strip() for p in re.split(r"\n\n+", body) if p.strip()]
+
+    if not paragraphs:
+        return [{"text": body, "section_path": []}]
+
+    chunks: List[Dict] = []
+    current_parts: List[str] = []
+    current_len = 0
+
+    for para in paragraphs:
+        # If adding this paragraph would exceed target and we already have
+        # content, flush the current accumulator first.
+        if current_parts and current_len + len(para) > target_size:
+            chunks.append({
+                "text": "\n\n".join(current_parts),
+                "section_path": [],
+            })
+            current_parts = []
+            current_len = 0
+
+        current_parts.append(para)
+        current_len += len(para)
+
+    # Flush remaining paragraphs
+    if current_parts:
+        chunks.append({
+            "text": "\n\n".join(current_parts),
+            "section_path": [],
+        })
+
+    return chunks
 
 
 def _split_by_headings(body: str) -> List[Dict]:
