@@ -146,7 +146,7 @@ class TestHealth:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["version"] == "0.7.0"
+        assert data["version"] == "0.8.3"
 
     def test_includes_uptime(self, client):
         resp = client.get("/api/health")
@@ -178,7 +178,7 @@ class TestSearch:
         assert resp.status_code == 200
         data = resp.json()
         assert data["query"] == "knowledge"
-        assert data["mode"] == "semantic"
+        assert data["mode"] == "hybrid"
         assert data["total"] == 1
         assert len(data["results"]) == 1
         hit = data["results"][0]
