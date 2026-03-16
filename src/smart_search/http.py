@@ -123,7 +123,7 @@ def create_app(
 
     app = FastAPI(
         title="Smart Search API",
-        version="0.7.2",
+        version="0.8.1",
         lifespan=lifespan,
     )
 

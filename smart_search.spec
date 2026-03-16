@@ -57,6 +57,11 @@ hiddenimports += [
     "smart_search.http_routes",
     "smart_search.http_models",
     "smart_search.server",
+    "smart_search.fts",
+    "smart_search.fusion",
+    "smart_search.startup",
+    "smart_search.mcp_client",
+    "smart_search.indexing_task",
     # FastAPI / uvicorn internals (dynamic module loading)
     "fastapi",
     "fastapi.middleware",

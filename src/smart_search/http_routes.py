@@ -83,7 +83,7 @@ def create_router(
         """Server health check with version and uptime."""
         return HealthResponse(
             status="ok",
-            version="0.7.2",
+            version="0.8.1",
             uptime_seconds=round(get_uptime(), 1),
         )
 
