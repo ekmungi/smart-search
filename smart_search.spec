@@ -28,6 +28,7 @@ _collect_packages = [
     "tokenizers",
     "markitdown",
     "magika",
+    "fastmcp",
 ]
 
 for pkg in _collect_packages:

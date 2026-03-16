@@ -461,10 +461,27 @@ def _cmd_mcp():
 
     Used by Claude Code and other MCP clients. Equivalent to
     running `python -m smart_search.server`.
-    """
-    from smart_search.server import main as mcp_main
 
-    mcp_main()
+    PyInstaller frozen exes use buffered stdio by default, which prevents
+    FastMCP's stdio transport from flushing responses. We force unbuffered
+    binary streams on stdin/stdout before starting the server.
+    """
+    import sys
+    import traceback
+
+    try:
+        from smart_search.server import main as mcp_main
+        mcp_main()
+    except Exception as exc:
+        # Write to a log file since stderr may not be visible to MCP clients
+        from smart_search.data_dir import get_data_dir
+        log_path = get_data_dir() / "mcp_crash.log"
+        with open(log_path, "w") as f:
+            f.write(f"MCP server crashed: {exc}\n")
+            traceback.print_exc(file=f)
+        print(f"MCP server crashed: {exc}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
 
 
 def _cmd_serve(args):
