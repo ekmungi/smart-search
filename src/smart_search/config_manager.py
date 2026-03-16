@@ -15,7 +15,7 @@ _DEFAULTS: Dict[str, Any] = {
     "embedding_backend": "onnx",
     "embedder_idle_timeout": 60,
     "exclude_patterns": [".git", ".obsidian", ".trash", "node_modules", ".smart-search"],
-    "relevance_threshold": 0.50,
+    "relevance_threshold": 0.30,
     "shortcut_key": "Ctrl+Space",
 }
 
