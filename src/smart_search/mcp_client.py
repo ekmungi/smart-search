@@ -223,3 +223,59 @@ def find_related(
     """
     params = {"note_path": note_path, "limit": str(limit)}
     return _request("GET", "/api/find-related", params=params, base_url=base_url)
+
+
+def ephemeral_index(
+    folder_path: str,
+    force: bool = False,
+    base_url: str = DEFAULT_BASE_URL,
+) -> Dict[str, Any]:
+    """Create an ephemeral index via the backend.
+
+    Args:
+        folder_path: Folder path to index.
+        force: Force re-index even if unchanged.
+        base_url: Backend base URL.
+
+    Returns:
+        Ephemeral index response dict.
+    """
+    return _request(
+        "POST", "/api/ephemeral/index",
+        body={"folder_path": folder_path, "force": force},
+        base_url=base_url,
+        timeout=120.0,
+    )
+
+
+def ephemeral_list(
+    base_url: str = DEFAULT_BASE_URL,
+) -> Dict[str, Any]:
+    """List all ephemeral indexes via the backend.
+
+    Args:
+        base_url: Backend base URL.
+
+    Returns:
+        Ephemeral list response dict.
+    """
+    return _request("GET", "/api/ephemeral", base_url=base_url)
+
+
+def ephemeral_cleanup(
+    folder_path: str,
+    base_url: str = DEFAULT_BASE_URL,
+) -> Dict[str, Any]:
+    """Clean up an ephemeral index via the backend.
+
+    Args:
+        folder_path: Folder path to clean up.
+        base_url: Backend base URL.
+
+    Returns:
+        Ephemeral cleanup response dict.
+    """
+    params = {"folder_path": folder_path}
+    return _request(
+        "DELETE", "/api/ephemeral", params=params, base_url=base_url,
+    )

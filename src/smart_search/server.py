@@ -1,10 +1,8 @@
 # FastMCP server entry point: thin proxy to the HTTP backend.
 #
-# All global knowledge base operations are proxied through the HTTP server
-# (localhost:9742) so there is a single source of truth. The UI always
-# reflects MCP-triggered actions. No heavy dependencies are loaded here.
-#
-# Ephemeral index tools still run locally since they are independent.
+# All operations are proxied through the HTTP server (localhost:9742)
+# so there is a single source of truth. The UI always reflects
+# MCP-triggered actions. No heavy dependencies are loaded here.
 
 from __future__ import annotations
 
@@ -25,8 +23,8 @@ def create_server(
 ) -> FastMCP:
     """Create and configure the FastMCP server with tools.
 
-    All global knowledge base tools proxy through the HTTP backend.
-    Ephemeral index tools run locally.
+    All tools proxy through the HTTP backend. No heavy dependencies
+    (ONNX, embedder) are loaded in the MCP process.
 
     Args:
         config: Optional SmartSearchConfig override.
@@ -51,7 +49,11 @@ def create_server(
         return _config_mgr
 
     def _get_registry():
-        """Get or create the ephemeral registry singleton."""
+        """Get or create the ephemeral registry singleton.
+
+        Still needed for ephemeral search/find_related paths which
+        touch the registry for deregister/touch operations.
+        """
         nonlocal _registry
         if _registry is None:
             from smart_search.ephemeral_registry import (
@@ -336,41 +338,24 @@ def create_server(
         Returns:
             Formatted summary of indexing results.
         """
-        path = Path(folder_path).resolve()
-        if not path.is_dir():
-            return f"ERROR: Directory not found: {folder_path}"
-
+        _ensure_backend()
         try:
-            from smart_search.ephemeral_store import (
-                calculate_ephemeral_size,
-                create_ephemeral_components,
-            )
-
-            components = create_ephemeral_components(str(path))
-            indexer = components["indexer"]
-            result = indexer.index_folder(str(path), force=force)
-
-            registry = _get_registry()
-            size = calculate_ephemeral_size(str(path))
-            total_chunks = sum(
-                r.chunk_count for r in result.results if r.status == "indexed"
-            )
-            registry.register(path.as_posix(), total_chunks, size)
-
-            return (
-                f"EPHEMERAL INDEX CREATED\n"
-                f"======================\n"
-                f"Folder: {path.as_posix()}\n"
-                f"Index location: {path.as_posix()}/.smart-search/\n"
-                f"Files indexed: {result.indexed}\n"
-                f"Files skipped: {result.skipped}\n"
-                f"Files failed: {result.failed}\n"
-                f"Total chunks: {total_chunks}\n"
-                f"Index size: {size / 1024:.1f} KB\n"
-                f"\nSearch with: knowledge_search(query, ephemeral_folder=\"{path.as_posix()}\")"
-            )
+            data = mcp_client.ephemeral_index(folder_path, force=force)
         except Exception as e:
             return f"ERROR: Failed to create ephemeral index: {e}"
+
+        return (
+            f"EPHEMERAL INDEX CREATED\n"
+            f"======================\n"
+            f"Folder: {data['folder']}\n"
+            f"Index location: {data['index_location']}\n"
+            f"Files indexed: {data['files_indexed']}\n"
+            f"Files skipped: {data['files_skipped']}\n"
+            f"Files failed: {data['files_failed']}\n"
+            f"Total chunks: {data['total_chunks']}\n"
+            f"Index size: {data['index_size_kb']} KB\n"
+            f"\nSearch with: knowledge_search(query, ephemeral_folder=\"{data['folder']}\")"
+        )
 
     @mcp.tool()
     def knowledge_temp_cleanup(folder_path: Optional[str] = None) -> str:
@@ -388,13 +373,14 @@ def create_server(
         Returns:
             Formatted list of indexes or cleanup confirmation.
         """
-        registry = _get_registry()
+        _ensure_backend()
 
         if folder_path is None:
-            pruned = registry.prune_stale()
-            entries = registry.list_all()
+            data = mcp_client.ephemeral_list()
+            active = data.get("active", [])
+            pruned = data.get("pruned", [])
 
-            if not entries and not pruned:
+            if not active and not pruned:
                 return "No ephemeral indexes found."
 
             lines = ["EPHEMERAL INDEXES", "=" * 18]
@@ -405,35 +391,28 @@ def create_server(
                     lines.append(f"  [stale] {p}")
                 lines.append("")
 
-            if entries:
-                lines.append(f"Active: {len(entries)} indexes")
+            if active:
+                lines.append(f"Active: {len(active)} indexes")
                 lines.append("")
-                for entry in entries:
-                    size_kb = entry.size_bytes / 1024
-                    lines.append(f"  {entry.folder_path}")
+                for entry in active:
+                    lines.append(f"  {entry['folder_path']}")
                     lines.append(
-                        f"    Chunks: {entry.chunk_count}, "
-                        f"Size: {size_kb:.1f} KB, "
-                        f"Created: {entry.created_at}"
+                        f"    Chunks: {entry['chunk_count']}, "
+                        f"Size: {entry['size_kb']} KB, "
+                        f"Created: {entry['created_at']}"
                     )
             else:
                 lines.append("No active ephemeral indexes.")
 
             return "\n".join(lines)
 
-        from smart_search.ephemeral_store import remove_ephemeral_index
+        data = mcp_client.ephemeral_cleanup(folder_path)
 
-        path = Path(folder_path).resolve()
-        path_posix = path.as_posix()
-
-        removed = remove_ephemeral_index(str(path))
-        registry.deregister(path_posix)
-
-        if removed:
+        if data.get("removed"):
             return (
                 f"EPHEMERAL INDEX CLEANED\n"
                 f"======================\n"
-                f"Folder: {path_posix}\n"
+                f"Folder: {data['folder']}\n"
                 f"Removed: .smart-search/ directory deleted\n"
                 f"Registry: entry removed"
             )
@@ -441,7 +420,7 @@ def create_server(
             return (
                 f"EPHEMERAL INDEX CLEANUP\n"
                 f"======================\n"
-                f"Folder: {path_posix}\n"
+                f"Folder: {data['folder']}\n"
                 f"No .smart-search/ directory found (registry entry cleaned if present)"
             )
 

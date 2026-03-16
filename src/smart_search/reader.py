@@ -7,6 +7,9 @@ from typing import List, Optional
 MAX_NOTE_PATH_LENGTH = 500
 MAX_CONTENT_BYTES = 50_000  # ~50KB cap to prevent context flooding
 
+# Extensions that require MarkItDown conversion instead of plain text read
+BINARY_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
+
 
 def resolve_note_path(
     note_path: str, watch_directories: List[str]
@@ -51,6 +54,19 @@ def resolve_note_path(
         if resolved.is_file():
             return resolved
 
+    # Fallback: search by filename across all watch directories.
+    # Handles cases where the user provides a path relative to a parent
+    # of the watch dir (e.g. "Drug Discovery/file.pdf" when the watch
+    # dir is already ".../Drug Discovery").
+    filename = Path(note_path).name
+    for directory in watch_directories:
+        for match in Path(directory).rglob(filename):
+            resolved = match.resolve()
+            if not str(resolved).startswith(str(Path(directory).resolve())):
+                continue
+            if resolved.is_file():
+                return resolved
+
     return None
 
 
@@ -75,7 +91,7 @@ def read_note(note_path: str, watch_directories: List[str]) -> str:
     if resolved is None:
         return f"Error: Note not found -- '{note_path}'"
 
-    content = resolved.read_text(encoding="utf-8")
+    content = _read_file_content(resolved)
 
     if len(content) > MAX_CONTENT_BYTES:
         return (
@@ -84,3 +100,19 @@ def read_note(note_path: str, watch_directories: List[str]) -> str:
         )
 
     return content
+
+
+def _read_file_content(path: Path) -> str:
+    """Read file content, using MarkItDown for binary formats.
+
+    Args:
+        path: Resolved absolute path to the file.
+
+    Returns:
+        File content as a string.
+    """
+    if path.suffix.lower() in BINARY_EXTENSIONS:
+        from smart_search.markitdown_parser import convert_to_markdown
+        return convert_to_markdown(str(path))
+
+    return path.read_text(encoding="utf-8")

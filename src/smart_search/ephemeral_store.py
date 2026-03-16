@@ -99,14 +99,34 @@ def calculate_ephemeral_size(folder_path: str) -> int:
 def remove_ephemeral_index(folder_path: str) -> bool:
     """Delete the .smart-search/ directory for a folder.
 
+    On Windows, SQLite holds file locks that prevent deletion. We
+    find and close only the ChunkStore instances whose sqlite_path
+    points at this ephemeral directory, then delete.
+
     Args:
         folder_path: Path to the target directory.
 
     Returns:
         True if the directory was removed, False if it did not exist.
     """
+    import gc
+
     smart_search_dir = Path(folder_path) / ".smart-search"
     if not smart_search_dir.exists():
         return False
+
+    # Find ChunkStore instances pointing at this ephemeral directory
+    # and close only their SQLite connections (not the global store).
+    ephemeral_db = str((smart_search_dir / "metadata.db").resolve())
+    for obj in gc.get_objects():
+        if isinstance(obj, ChunkStore):
+            try:
+                store_db = str(Path(obj._config.sqlite_path).resolve())
+                if store_db == ephemeral_db:
+                    obj.close()
+            except Exception:
+                pass
+    gc.collect()
+
     shutil.rmtree(smart_search_dir)
     return True

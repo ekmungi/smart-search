@@ -190,3 +190,51 @@ class ConfigUpdateResponse(BaseModel):
 
     config: dict
     requires_reindex: bool = False
+
+
+class EphemeralIndexRequest(BaseModel):
+    """Request body to create an ephemeral index."""
+
+    folder_path: str
+    force: bool = False
+
+
+class EphemeralIndexResponse(BaseModel):
+    """Result of creating an ephemeral index."""
+
+    folder: str
+    index_location: str
+    files_indexed: int
+    files_skipped: int
+    files_failed: int
+    total_chunks: int
+    index_size_kb: float
+
+
+class EphemeralCleanupRequest(BaseModel):
+    """Request body to clean up a specific ephemeral index."""
+
+    folder_path: str
+
+
+class EphemeralEntryInfo(BaseModel):
+    """Info about a single registered ephemeral index."""
+
+    folder_path: str
+    chunk_count: int
+    size_kb: float
+    created_at: str
+
+
+class EphemeralListResponse(BaseModel):
+    """List of active ephemeral indexes with pruned stale entries."""
+
+    active: List[EphemeralEntryInfo]
+    pruned: List[str]
+
+
+class EphemeralCleanupResponse(BaseModel):
+    """Result of cleaning up an ephemeral index."""
+
+    folder: str
+    removed: bool

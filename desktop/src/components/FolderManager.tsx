@@ -51,13 +51,15 @@ export default function FolderManager() {
 
     const checkIndexing = async () => {
       try {
-        const status = await fetchIndexingStatus();
+        const [status, foldersRes] = await Promise.all([
+          fetchIndexingStatus(),
+          fetchFolders(),
+        ]);
         if (!cancelled) {
           setIndexingTasks(status.tasks);
-          // Refresh folder list when tasks complete so status badges update
-          if (status.active === 0 && indexingTasks.some((t) => t.state === "running")) {
-            refresh();
-          }
+          // Always sync folder list to pick up external changes (MCP, API)
+          setFolders(foldersRes.folders);
+
           // Slow down when no active tasks
           const nextDelay = status.active > 0 ? 2000 : 10000;
           if (intervalId !== null) clearInterval(intervalId);

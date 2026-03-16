@@ -118,7 +118,7 @@ def create_app(
 
     app = FastAPI(
         title="Smart Search API",
-        version="0.7.0",
+        version="0.7.2",
         lifespan=lifespan,
     )
 
@@ -184,6 +184,17 @@ def create_app(
             _task_mgr = IndexingTaskManager()
         return _task_mgr
 
+    _registry = None
+
+    def get_registry():
+        """Get or create the EphemeralRegistry singleton."""
+        nonlocal _registry
+        if _registry is None:
+            from smart_search.ephemeral_registry import EphemeralRegistry
+            _registry = EphemeralRegistry(config.sqlite_path)
+            _registry.initialize()
+        return _registry
+
     def get_uptime():
         """Return seconds since server started."""
         return time.time() - state["start_time"]
@@ -203,6 +214,7 @@ def create_app(
         get_watcher=get_watcher,
         get_uptime=get_uptime,
         get_task_mgr=get_task_mgr,
+        get_registry=get_registry,
         reset_embedding_singletons=reset_embedding_singletons,
         config=config,
     )

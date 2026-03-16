@@ -82,6 +82,16 @@ class ChunkStore:
         )
         self._sqlite_conn.commit()
 
+    def close(self) -> None:
+        """Close the SQLite connection.
+
+        Call before deleting the backing directory (e.g. ephemeral
+        indexes on Windows) to release file locks.
+        """
+        if self._sqlite_conn:
+            self._sqlite_conn.close()
+            self._sqlite_conn = None
+
     def upsert_chunks(self, chunks: List[Chunk]) -> None:
         """Insert or replace chunks in LanceDB.
 
