@@ -12,19 +12,16 @@ import {
 } from "lucide-react";
 import {
   fetchFolders,
-  fetchStats,
   addFolder,
   removeFolder,
   reindexFolder,
   fetchIndexingStatus,
   type FolderInfo,
-  type StatsResponse,
   type IndexingTask,
 } from "../lib/api";
 
 export default function FolderManager() {
   const [folders, setFolders] = useState<FolderInfo[]>([]);
-  const [stats, setStats] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -33,9 +30,8 @@ export default function FolderManager() {
 
   const refresh = useCallback(async () => {
     try {
-      const [fRes, sRes] = await Promise.all([fetchFolders(), fetchStats()]);
+      const fRes = await fetchFolders();
       setFolders(fRes.folders);
-      setStats(sRes);
       setError(null);
     } catch {
       setError("Could not load folders");
@@ -46,16 +42,6 @@ export default function FolderManager() {
 
   useEffect(() => {
     refresh();
-    // Poll stats every 5s for document count updates
-    const statsInterval = setInterval(async () => {
-      try {
-        const s = await fetchStats();
-        setStats(s);
-      } catch {
-        // Ignore poll errors
-      }
-    }, 5000);
-    return () => clearInterval(statsInterval);
   }, [refresh]);
 
   // Poll indexing status every 2s while tasks are active, slow down when idle
@@ -171,32 +157,7 @@ export default function FolderManager() {
         </button>
       </div>
 
-      {/* Indexing progress summary */}
-      {(isIndexing || (stats && stats.total_files > 0)) && (
-        <div className="bg-bg-surface rounded-lg p-3 mb-4 flex items-center gap-3">
-          {isIndexing ? (
-            <>
-              <Loader size={14} className="text-accent-blue animate-spin shrink-0" />
-              <span className="text-sm text-text-secondary">
-                Indexing in progress &mdash;{" "}
-                {(() => {
-                  const activeTasks = indexingTasks.filter((t) => t.state === "running" || t.state === "pending");
-                  const done = activeTasks.reduce((sum, t) => sum + t.indexed + t.skipped + t.failed, 0);
-                  const total = activeTasks.reduce((sum, t) => sum + t.total, 0);
-                  return total > 0 ? `${done} of ${total} files processed` : `${done} files processed`;
-                })()}
-              </span>
-            </>
-          ) : (
-            <>
-              <CheckCircle size={14} className="text-accent-green shrink-0" />
-              <span className="text-sm text-text-secondary">
-                {stats!.document_count} files indexed ({stats!.chunk_count} chunks)
-              </span>
-            </>
-          )}
-        </div>
-      )}
+      {/* Top-level banner removed -- per-folder status is sufficient */}
 
       {error && (
         <div className="bg-bg-surface border border-border rounded-lg p-3 mb-4 text-sm text-text-secondary">
