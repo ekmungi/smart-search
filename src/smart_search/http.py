@@ -4,6 +4,7 @@
 Used by the Tauri desktop shell and any HTTP client. Shares the same
 data directory and components as the MCP server."""
 
+import threading
 import time
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Optional
@@ -70,6 +71,9 @@ def create_app(
 
     # Mutable dict avoids nonlocal for start_time assignment in lifespan
     state = {"start_time": 0.0}
+    # Lock protects lazy singleton creation from races between the
+    # background startup thread and incoming HTTP request handlers.
+    _singleton_lock = threading.Lock()
     _engine = search_engine
     _store = store
     _indexer = indexer
@@ -79,41 +83,58 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """Run startup checks, record time, clean up on shutdown."""
+        """Record start time, launch background startup tasks, yield immediately.
+
+        Heavy startup work (index compatibility check, orphan reconciliation,
+        FTS backfill, auto-resume) runs in a daemon thread so uvicorn binds
+        the port without waiting for those operations to complete.
+        """
         import logging
         _logger = logging.getLogger(__name__)
 
         state["start_time"] = time.time()
 
-        # Run startup checks (non-blocking, log-only)
-        try:
-            from smart_search.startup import (
-                backfill_fts_if_needed,
-                check_index_compatibility,
-                reconcile_orphans,
-            )
-            check_index_compatibility(config, config.sqlite_path)
-            reconcile_orphans(get_store())
-            backfill_fts_if_needed(get_store())
-        except Exception as e:
-            _logger.warning("Startup checks failed (non-fatal): %s", e)
+        def _run_startup_tasks():
+            """Run blocking startup checks and auto-resume in a background thread.
 
-        # Resume indexing for any watched folders that have un-indexed files.
-        # Hash-based skip ensures already-indexed files are not re-processed.
-        try:
-            from smart_search.data_dir import get_data_dir
-            data_dir = get_data_dir()
-            resume_mgr = ConfigManager(data_dir)
-            live_cfg = resume_mgr.load()
-            folders = live_cfg.get("watch_directories", [])
-            print(f"Startup: {len(folders)} watched folders to resume", flush=True)
-            for folder in folders:
-                print(f"Startup: queuing {folder}", flush=True)
-                get_task_mgr().submit(folder, get_indexer())
-        except Exception as e:
-            import traceback
-            print(f"Startup: auto-resume FAILED: {e}", flush=True)
-            traceback.print_exc()
+            Runs: check_index_compatibility -> reconcile_orphans ->
+            backfill_fts_if_needed -> submit auto-resume for each watched folder.
+            All errors are caught and logged so the server stays up regardless.
+            """
+            # Run startup checks (non-blocking, log-only)
+            try:
+                from smart_search.startup import (
+                    backfill_fts_if_needed,
+                    check_index_compatibility,
+                    reconcile_orphans,
+                )
+                check_index_compatibility(config, config.sqlite_path)
+                reconcile_orphans(get_store())
+                backfill_fts_if_needed(get_store())
+            except Exception as e:
+                _logger.warning("Startup checks failed (non-fatal): %s", e)
+
+            # Resume indexing for any watched folders that have un-indexed files.
+            # Hash-based skip ensures already-indexed files are not re-processed.
+            try:
+                from smart_search.data_dir import get_data_dir
+                data_dir = get_data_dir()
+                resume_mgr = ConfigManager(data_dir)
+                live_cfg = resume_mgr.load()
+                folders = live_cfg.get("watch_directories", [])
+                print(f"Startup: {len(folders)} watched folders to resume", flush=True)
+                for folder in folders:
+                    print(f"Startup: queuing {folder}", flush=True)
+                    get_task_mgr().submit(folder, get_indexer())
+            except Exception as e:
+                import traceback
+                print(f"Startup: auto-resume FAILED: {e}", flush=True)
+                traceback.print_exc()
+
+        # Start background thread before yielding; daemon=True ensures it does
+        # not block process shutdown if the server exits before tasks complete.
+        t = threading.Thread(target=_run_startup_tasks, daemon=True, name="startup-tasks")
+        t.start()
 
         yield
         if _watcher is not None and getattr(_watcher, "is_running", False):
@@ -123,7 +144,7 @@ def create_app(
 
     app = FastAPI(
         title="Smart Search API",
-        version="0.8.1",
+        version="0.8.3",
         lifespan=lifespan,
     )
 
@@ -135,58 +156,70 @@ def create_app(
     )
 
     def get_store():
-        """Get or create the ChunkStore singleton."""
+        """Get or create the ChunkStore singleton (thread-safe)."""
         nonlocal _store
         if _store is None:
-            from smart_search.store import ChunkStore as _CS
-            _store = _CS(config)
-            _store.initialize()
+            with _singleton_lock:
+                if _store is None:
+                    from smart_search.store import ChunkStore as _CS
+                    _store = _CS(config)
+                    _store.initialize()
         return _store
 
     def get_engine():
-        """Get or create the SearchEngine singleton."""
+        """Get or create the SearchEngine singleton (thread-safe)."""
         nonlocal _engine
         if _engine is None:
-            from smart_search.embedder import Embedder
-            from smart_search.search import SearchEngine as _SE
-            _engine = _SE(config, Embedder(config), get_store())
+            with _singleton_lock:
+                if _engine is None:
+                    from smart_search.embedder import Embedder
+                    from smart_search.search import SearchEngine as _SE
+                    _engine = _SE(config, Embedder(config), get_store())
         return _engine
 
     def get_indexer():
-        """Get or create the DocumentIndexer singleton."""
+        """Get or create the DocumentIndexer singleton (thread-safe)."""
         nonlocal _indexer
         if _indexer is None:
-            from smart_search.embedder import Embedder
-            from smart_search.indexer import DocumentIndexer as _DI
-            from smart_search.markdown_chunker import MarkdownChunker
-            _indexer = _DI(
-                config=config,
-                embedder=Embedder(config),
-                store=get_store(),
-                markdown_chunker=MarkdownChunker(config),
-            )
+            with _singleton_lock:
+                if _indexer is None:
+                    from smart_search.embedder import Embedder
+                    from smart_search.indexer import DocumentIndexer as _DI
+                    from smart_search.markdown_chunker import MarkdownChunker
+                    _indexer = _DI(
+                        config=config,
+                        embedder=Embedder(config),
+                        store=get_store(),
+                        markdown_chunker=MarkdownChunker(config),
+                    )
         return _indexer
 
     def get_config_mgr():
-        """Get or create the ConfigManager singleton."""
+        """Get or create the ConfigManager singleton (thread-safe)."""
         nonlocal _config_mgr
         if _config_mgr is None:
-            _config_mgr = ConfigManager(get_data_dir())
+            with _singleton_lock:
+                if _config_mgr is None:
+                    _config_mgr = ConfigManager(get_data_dir())
         return _config_mgr
 
     def get_watcher():
-        """Get or create the FileWatcher singleton."""
+        """Get or create the FileWatcher singleton (thread-safe)."""
         nonlocal _watcher
         if _watcher is None:
-            from smart_search.watcher import FileWatcher as _FW
-            _watcher = _FW(config, get_indexer(), get_store())
+            with _singleton_lock:
+                if _watcher is None:
+                    from smart_search.watcher import FileWatcher as _FW
+                    _watcher = _FW(config, get_indexer(), get_store())
         return _watcher
 
     def get_task_mgr():
-        """Get or create the IndexingTaskManager singleton."""
+        """Get or create the IndexingTaskManager singleton (thread-safe)."""
         nonlocal _task_mgr
         if _task_mgr is None:
-            _task_mgr = IndexingTaskManager()
+            with _singleton_lock:
+                if _task_mgr is None:
+                    _task_mgr = IndexingTaskManager()
         return _task_mgr
 
     _registry = None

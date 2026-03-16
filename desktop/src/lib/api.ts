@@ -2,6 +2,24 @@
 
 const BASE_URL = "http://127.0.0.1:9742/api";
 
+/** Default timeout for API requests in milliseconds. */
+const API_TIMEOUT_MS = 5000;
+
+/** Fetch with timeout using AbortController. Throws on timeout. */
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs = API_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
@@ -103,28 +121,28 @@ export interface SearchResponse {
 
 /** Fetch server health status. */
 export async function fetchHealth(): Promise<HealthResponse> {
-  const res = await fetch(`${BASE_URL}/health`);
+  const res = await fetchWithTimeout(`${BASE_URL}/health`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 /** Fetch index statistics. */
 export async function fetchStats(): Promise<StatsResponse> {
-  const res = await fetch(`${BASE_URL}/stats`);
+  const res = await fetchWithTimeout(`${BASE_URL}/stats`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 /** Fetch watched folder list. */
 export async function fetchFolders(): Promise<FoldersResponse> {
-  const res = await fetch(`${BASE_URL}/folders`);
+  const res = await fetchWithTimeout(`${BASE_URL}/folders`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 /** Add a folder to the watch list and trigger indexing. */
 export async function addFolder(path: string): Promise<AddFolderResponse> {
-  const res = await fetch(`${BASE_URL}/folders`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/folders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
@@ -142,7 +160,7 @@ export async function removeFolder(
   removeData = false,
 ): Promise<void> {
   const params = new URLSearchParams({ path, remove_data: String(removeData) });
-  const res = await fetch(`${BASE_URL}/folders?${params}`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/folders?${params}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -150,7 +168,7 @@ export async function removeFolder(
 
 /** Trigger re-indexing of a folder. */
 export async function reindexFolder(path: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/ingest`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/ingest`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, force: true }),
@@ -160,7 +178,7 @@ export async function reindexFolder(path: string): Promise<void> {
 
 /** Fetch current configuration. */
 export async function fetchConfig(): Promise<ConfigResponse> {
-  const res = await fetch(`${BASE_URL}/config`);
+  const res = await fetchWithTimeout(`${BASE_URL}/config`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -173,14 +191,14 @@ export async function searchDocuments(
 ): Promise<SearchResponse> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   if (folder) params.set("folder", folder);
-  const res = await fetch(`${BASE_URL}/search?${params}`);
+  const res = await fetchWithTimeout(`${BASE_URL}/search?${params}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 /** Check if the embedding model is cached locally. */
 export async function fetchModelStatus(): Promise<ModelStatusResponse> {
-  const res = await fetch(`${BASE_URL}/model/status`);
+  const res = await fetchWithTimeout(`${BASE_URL}/model/status`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -189,7 +207,7 @@ export async function fetchModelStatus(): Promise<ModelStatusResponse> {
 export async function updateConfig(
   config: Record<string, unknown>,
 ): Promise<ConfigUpdateResponse> {
-  const res = await fetch(`${BASE_URL}/config`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/config`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ config }),
@@ -200,21 +218,21 @@ export async function updateConfig(
 
 /** Check if the embedding model is currently loaded in memory. */
 export async function fetchModelLoaded(): Promise<ModelLoadedResponse> {
-  const res = await fetch(`${BASE_URL}/model/loaded`);
+  const res = await fetchWithTimeout(`${BASE_URL}/model/loaded`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 /** Fetch the list of available embedding models. */
 export async function fetchModels(): Promise<ModelsResponse> {
-  const res = await fetch(`${BASE_URL}/models`);
+  const res = await fetchWithTimeout(`${BASE_URL}/models`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 /** Fetch the current background indexing task status. */
 export async function fetchIndexingStatus(): Promise<IndexingStatusResponse> {
-  const res = await fetch(`${BASE_URL}/indexing/status`);
+  const res = await fetchWithTimeout(`${BASE_URL}/indexing/status`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -231,7 +249,8 @@ export interface RepairResponse {
 
 /** Run all index maintenance operations: orphan removal, FTS5 rebuild, compaction. */
 export async function repairIndex(): Promise<RepairResponse> {
-  const res = await fetch(`${BASE_URL}/repair`, { method: "POST" });
+  // Repair can take 30s+ on large indexes; use extended timeout.
+  const res = await fetchWithTimeout(`${BASE_URL}/repair`, { method: "POST" }, 60_000);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

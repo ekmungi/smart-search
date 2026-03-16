@@ -560,6 +560,9 @@ pub fn run() {
             if backend_alive {
                 log::info!("Backend already running on port {}", BACKEND_PORT);
             } else if cfg!(debug_assertions) {
+                // Kill any orphan from a previous crash before spawning a new one
+                log::info!("Killing any orphan backend on port {}", BACKEND_PORT);
+                kill_process_on_port(BACKEND_PORT);
                 // Dev mode: prefer Python directly (sidecar binary may be stale)
                 if let Some(child) = start_dev_backend() {
                     *state.dev_child.lock().unwrap() = Some(child);
@@ -568,6 +571,9 @@ pub fn run() {
                     log::warn!("Could not start Python backend");
                 }
             } else {
+                // Kill any orphan from a previous crash before spawning a new one
+                log::info!("Killing any orphan backend on port {}", BACKEND_PORT);
+                kill_process_on_port(BACKEND_PORT);
                 // Production: use sidecar, fall back to Python
                 if let Some(child) = start_sidecar(app.handle()) {
                     *state.child.lock().unwrap() = Some(child);

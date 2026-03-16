@@ -1,5 +1,6 @@
 # Document ingestion pipeline: file -> chunks -> embeddings -> store.
 
+import gc
 import hashlib
 import logging
 import threading
@@ -131,6 +132,7 @@ class DocumentIndexer:
                     source_path=source_path,
                     source_type=source_type,
                 )
+                del markdown_text
             if not chunks:
                 return IndexFileResult(
                     file_path=str(path), status="indexed", chunk_count=0,
@@ -139,32 +141,38 @@ class DocumentIndexer:
             # Generate embeddings
             texts = [c.text for c in chunks]
             embeddings = self._embedder.embed_documents(texts)
+            del texts
 
             # Attach embeddings to chunks (create new immutable copies)
             embedded_chunks = [
                 Chunk(**{**c.model_dump(), "embedding": emb, "source_path": source_path})
                 for c, emb in zip(chunks, embeddings)
             ]
+            del chunks
 
             # Delete old chunks and insert new ones
             self._store.delete_chunks_for_file(source_path)
             self._store.upsert_chunks(embedded_chunks)
 
+            # Save count before releasing the list
+            chunk_count = len(embedded_chunks)
+            del embedded_chunks
+
             # Record in SQLite
             self._store.record_file_indexed(
-                source_path, file_hash, len(embedded_chunks)
+                source_path, file_hash, chunk_count
             )
 
             _logger.debug(
                 "Indexed %s: %d chunks from %d KB file",
                 file_path,
-                len(embedded_chunks),
+                chunk_count,
                 file_size_kb,
             )
             return IndexFileResult(
                 file_path=str(path),
                 status="indexed",
-                chunk_count=len(embedded_chunks),
+                chunk_count=chunk_count,
             )
 
         except Exception as e:
@@ -206,6 +214,7 @@ class DocumentIndexer:
             p for p in folder.glob(pattern)
             if p.is_file() and p.suffix.lower() in self._config.supported_extensions
         )
+        _logger.info("Discovered %d supported files in %s", len(files), folder_path)
 
         for path in files:
             if cancel_event is not None and cancel_event.is_set():
@@ -214,6 +223,10 @@ class DocumentIndexer:
             results.append(result)
             if result.status == "indexed":
                 indexed += 1
+                # Reclaim MarkItDown/ONNX buffers periodically (every 10 files)
+                # to avoid accumulating memory across the entire batch.
+                if indexed % 10 == 0:
+                    gc.collect()
             elif result.status == "skipped":
                 skipped += 1
             else:

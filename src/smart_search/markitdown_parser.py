@@ -42,6 +42,10 @@ def convert_to_markdown(file_path: str) -> str:
     if _converter is None:
         _converter = MarkItDown()
     result = _converter.convert(file_path)
-    if not result.text_content or not result.text_content.strip():
+    # Extract text before releasing the result object to free MarkItDown's
+    # internal buffers immediately (important for large PDFs).
+    text_content = result.text_content
+    del result
+    if not text_content or not text_content.strip():
         raise ValueError(f"MarkItDown produced empty output for {file_path}")
-    return result.text_content
+    return text_content

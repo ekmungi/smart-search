@@ -4,8 +4,11 @@
 component getter functions from the app factory and delegate to the
 same backend components used by the MCP server."""
 
+import logging
 from pathlib import Path
 from typing import Callable
+
+_logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Query
 from starlette.responses import JSONResponse
@@ -83,7 +86,7 @@ def create_router(
         """Server health check with version and uptime."""
         return HealthResponse(
             status="ok",
-            version="0.8.1",
+            version="0.8.3",
             uptime_seconds=round(get_uptime(), 1),
         )
 
@@ -182,6 +185,7 @@ def create_router(
                 detail=f"Directory not found: {req.path}",
             )
 
+        _logger.info("add_folder: submitting background index for %s", path.as_posix())
         mgr = get_config_mgr()
         mgr.add_watch_dir(str(path))
 
@@ -278,6 +282,7 @@ def create_router(
                 error=result.error,
             )
         elif target.is_dir():
+            _logger.info("ingest: submitting background index for %s", target.as_posix())
             task_id = get_task_mgr().submit(str(target), indexer)
             return JSONResponse(
                 status_code=202,

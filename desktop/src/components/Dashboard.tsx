@@ -1,6 +1,6 @@
 // Index dashboard with stats cards, server status, and format badges.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { FileText, Layers, HardDrive, Clock } from "lucide-react";
 import {
   fetchHealth,
@@ -33,6 +33,12 @@ export default function Dashboard() {
   const [modelCached, setModelCached] = useState<boolean | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
   const [activeTasks, setActiveTasks] = useState<IndexingTask[]>([]);
+  // True on first load: assume backend is starting up, not offline.
+  // Stays true until health succeeds OR 30s of continuous failure elapses.
+  const [startingUp, setStartingUp] = useState<boolean>(true);
+  // Tracks the timestamp of the first consecutive health failure (null when healthy).
+  const failingSince = useRef<number | null>(null);
+
   useEffect(() => {
     const poll = async () => {
       try {
@@ -40,9 +46,21 @@ export default function Dashboard() {
         setHealth(h);
         setStats(s);
         setError(null);
+        // Backend is up -- clear startup and failure tracking
+        setStartingUp(false);
+        failingSince.current = null;
       } catch {
         setHealth(null);
         setError("Backend not reachable");
+        // Record when failures started
+        if (failingSince.current === null) {
+          failingSince.current = Date.now();
+        }
+        // After 30s of continuous failure, treat as truly offline
+        const elapsed = Date.now() - failingSince.current;
+        if (elapsed >= 30_000) {
+          setStartingUp(false);
+        }
       }
     };
 
@@ -122,17 +140,30 @@ export default function Dashboard() {
         <div className="flex items-center gap-2">
           <span
             className={`w-2 h-2 rounded-full ${
-              health ? "bg-accent-green" : "bg-accent-red"
+              health
+                ? "bg-accent-green"
+                : startingUp
+                  ? "bg-accent-amber"
+                  : "bg-accent-red"
             }`}
           />
           <span className="text-sm text-text-secondary">
-            {health ? `v${health.version}` : "Offline"}
+            {health
+              ? `v${health.version}`
+              : startingUp
+                ? "Starting up..."
+                : "Offline"}
           </span>
         </div>
       </div>
 
-      {/* Error banner */}
-      {error && (
+      {/* Error / startup banner */}
+      {error && startingUp && (
+        <div className="bg-bg-surface border border-accent-amber/30 rounded-lg p-4 mb-6 text-sm text-text-secondary">
+          Server is starting up, please wait...
+        </div>
+      )}
+      {error && !startingUp && (
         <div className="bg-bg-surface border border-accent-red/30 rounded-lg p-4 mb-6 text-sm text-accent-red">
           {error} &mdash; Start the backend with:{" "}
           <code className="text-text-primary">smart-search serve</code>
