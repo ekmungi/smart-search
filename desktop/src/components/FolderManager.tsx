@@ -81,9 +81,6 @@ export default function FolderManager() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Whether indexing is currently active according to the backend task queue. */
-  const isIndexing = indexingTasks.some((t) => t.state === "running" || t.state === "pending");
-
   /** Return the active indexing task for a given folder path, if any. */
   const taskForFolder = (path: string): IndexingTask | undefined =>
     indexingTasks.find(
