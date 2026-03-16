@@ -4,12 +4,88 @@
 Supports cancellation via threading.Event and progress tracking.
 Each folder gets at most one active task — resubmitting cancels the old one."""
 
+import ctypes
+import logging
+import os
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
+
+_logger = logging.getLogger(__name__)
+
+
+def _get_available_ram_gb() -> float:
+    """Get available system RAM in GB using OS-native APIs.
+
+    Returns:
+        Available RAM in GB, or 4.0 as a safe fallback.
+    """
+    try:
+        # Windows: use kernel32.GlobalMemoryStatusEx
+        if os.name == "nt":
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(stat)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+            return stat.ullAvailPhys / (1024 ** 3)
+        # Linux/macOS: parse /proc/meminfo or use sysctl
+        else:
+            import shutil
+            total, used, free = shutil.disk_usage("/")  # fallback
+            # Try /proc/meminfo on Linux
+            meminfo = Path("/proc/meminfo")
+            if meminfo.exists():
+                for line in meminfo.read_text().splitlines():
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) / (1024 ** 2)
+            return 4.0
+    except Exception:
+        return 4.0
+
+
+def _compute_max_concurrent() -> int:
+    """Determine max concurrent indexing tasks based on available resources.
+
+    Checks CPU cores and available RAM. Each indexing task needs roughly
+    1.5 GB of headroom (ONNX model + tokenizer + buffers). Caps at 2
+    to avoid overwhelming the system.
+
+    Returns:
+        Max concurrent tasks (always at least 1).
+    """
+    try:
+        cpu_cores = os.cpu_count() or 2
+        available_gb = _get_available_ram_gb()
+
+        # Each task needs ~1.5 GB; reserve 2 GB for OS + app overhead
+        usable_gb = max(0, available_gb - 2.0)
+        by_ram = max(1, int(usable_gb / 1.5))
+
+        # Allow one task per 2 cores
+        by_cpu = max(1, cpu_cores // 2)
+
+        limit = min(by_ram, by_cpu, 2)
+        _logger.info(
+            "Resource check: %.1f GB available, %d cores -> max %d concurrent tasks",
+            available_gb, cpu_cores, limit,
+        )
+        return limit
+    except Exception:
+        return 1  # Safe fallback
 
 if TYPE_CHECKING:
     from smart_search.indexer import DocumentIndexer
@@ -51,11 +127,13 @@ class IndexingTaskManager:
     """
 
     def __init__(self) -> None:
-        """Initialize with empty task registry."""
+        """Initialize with empty task registry and resource-aware semaphore."""
         self._tasks: Dict[str, IndexingStatus] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
         self._folder_to_task: Dict[str, str] = {}
         self._lock = threading.Lock()
+        self._max_concurrent = _compute_max_concurrent()
+        self._semaphore = threading.Semaphore(self._max_concurrent)
 
     def submit(self, folder: str, indexer: "DocumentIndexer") -> str:
         """Submit a folder for background indexing.
@@ -187,8 +265,7 @@ class IndexingTaskManager:
                 status.failed += 1
 
         try:
-            # Discover total file count before indexing starts
-            from smart_search.config import SmartSearchConfig
+            # Discover total file count before waiting for semaphore (lightweight)
             folder_p = Path(folder)
             config = indexer._config
             file_count = sum(
@@ -197,15 +274,28 @@ class IndexingTaskManager:
             )
             status.total = file_count
 
-            result = indexer.index_folder(
-                folder,
-                cancel_event=cancel_event,
-                on_progress=_on_progress,
-            )
-            if cancel_event.is_set():
-                status.state = "cancelled"
-            else:
-                status.state = "completed"
+            # Wait for resource slot before starting heavy work
+            _logger.info("Task %s: waiting for resource slot (%d max concurrent)",
+                         task_id, self._max_concurrent)
+            self._semaphore.acquire()
+            _logger.info("Task %s: acquired slot, indexing %s (%d files)",
+                         task_id, folder, file_count)
+            try:
+                if cancel_event.is_set():
+                    status.state = "cancelled"
+                    return
+
+                indexer.index_folder(
+                    folder,
+                    cancel_event=cancel_event,
+                    on_progress=_on_progress,
+                )
+                if cancel_event.is_set():
+                    status.state = "cancelled"
+                else:
+                    status.state = "completed"
+            finally:
+                self._semaphore.release()
         except Exception as e:
             status.state = "failed"
             status.error = str(e)

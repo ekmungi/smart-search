@@ -95,10 +95,7 @@ def create_app(
 
         # Resume indexing for any watched folders that have un-indexed files.
         # Hash-based skip ensures already-indexed files are not re-processed.
-        # Resume indexing for any watched folders that have un-indexed files.
-        # Hash-based skip ensures already-indexed files are not re-processed.
         try:
-            print("Startup: checking watched folders for auto-resume", flush=True)
             from smart_search.data_dir import get_data_dir
             cfg_path = get_data_dir() / "config.json"
             if cfg_path.exists():
