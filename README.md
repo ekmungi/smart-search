@@ -2,7 +2,7 @@
 
 Local-first semantic search for your documents. Index Markdown, PDF, DOCX, PPTX, XLSX, and HTML files into a personal knowledge base searchable from Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on CPU -- no cloud, no GPU, no subscriptions.
 
-**Version:** 0.8.1 | **License:** MIT
+**Version:** 0.8.2 | **License:** MIT
 
 ---
 
@@ -329,13 +329,37 @@ All settings can be overridden with `SMART_SEARCH_` prefixed variables:
 
 ## Architecture
 
-```
-User Interfaces
-  Claude Code  <-- MCP (stdio) --> server.py (thin HTTP proxy)
-  Desktop App  <-- HTTP REST -->  http.py (FastAPI, port 9742)
-  CLI          <-- direct -->     cli.py
+All clients connect to the **same HTTP server** on port 9742. The server is the single source of truth -- there is only one backend process.
 
-Backend (Python)
+```
+                         ┌─────────────────────────┐
+                         │   HTTP Server (:9742)    │
+                         │   smart-search serve     │
+                         │   (FastAPI, 20 endpoints)│
+                         └──────┬──┬──┬────────────┘
+                                │  │  │
+                 ┌──────────────┘  │  └──────────────┐
+                 │                 │                  │
+          ┌──────┴──────┐  ┌──────┴──────┐   ┌──────┴──────┐
+          │  Desktop UI │  │  MCP Server │   │     CLI     │
+          │  (Tauri v2) │  │  (proxy)    │   │  smart-search│
+          │  fetch()    │  │  → :9742    │   │  search/etc │
+          └─────────────┘  └─────────────┘   └─────────────┘
+          Started by user   Started by         Run manually
+          (or autostart)    Claude Code        in terminal
+```
+
+**Who starts the HTTP server?**
+
+- **Desktop app running**: the Tauri app starts the server as a sidecar process. When you quit from the system tray, it kills the server.
+- **No desktop app**: run `smart-search serve` manually, or the MCP tools will fail.
+
+**Key point**: the MCP server does NOT run its own backend. It is a thin translator -- MCP protocol in, HTTP request to `:9742`, response back as MCP result. If the HTTP server is not running, MCP tools will return errors.
+
+### Component Details
+
+```
+Backend (Python, all share the HTTP server)
   http.py / http_routes.py       FastAPI app, 20 endpoints
   server.py / mcp_client.py      MCP server, proxies to HTTP
   search.py                      Hybrid search: vector + FTS5 + RRF fusion
@@ -351,7 +375,7 @@ Backend (Python)
   indexing_task.py               Background task manager with cancellation
   config_manager.py              Persistent config.json
 
-Storage (file-based, no server)
+Storage (file-based, no database server)
   LanceDB      vectors/ directory (columnar, sub-50ms search)
   SQLite       metadata.db (indexed_files + chunks_fts virtual table)
 
@@ -360,9 +384,19 @@ Desktop (Tauri v2)
   React        Dashboard, Folder Manager, Settings, Quick Search
 ```
 
-Data flow: File -> MarkItDown (non-.md) -> Markdown -> MarkdownChunker -> Chunks -> Embedder -> LanceDB + SQLite FTS5
+### Data Flow
 
-Search flow (hybrid): query -> vector search + FTS5 keyword search -> RRF fusion -> ranked results
+```
+File -> MarkItDown (non-.md) -> Markdown -> MarkdownChunker -> Chunks
+     -> Embedder -> LanceDB + SQLite FTS5
+```
+
+### Search Flow (hybrid mode)
+
+```
+Query -> Vector search (LanceDB)  ─┐
+      -> Keyword search (FTS5 BM25) ─┼─> RRF Fusion -> Ranked results
+```
 
 ---
 
