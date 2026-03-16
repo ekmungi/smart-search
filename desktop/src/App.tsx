@@ -1,8 +1,9 @@
 // Main app layout with custom title bar, icon sidebar, and routed content area.
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { Minus, X } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./components/Dashboard";
 import FolderManager from "./components/FolderManager";
@@ -14,6 +15,16 @@ function App() {
   const [activeView, setActiveView] = useState<View>("dashboard");
 
   const appWindow = getCurrentWindow();
+
+  /** Close button: hide to tray if enabled, otherwise quit the app. */
+  const handleClose = useCallback(async () => {
+    const closeToTray = localStorage.getItem("smart-search-close-to-tray") !== "false";
+    if (closeToTray) {
+      await appWindow.hide();
+    } else {
+      await invoke("quit_app");
+    }
+  }, [appWindow]);
 
   return (
     <div className="flex flex-col h-screen bg-bg-primary text-text-primary">
@@ -36,13 +47,7 @@ function App() {
             <Minus size={14} />
           </button>
           <button
-            onClick={() => appWindow.toggleMaximize()}
-            className="h-full px-3 hover:bg-bg-elevated text-text-muted hover:text-text-primary transition-colors"
-          >
-            <Square size={12} />
-          </button>
-          <button
-            onClick={() => appWindow.close()}
+            onClick={handleClose}
             className="h-full px-3 hover:bg-accent-red text-text-muted hover:text-text-primary transition-colors"
           >
             <X size={14} />

@@ -71,8 +71,16 @@ def nomic_config(tmp_path):
     )
 
 
+class _MockEncoding:
+    """Mimics tokenizers.Encoding with .ids and .attention_mask attributes."""
+
+    def __init__(self, ids, attention_mask):
+        self.ids = ids
+        self.attention_mask = attention_mask
+
+
 def _make_mock_embedder(config, hidden_dim=768):
-    """Create an Embedder with mocked ONNX session and tokenizer.
+    """Create an Embedder with mocked ONNX session and standalone tokenizer.
 
     Args:
         config: SmartSearchConfig instance.
@@ -84,14 +92,14 @@ def _make_mock_embedder(config, hidden_dim=768):
     mock_tokenizer = MagicMock()
     mock_tokenizer._last_texts = []
 
-    def tokenize(texts, **kwargs):
+    def encode_batch(texts):
         mock_tokenizer._last_texts = texts
-        return {
-            "input_ids": np.ones((len(texts), 10), dtype=np.int64),
-            "attention_mask": np.ones((len(texts), 10), dtype=np.int64),
-        }
+        return [
+            _MockEncoding(ids=[1] * 10, attention_mask=[1] * 10)
+            for _ in texts
+        ]
 
-    mock_tokenizer.side_effect = tokenize
+    mock_tokenizer.encode_batch = encode_batch
 
     mock_session = MagicMock()
     mock_input_ids = MagicMock()
@@ -113,6 +121,7 @@ def _make_mock_embedder(config, hidden_dim=768):
     # Create embedder (lazy — no model loaded) then inject mocks
     embedder = Embedder(config)
     embedder._tokenizer = mock_tokenizer
+    embedder._tokenizer_loaded = True
     embedder._session = mock_session
     embedder._loaded = True
 

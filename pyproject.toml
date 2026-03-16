@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smart-search"
-version = "0.8.1"
+version = "0.8.2"
 description = "Local MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX, and HTML documents"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,7 +14,7 @@ dependencies = [
     "pylance",
     "onnxruntime",
     "huggingface-hub",
-    "transformers",
+    "tokenizers",
     "pyarrow",
     "pydantic>=2.0",
     "pydantic-settings",
@@ -40,6 +40,11 @@ dev = [
 ]
 bundle = [
     "pyinstaller>=6.0",
+]
+# transformers is only needed if tokenizer.json is missing from the HF cache.
+# At runtime, the lightweight standalone tokenizers (Rust) handles tokenization.
+download = [
+    "transformers",
 ]
 
 [tool.pytest.ini_options]

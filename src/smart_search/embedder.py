@@ -1,8 +1,14 @@
 # Embedding generation with lazy loading, idle unload, and Matryoshka truncation.
 #
 # Supports snowflake-arctic-embed-m-v2.0 (default) and nomic-embed-text-v1.5.
-# Uses huggingface_hub for download, transformers for tokenization, onnxruntime
-# for inference. No torch/sentence-transformers dependency.
+# Uses huggingface_hub for download, standalone tokenizers (Rust) for tokenization,
+# onnxruntime for inference. No torch/sentence-transformers dependency.
+#
+# Memory optimizations (v0.8.2):
+# - ONNX arena disabled (saves 300-500MB), sequential execution, limited threads
+# - Standalone tokenizers replaces transformers (saves 100-150MB baseline RSS)
+# - Tokenizer lifecycle separated from ONNX session (faster reload after idle)
+# - gc.collect() on unload ensures C++ buffers return to OS
 
 import gc
 import threading
@@ -99,6 +105,9 @@ class Embedder:
         """Initialize the embedder -- does NOT load the model yet.
 
         The model is loaded lazily on first embed call via _ensure_loaded().
+        Tokenizer and ONNX session have separate lifecycles: the tokenizer
+        (~20MB) stays resident once loaded; the ONNX session (~400MB) lazy-loads
+        and idle-unloads independently.
 
         Args:
             config: SmartSearchConfig with model name, dims, and backend.
@@ -110,8 +119,11 @@ class Embedder:
             config.embedding_model, _DEFAULT_PREFIXES
         )
 
-        # Model state -- guarded by _lock
+        # Tokenizer state -- loaded once, stays resident (cheap: ~20MB)
         self._tokenizer = None
+        self._tokenizer_loaded = False
+
+        # ONNX session state -- lazy-loads and idle-unloads (expensive: ~400MB)
         self._session = None
         self._loaded = False
         self._lock = threading.Lock()
@@ -126,31 +138,40 @@ class Embedder:
         return self._loaded
 
     def _ensure_loaded(self) -> None:
-        """Load the model if not already loaded. Thread-safe.
+        """Load tokenizer and ONNX session if not already loaded. Thread-safe.
 
-        Acquires the lock and checks again (double-checked locking pattern)
-        to avoid redundant loads from concurrent callers.
+        Tokenizer is loaded once and stays resident. ONNX session lazy-loads
+        and idle-unloads independently. Uses double-checked locking to avoid
+        redundant loads from concurrent callers.
         """
+        if not self._tokenizer_loaded:
+            with self._lock:
+                if not self._tokenizer_loaded:
+                    self._tokenizer = self._load_tokenizer(self._config)
+                    self._tokenizer_loaded = True
         if self._loaded:
             return
         with self._lock:
             if self._loaded:
                 return
-            self._tokenizer, self._session = self._load_model(self._config)
+            self._session = self._load_session(self._config)
             self._loaded = True
 
     def unload(self) -> None:
-        """Unload the ONNX model from memory to free RAM.
+        """Unload the ONNX session from memory to free RAM.
 
-        Thread-safe -- acquires the lock to prevent unloading during inference.
+        Only unloads the ONNX session (~400MB). The tokenizer (~20MB) stays
+        resident for fast reload. Thread-safe via lock.
+        gc.collect() forces ONNX Runtime's C++ allocations back to the OS.
         """
         with self._lock:
             self._session = None
-            self._tokenizer = None
             self._loaded = False
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
+        # Force free ONNX C++ buffers outside the lock
+        gc.collect()
 
     def _reset_idle_timer(self) -> None:
         """Reset the idle unload timer after each use.
@@ -207,28 +228,73 @@ class Embedder:
         """
         return Embedder._get_model_dir(model_name) is not None
 
-    def _load_model(self, config: SmartSearchConfig):
-        """Download (if needed) and load the ONNX model and tokenizer.
+    @staticmethod
+    def _get_model_path(model_name: str) -> Path:
+        """Download model if needed and return the local snapshot path.
 
-        Prefers int8 quantized ONNX when available (smaller, faster on CPU).
+        Args:
+            model_name: HuggingFace model identifier.
+
+        Returns:
+            Path to the local model directory.
+        """
+        from huggingface_hub import snapshot_download
+
+        model_dir = snapshot_download(
+            model_name,
+            ignore_patterns=["*.bin", "*.pt", "*.safetensors", "*.msgpack"],
+        )
+        return Path(model_dir)
+
+    @staticmethod
+    def _load_tokenizer(config: SmartSearchConfig):
+        """Load the standalone Rust tokenizer from tokenizer.json.
+
+        Uses the lightweight `tokenizers` library (~5MB) instead of the full
+        `transformers` package (~150MB RSS). The tokenizer.json file is
+        self-contained and created by huggingface_hub during model download.
 
         Args:
             config: Configuration with model name.
 
         Returns:
-            Tuple of (AutoTokenizer, onnxruntime.InferenceSession).
+            tokenizers.Tokenizer instance with padding and truncation configured.
         """
-        from huggingface_hub import snapshot_download
-        from transformers import AutoTokenizer
+        from tokenizers import Tokenizer
+
+        model_path = Embedder._get_model_path(config.embedding_model)
+        tokenizer_path = model_path / "tokenizer.json"
+
+        if not tokenizer_path.exists():
+            raise FileNotFoundError(
+                f"No tokenizer.json found in {model_path}. "
+                "Run model download first or use transformers to generate it."
+            )
+
+        tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        # Configure padding: pad_id=0 is standard for BERT-family models.
+        # pad_token must match the model's vocabulary.
+        tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
+        tokenizer.enable_truncation(max_length=_MAX_TOKEN_LENGTH)
+        return tokenizer
+
+    @staticmethod
+    def _load_session(config: SmartSearchConfig):
+        """Load the ONNX inference session with memory-optimized settings.
+
+        Prefers int8 quantized ONNX when available (smaller, faster on CPU).
+        Disables the CPU memory arena to avoid speculative pre-allocation
+        (saves 300-500MB) at the cost of ~10% slower inference.
+
+        Args:
+            config: Configuration with model name.
+
+        Returns:
+            onnxruntime.InferenceSession.
+        """
         import onnxruntime as ort
 
-        model_dir = snapshot_download(
-            config.embedding_model,
-            ignore_patterns=["*.bin", "*.pt", "*.safetensors", "*.msgpack"],
-        )
-        model_path = Path(model_dir)
-
-        tokenizer = AutoTokenizer.from_pretrained(str(model_path))
+        model_path = Embedder._get_model_path(config.embedding_model)
 
         # Prefer quantized int8, fall back to fp32
         onnx_path = model_path / "onnx" / "model_quantized.onnx"
@@ -238,19 +304,25 @@ class Embedder:
             onnx_path = model_path / "model.onnx"
         if not onnx_path.exists():
             raise FileNotFoundError(
-                f"No ONNX model found in {model_dir}. "
+                f"No ONNX model found in {model_path}. "
                 "Expected onnx/model_quantized.onnx, onnx/model.onnx, or model.onnx."
             )
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        session = ort.InferenceSession(
+        # Memory optimizations: disable speculative arena pre-allocation,
+        # limit thread buffers, use sequential execution.
+        sess_options.enable_cpu_mem_arena = False
+        sess_options.enable_mem_pattern = True
+        sess_options.intra_op_num_threads = 2
+        sess_options.inter_op_num_threads = 1
+        sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+
+        return ort.InferenceSession(
             str(onnx_path),
             sess_options=sess_options,
             providers=["CPUExecutionProvider"],
         )
-
-        return tokenizer, session
 
     def _encode(self, texts: List[str]) -> np.ndarray:
         """Tokenize, run ONNX inference, and apply Matryoshka truncation.
@@ -265,15 +337,14 @@ class Embedder:
         """
         self._ensure_loaded()
 
-        encoded = self._tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            max_length=_MAX_TOKEN_LENGTH,
-            return_tensors="np",
+        # Standalone tokenizers API: encode_batch returns Encoding objects
+        encoded_batch = self._tokenizer.encode_batch(texts)
+        input_ids = np.array(
+            [e.ids for e in encoded_batch], dtype=np.int64
         )
-        input_ids = encoded["input_ids"].astype(np.int64)
-        attention_mask = encoded["attention_mask"].astype(np.int64)
+        attention_mask = np.array(
+            [e.attention_mask for e in encoded_batch], dtype=np.int64
+        )
 
         feeds = {"input_ids": input_ids, "attention_mask": attention_mask}
         input_names = [inp.name for inp in self._session.get_inputs()]
@@ -283,7 +354,7 @@ class Embedder:
         outputs = self._session.run(None, feeds)
 
         token_embeddings = outputs[0]
-        pooled = _mean_pool(token_embeddings, encoded["attention_mask"].astype(np.float32))
+        pooled = _mean_pool(token_embeddings, attention_mask.astype(np.float32))
         normalized = _l2_normalize(pooled)
         truncated = _truncate(normalized, self._dimensions)
 

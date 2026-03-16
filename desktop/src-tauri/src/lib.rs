@@ -51,6 +51,14 @@ fn hide_search_window(app: AppHandle) {
     }
 }
 
+/// Quit the app: stop backend and exit. Called when close-to-tray is off.
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    let state = app.state::<BackendState>();
+    stop_backend(&state);
+    app.exit(0);
+}
+
 /// Open a file in the user's default application.
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
@@ -562,6 +570,7 @@ pub fn run() {
             get_backend_url,
             hide_search_window,
             open_file,
+            quit_app,
             check_mcp_registered,
             register_mcp,
             update_shortcut,

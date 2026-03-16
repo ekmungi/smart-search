@@ -7,8 +7,9 @@
 # The ONNX embedding model is NOT bundled -- it downloads on first run
 # via HuggingFace cache (~250MB). This keeps the installer small.
 #
-# Torch-free: uses direct onnxruntime + huggingface-hub + transformers
+# Torch-free: uses direct onnxruntime + huggingface-hub + standalone tokenizers
 # for ~500MB savings over the sentence-transformers stack.
+# transformers package no longer needed at runtime (replaced by tokenizers).
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -24,7 +25,6 @@ _collect_packages = [
     "lancedb",
     "pyarrow",
     "onnxruntime",
-    "transformers",
     "tokenizers",
     "markitdown",
     "magika",
@@ -115,6 +115,8 @@ excludes = [
     "speech_recognition",
     "pydub",
     "audioop",
+    # transformers -- replaced by standalone tokenizers at runtime
+    "transformers",
     # Torch stack -- not needed with direct ONNX inference
     "torch",
     "torchvision",

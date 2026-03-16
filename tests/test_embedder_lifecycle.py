@@ -11,19 +11,30 @@ from smart_search.config import SmartSearchConfig
 from smart_search.embedder import Embedder
 
 
+class _MockEncoding:
+    """Mimics tokenizers.Encoding with .ids and .attention_mask attributes."""
+
+    def __init__(self, ids, attention_mask):
+        self.ids = ids
+        self.attention_mask = attention_mask
+
+
 def _make_mock_components():
-    """Create mock tokenizer and session for testing lifecycle."""
+    """Create mock tokenizer and session for testing lifecycle.
+
+    Tokenizer mimics standalone tokenizers.Tokenizer API (encode_batch).
+    """
     mock_tokenizer = MagicMock()
     mock_tokenizer._last_texts = []
 
-    def tokenize(texts, **kwargs):
+    def encode_batch(texts):
         mock_tokenizer._last_texts = texts
-        return {
-            "input_ids": np.ones((len(texts), 10), dtype=np.int64),
-            "attention_mask": np.ones((len(texts), 10), dtype=np.int64),
-        }
+        return [
+            _MockEncoding(ids=[1] * 10, attention_mask=[1] * 10)
+            for _ in texts
+        ]
 
-    mock_tokenizer.side_effect = tokenize
+    mock_tokenizer.encode_batch = encode_batch
 
     mock_session = MagicMock()
     mock_input_ids = MagicMock()
@@ -65,42 +76,49 @@ def no_timeout_config(tmp_path):
 
 
 class TestLazyLoading:
-    """Tests that __init__ does NOT load the model."""
+    """Tests that __init__ does NOT load tokenizer or session."""
 
     def test_init_does_not_load(self, config):
-        """Embedder __init__ should NOT call _load_model."""
-        with patch.object(Embedder, "_load_model") as mock_load:
+        """Embedder __init__ should NOT call _load_tokenizer or _load_session."""
+        with patch.object(Embedder, "_load_tokenizer") as mock_tok_load, \
+             patch.object(Embedder, "_load_session") as mock_sess_load:
             embedder = Embedder(config)
-            mock_load.assert_not_called()
+            mock_tok_load.assert_not_called()
+            mock_sess_load.assert_not_called()
             assert embedder.is_loaded is False
 
     def test_first_embed_triggers_load(self, config):
-        """First embed_query call should trigger _load_model."""
+        """First embed_query call should trigger both _load_tokenizer and _load_session."""
         mock_tok, mock_sess = _make_mock_components()
-        with patch.object(Embedder, "_load_model", return_value=(mock_tok, mock_sess)) as mock_load:
+        with patch.object(Embedder, "_load_tokenizer", return_value=mock_tok) as mock_tok_load, \
+             patch.object(Embedder, "_load_session", return_value=mock_sess) as mock_sess_load:
             embedder = Embedder(config)
             assert embedder.is_loaded is False
             embedder.embed_query("hello")
-            mock_load.assert_called_once()
+            mock_tok_load.assert_called_once()
+            mock_sess_load.assert_called_once()
             assert embedder.is_loaded is True
 
     def test_second_embed_does_not_reload(self, config):
-        """Subsequent calls should not reload the model."""
+        """Subsequent calls should not reload tokenizer or session."""
         mock_tok, mock_sess = _make_mock_components()
-        with patch.object(Embedder, "_load_model", return_value=(mock_tok, mock_sess)) as mock_load:
+        with patch.object(Embedder, "_load_tokenizer", return_value=mock_tok) as mock_tok_load, \
+             patch.object(Embedder, "_load_session", return_value=mock_sess) as mock_sess_load:
             embedder = Embedder(config)
             embedder.embed_query("a")
             embedder.embed_query("b")
-            mock_load.assert_called_once()
+            mock_tok_load.assert_called_once()
+            mock_sess_load.assert_called_once()
 
 
 class TestIdleUnload:
     """Tests for automatic model unload after idle timeout."""
 
     def test_unload_after_idle(self, config):
-        """Model should unload after idle timeout elapses."""
+        """ONNX session should unload after idle timeout elapses."""
         mock_tok, mock_sess = _make_mock_components()
-        with patch.object(Embedder, "_load_model", return_value=(mock_tok, mock_sess)):
+        with patch.object(Embedder, "_load_tokenizer", return_value=mock_tok), \
+             patch.object(Embedder, "_load_session", return_value=mock_sess):
             embedder = Embedder(config)
             embedder.embed_query("test")
             assert embedder.is_loaded is True
@@ -108,11 +126,14 @@ class TestIdleUnload:
             # Wait for idle timeout (0.2s) plus margin
             time.sleep(0.4)
             assert embedder.is_loaded is False
+            # Tokenizer should still be loaded
+            assert embedder._tokenizer_loaded is True
 
     def test_timer_resets_on_use(self, config):
         """Using the embedder should reset the idle timer."""
         mock_tok, mock_sess = _make_mock_components()
-        with patch.object(Embedder, "_load_model", return_value=(mock_tok, mock_sess)):
+        with patch.object(Embedder, "_load_tokenizer", return_value=mock_tok), \
+             patch.object(Embedder, "_load_session", return_value=mock_sess):
             embedder = Embedder(config)
             embedder.embed_query("a")
 
@@ -127,45 +148,53 @@ class TestIdleUnload:
     def test_no_timer_when_timeout_zero(self, no_timeout_config):
         """No idle timer should be set when timeout is 0."""
         mock_tok, mock_sess = _make_mock_components()
-        with patch.object(Embedder, "_load_model", return_value=(mock_tok, mock_sess)):
+        with patch.object(Embedder, "_load_tokenizer", return_value=mock_tok), \
+             patch.object(Embedder, "_load_session", return_value=mock_sess):
             embedder = Embedder(no_timeout_config)
             embedder.embed_query("test")
             assert embedder._timer is None
             assert embedder.is_loaded is True
 
-    def test_reload_after_unload(self, config):
-        """Model should reload on next use after unload."""
+    def test_reload_after_unload_only_reloads_session(self, config):
+        """After unload, only ONNX session should reload (tokenizer stays)."""
         mock_tok, mock_sess = _make_mock_components()
-        with patch.object(Embedder, "_load_model", return_value=(mock_tok, mock_sess)) as mock_load:
+        with patch.object(Embedder, "_load_tokenizer", return_value=mock_tok) as mock_tok_load, \
+             patch.object(Embedder, "_load_session", return_value=mock_sess) as mock_sess_load:
             embedder = Embedder(config)
             embedder.embed_query("first")
-            assert mock_load.call_count == 1
+            assert mock_tok_load.call_count == 1
+            assert mock_sess_load.call_count == 1
 
             embedder.unload()
             assert embedder.is_loaded is False
 
             embedder.embed_query("second")
-            assert mock_load.call_count == 2
+            # Tokenizer should NOT reload, only session
+            assert mock_tok_load.call_count == 1
+            assert mock_sess_load.call_count == 2
             assert embedder.is_loaded is True
 
 
 class TestManualUnload:
     """Tests for explicit unload() method."""
 
-    def test_unload_frees_resources(self, config):
-        """unload() should set session and tokenizer to None."""
+    def test_unload_frees_session_keeps_tokenizer(self, config):
+        """unload() should free session but keep tokenizer resident."""
         mock_tok, mock_sess = _make_mock_components()
-        with patch.object(Embedder, "_load_model", return_value=(mock_tok, mock_sess)):
+        with patch.object(Embedder, "_load_tokenizer", return_value=mock_tok), \
+             patch.object(Embedder, "_load_session", return_value=mock_sess):
             embedder = Embedder(config)
             embedder.embed_query("test")
             embedder.unload()
             assert embedder._session is None
-            assert embedder._tokenizer is None
+            assert embedder._tokenizer is not None
+            assert embedder._tokenizer_loaded is True
             assert embedder.is_loaded is False
 
     def test_unload_when_not_loaded_is_safe(self, config):
         """Calling unload() before any load should not raise."""
-        with patch.object(Embedder, "_load_model"):
+        with patch.object(Embedder, "_load_tokenizer"), \
+             patch.object(Embedder, "_load_session"):
             embedder = Embedder(config)
             embedder.unload()  # should not raise
 
@@ -176,7 +205,8 @@ class TestThreadSafety:
     def test_concurrent_first_calls(self, config):
         """Multiple threads calling embed_query simultaneously should not crash."""
         mock_tok, mock_sess = _make_mock_components()
-        with patch.object(Embedder, "_load_model", return_value=(mock_tok, mock_sess)):
+        with patch.object(Embedder, "_load_tokenizer", return_value=mock_tok), \
+             patch.object(Embedder, "_load_session", return_value=mock_sess):
             embedder = Embedder(config)
 
             def embed_task(text):

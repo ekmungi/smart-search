@@ -42,6 +42,9 @@ export default function Settings() {
   const [reindexing, setReindexing] = useState(false);
   const [repairing, setRepairing] = useState(false);
   const [repairResult, setRepairResult] = useState<RepairResponse | null>(null);
+  const [closeToTray, setCloseToTray] = useState(() => {
+    return localStorage.getItem("smart-search-close-to-tray") !== "false";
+  });
 
   const refresh = useCallback(async () => {
     try {
@@ -115,6 +118,13 @@ export default function Settings() {
     } catch {
       setError("Failed to update autostart setting");
     }
+  };
+
+  /** Toggle close-to-tray behavior. */
+  const handleCloseToTrayToggle = () => {
+    const newValue = !closeToTray;
+    setCloseToTray(newValue);
+    localStorage.setItem("smart-search-close-to-tray", String(newValue));
   };
 
   /** Register smart-search as MCP server with Claude Code. */
@@ -255,6 +265,23 @@ export default function Settings() {
             <span
               className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-text-primary transition-transform ${
                 autostart ? "translate-x-5" : ""
+              }`}
+            />
+          </button>
+        </SettingRow>
+        <SettingRow
+          label="Close to Tray"
+          description="Minimize to system tray instead of quitting"
+        >
+          <button
+            onClick={handleCloseToTrayToggle}
+            className={`relative w-10 h-5 rounded-full transition-colors ${
+              closeToTray ? "bg-accent-blue" : "bg-bg-elevated"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-text-primary transition-transform ${
+                closeToTray ? "translate-x-5" : ""
               }`}
             />
           </button>

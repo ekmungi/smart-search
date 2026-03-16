@@ -30,23 +30,36 @@ def nomic_config(tmp_path):
     )
 
 
-def _make_mock_embedder(config, hidden_dim=768):
-    """Create an Embedder with mocked ONNX session and tokenizer.
+class _MockEncoding:
+    """Mimics tokenizers.Encoding with .ids and .attention_mask attributes."""
 
-    Since __init__ no longer calls _load_model (lazy loading), we
+    def __init__(self, ids, attention_mask):
+        self.ids = ids
+        self.attention_mask = attention_mask
+
+
+def _make_mock_embedder(config, hidden_dim=768):
+    """Create an Embedder with mocked ONNX session and standalone tokenizer.
+
+    Since __init__ does not load tokenizer or session (lazy loading), we
     manually inject the mock components and set _loaded = True.
+    The mock tokenizer mimics the standalone tokenizers.Tokenizer API
+    (encode_batch returns list of Encoding objects).
     """
     mock_tokenizer = MagicMock()
     mock_tokenizer._last_texts = []
 
-    def tokenize(texts, **kwargs):
+    def encode_batch(texts):
         mock_tokenizer._last_texts = texts
-        return {
-            "input_ids": np.ones((len(texts), 10), dtype=np.int64),
-            "attention_mask": np.ones((len(texts), 10), dtype=np.int64),
-        }
+        return [
+            _MockEncoding(
+                ids=[1] * 10,
+                attention_mask=[1] * 10,
+            )
+            for _ in texts
+        ]
 
-    mock_tokenizer.side_effect = tokenize
+    mock_tokenizer.encode_batch = encode_batch
 
     mock_session = MagicMock()
     mock_input_ids = MagicMock()
@@ -68,6 +81,7 @@ def _make_mock_embedder(config, hidden_dim=768):
     # Create embedder (lazy — no model loaded) then inject mocks
     embedder = Embedder(config)
     embedder._tokenizer = mock_tokenizer
+    embedder._tokenizer_loaded = True
     embedder._session = mock_session
     embedder._loaded = True
 
@@ -233,6 +247,94 @@ class TestEmbedImage:
         """Text-only embedder should raise NotImplementedError."""
         with pytest.raises(NotImplementedError, match="Text-only model"):
             mock_embedder.embed_image("some/image.png")
+
+
+class TestUnloadLifecycle:
+    """Tests for separate tokenizer/session lifecycle and gc on unload."""
+
+    def test_unload_keeps_tokenizer(self, mock_embedder):
+        """After unload, tokenizer should stay resident (cheap: ~20MB)."""
+        mock_embedder.unload()
+        assert mock_embedder._tokenizer is not None
+        assert mock_embedder._tokenizer_loaded is True
+        assert mock_embedder._session is None
+        assert mock_embedder._loaded is False
+
+    def test_unload_clears_session(self, mock_embedder):
+        """Unload should set _session to None."""
+        assert mock_embedder._session is not None
+        mock_embedder.unload()
+        assert mock_embedder._session is None
+
+    def test_unload_calls_gc(self, mock_embedder):
+        """Unload should call gc.collect() to free ONNX C++ buffers."""
+        with patch("smart_search.embedder.gc.collect") as mock_gc:
+            mock_embedder.unload()
+            mock_gc.assert_called_once()
+
+    def test_reload_after_unload_only_loads_session(self, mock_embedder):
+        """After unload + re-ensure_loaded, only session should reload."""
+        mock_embedder.unload()
+        # Simulate re-load by patching _load_session
+        fake_session = MagicMock()
+        with patch.object(Embedder, "_load_session", return_value=fake_session) as mock_load:
+            mock_embedder._ensure_loaded()
+            mock_load.assert_called_once()
+        # Tokenizer should not have been reloaded
+        assert mock_embedder._tokenizer_loaded is True
+
+    def test_is_loaded_reflects_session_state(self, mock_embedder):
+        """is_loaded should track ONNX session, not tokenizer."""
+        assert mock_embedder.is_loaded is True
+        mock_embedder.unload()
+        assert mock_embedder.is_loaded is False
+
+
+class TestOnnxSessionOptions:
+    """Tests for memory-optimized ONNX session configuration."""
+
+    def test_session_options_disable_arena(self):
+        """_load_session should set enable_cpu_mem_arena = False."""
+        with patch("smart_search.embedder.Embedder._get_model_path") as mock_path, \
+             patch("onnxruntime.SessionOptions") as mock_opts_cls, \
+             patch("onnxruntime.InferenceSession"):
+            import onnxruntime as ort
+            mock_model_path = MagicMock()
+            mock_model_path.__truediv__ = MagicMock(side_effect=lambda x: mock_model_path)
+            mock_model_path.exists.return_value = True
+            mock_path.return_value = mock_model_path
+            mock_opts = MagicMock()
+            mock_opts_cls.return_value = mock_opts
+
+            config = SmartSearchConfig(
+                lancedb_path="test", sqlite_path="test"
+            )
+            Embedder._load_session(config)
+
+            assert mock_opts.enable_cpu_mem_arena is False
+            assert mock_opts.enable_mem_pattern is True
+            assert mock_opts.intra_op_num_threads == 2
+            assert mock_opts.inter_op_num_threads == 1
+            assert mock_opts.execution_mode == ort.ExecutionMode.ORT_SEQUENTIAL
+
+
+class TestStandaloneTokenizer:
+    """Tests for standalone tokenizers (Rust) integration."""
+
+    def test_encode_batch_produces_ids_and_mask(self, mock_embedder):
+        """encode_batch output should have .ids and .attention_mask."""
+        result = mock_embedder._tokenizer.encode_batch(["test"])
+        assert hasattr(result[0], "ids")
+        assert hasattr(result[0], "attention_mask")
+
+    def test_tokenizer_file_not_found_raises(self, tmp_path):
+        """_load_tokenizer should raise if tokenizer.json is missing."""
+        with patch.object(Embedder, "_get_model_path", return_value=tmp_path):
+            config = SmartSearchConfig(
+                lancedb_path="test", sqlite_path="test"
+            )
+            with pytest.raises(FileNotFoundError, match="tokenizer.json"):
+                Embedder._load_tokenizer(config)
 
 
 class TestIsModelCached:
