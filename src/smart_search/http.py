@@ -93,10 +93,30 @@ def create_app(
         except Exception as e:
             _logger.warning("Startup checks failed (non-fatal): %s", e)
 
+        # Resume indexing for any watched folders that have un-indexed files.
+        # Hash-based skip ensures already-indexed files are not re-processed.
+        # Resume indexing for any watched folders that have un-indexed files.
+        # Hash-based skip ensures already-indexed files are not re-processed.
+        try:
+            print("Startup: checking watched folders for auto-resume", flush=True)
+            from smart_search.data_dir import get_data_dir
+            cfg_path = get_data_dir() / "config.json"
+            if cfg_path.exists():
+                resume_mgr = ConfigManager(str(cfg_path))
+                live_cfg = resume_mgr.load()
+                folders = live_cfg.get("watch_directories", [])
+                if folders:
+                    _logger.info("Startup: resuming indexing for %d watched folders", len(folders))
+                    for folder in folders:
+                        _logger.info("Startup: queuing %s", folder)
+                        get_task_mgr().submit(folder, get_indexer())
+        except Exception as e:
+            _logger.error("Startup: auto-resume failed: %s", e, exc_info=True)
+
         yield
         if _watcher is not None and getattr(_watcher, "is_running", False):
             _watcher.stop()
-        if _task_mgr is not None:
+        if _task_mgr is not None:  # Only shutdown if it was created
             _task_mgr.shutdown()
 
     app = FastAPI(
