@@ -8,8 +8,6 @@ import {
   fetchConfig,
   updateConfig,
   fetchModels,
-  reindexFolder,
-  fetchFolders,
 } from "../lib/api";
 import type { ModelInfo } from "../lib/api";
 import { ShortcutRecorder } from "./ShortcutRecorder";
@@ -165,13 +163,7 @@ export default function Settings() {
         embedding_dimensions: confirmDialog.dims,
       });
       setConfig(res.config);
-      // Re-index all folders
-      const foldersRes = await fetchFolders();
-      for (const folder of foldersRes.folders) {
-        if (folder.exists) {
-          await reindexFolder(folder.path);
-        }
-      }
+      // Backend already submits all folders for re-indexing when model changes
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {

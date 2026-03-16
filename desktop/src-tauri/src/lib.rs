@@ -244,9 +244,9 @@ async fn update_shortcut(app: AppHandle, shortcut: String) -> Result<String, Str
 
     let gs = app.global_shortcut();
 
-    // Unregister the old shortcut
-    gs.unregister(old_sc)
-        .map_err(|e| format!("Failed to unregister old shortcut: {}", e))?;
+    // Unregister all shortcuts first — unregister(specific) can fail on Windows
+    // when the shortcut was registered via Builder::with_handler()
+    let _ = gs.unregister_all();
 
     // Register the new shortcut (handler is already set globally via with_handler)
     if let Err(e) = gs.register(new_sc) {

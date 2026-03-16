@@ -1,49 +1,36 @@
-# FastMCP server entry point: exposes knowledge tools and file watcher.
+# FastMCP server entry point: thin proxy to the HTTP backend.
 #
-# IMPORTANT: Keep top-level imports minimal for fast MCP server startup.
-# Heavy dependencies (sentence-transformers, markitdown, lancedb) are
-# imported lazily inside functions to stay under Claude Code's ~10s timeout.
+# All global knowledge base operations are proxied through the HTTP server
+# (localhost:9742) so there is a single source of truth. The UI always
+# reflects MCP-triggered actions. No heavy dependencies are loaded here.
+#
+# Ephemeral index tools still run locally since they are independent.
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
 from fastmcp import FastMCP
 
 from smart_search.config import SmartSearchConfig, get_config
 from smart_search.config_manager import ConfigManager
 from smart_search.data_dir import get_data_dir
-from smart_search.models import IndexStats
-
-if TYPE_CHECKING:
-    from smart_search.ephemeral_registry import EphemeralRegistry
-    from smart_search.indexer import DocumentIndexer, IndexFileResult, IndexFolderResult
-    from smart_search.search import SearchEngine
-    from smart_search.store import ChunkStore
-    from smart_search.watcher import FileWatcher
+from smart_search import mcp_client
 
 
 def create_server(
-    search_engine: Optional["SearchEngine"] = None,
-    store: Optional["ChunkStore"] = None,
     config: Optional[SmartSearchConfig] = None,
-    indexer: Optional["DocumentIndexer"] = None,
     config_manager: Optional[ConfigManager] = None,
-    watcher: Optional["FileWatcher"] = None,
 ) -> FastMCP:
     """Create and configure the FastMCP server with tools.
 
-    Accepts optional pre-built components for testing. When called
-    without arguments, creates real components from config.
+    All global knowledge base tools proxy through the HTTP backend.
+    Ephemeral index tools run locally.
 
     Args:
-        search_engine: Optional SearchEngine (for testing).
-        store: Optional ChunkStore (for testing).
         config: Optional SmartSearchConfig override.
-        indexer: Optional DocumentIndexer (for testing).
         config_manager: Optional ConfigManager (for testing).
-        watcher: Optional FileWatcher (for testing).
 
     Returns:
         Configured FastMCP server instance.
@@ -53,59 +40,8 @@ def create_server(
 
     mcp = FastMCP("smart-search")
 
-    # Lazy-init real components only when tools are first called
-    _engine = search_engine
-    _store = store
-    _indexer = indexer
     _config_mgr = config_manager
-    _watcher = watcher
-
-    def _get_engine():
-        """Get or create the search engine singleton."""
-        nonlocal _engine, _store
-        if _engine is None:
-            from smart_search.embedder import Embedder
-            from smart_search.search import SearchEngine as _SearchEngine
-            from smart_search.store import ChunkStore as _ChunkStore
-
-            if _store is None:
-                _store = _ChunkStore(config)
-                _store.initialize()
-
-            embedder = Embedder(config)
-            _engine = _SearchEngine(config, embedder, _store)
-        return _engine
-
-    def _get_store():
-        """Get or create the chunk store singleton."""
-        nonlocal _store
-        if _store is None:
-            from smart_search.store import ChunkStore as _ChunkStore
-
-            _store = _ChunkStore(config)
-            _store.initialize()
-        return _store
-
-    def _get_indexer():
-        """Get or create the document indexer singleton."""
-        nonlocal _indexer, _store
-        if _indexer is None:
-            from smart_search.embedder import Embedder
-            from smart_search.indexer import DocumentIndexer as _DocumentIndexer
-            from smart_search.markdown_chunker import MarkdownChunker
-            from smart_search.store import ChunkStore as _ChunkStore
-
-            if _store is None:
-                _store = _ChunkStore(config)
-                _store.initialize()
-
-            _indexer = _DocumentIndexer(
-                config=config,
-                embedder=Embedder(config),
-                store=_store,
-                markdown_chunker=MarkdownChunker(config),
-            )
-        return _indexer
+    _registry = None
 
     def _get_config_mgr():
         """Get or create the config manager singleton."""
@@ -113,17 +49,6 @@ def create_server(
         if _config_mgr is None:
             _config_mgr = ConfigManager(get_data_dir())
         return _config_mgr
-
-    def _get_watcher():
-        """Get or create the file watcher singleton."""
-        nonlocal _watcher
-        if _watcher is None:
-            from smart_search.watcher import FileWatcher as _FileWatcher
-
-            _watcher = _FileWatcher(config, _get_indexer(), _get_store())
-        return _watcher
-
-    _registry = None
 
     def _get_registry():
         """Get or create the ephemeral registry singleton."""
@@ -136,6 +61,13 @@ def create_server(
             _registry = _EphemeralRegistry(config.sqlite_path)
             _registry.initialize()
         return _registry
+
+    def _ensure_backend():
+        """Check that the HTTP backend is running, raise if not."""
+        if not mcp_client.is_backend_running():
+            raise ConnectionError(
+                "Backend not reachable. Start it with: smart-search serve"
+            )
 
     @mcp.tool()
     def knowledge_search(
@@ -189,11 +121,11 @@ def create_server(
                 doc_types=doc_types, folder=None,
             )
 
-        engine = _get_engine()
-        return engine.search(
-            query=query, limit=limit, mode=mode,
-            doc_types=doc_types, folder=folder,
+        _ensure_backend()
+        data = mcp_client.search(
+            query=query, limit=limit, folder=folder, doc_types=doc_types,
         )
+        return _format_search_response(data)
 
     @mcp.tool()
     def knowledge_stats() -> str:
@@ -205,9 +137,9 @@ def create_server(
         Returns:
             Formatted statistics as a string.
         """
-        s = _get_store()
-        stats = s.get_stats()
-        return _format_stats(stats)
+        _ensure_backend()
+        data = mcp_client.get_stats()
+        return _format_stats_response(data)
 
     @mcp.tool()
     def knowledge_ingest(
@@ -227,17 +159,9 @@ def create_server(
         Returns:
             Formatted ingestion result summary.
         """
-        idx = _get_indexer()
-        target = Path(path)
-
-        if target.is_file():
-            result = idx.index_file(str(target), force=force)
-            return _format_file_result(result)
-        elif target.is_dir():
-            result = idx.index_folder(str(target), force=force)
-            return _format_folder_result(result)
-        else:
-            return f"INGEST ERROR\nPath not found: {path}"
+        _ensure_backend()
+        data = mcp_client.ingest(path=path, force=force)
+        return _format_ingest_response(data)
 
     @mcp.tool()
     def find_related(
@@ -281,8 +205,9 @@ def create_server(
             _get_registry().touch(path_posix)
             return engine.find_related(note_path, limit=limit)
 
-        engine = _get_engine()
-        return engine.find_related(note_path, limit=limit)
+        _ensure_backend()
+        data = mcp_client.find_related(note_path=note_path, limit=limit)
+        return data.get("result", f"Error: {data}")
 
     @mcp.tool()
     def knowledge_add_folder(folder_path: str) -> str:
@@ -301,25 +226,15 @@ def create_server(
         if not path.is_dir():
             return f"ERROR: Directory not found: {folder_path}"
 
-        mgr = _get_config_mgr()
-        mgr.add_watch_dir(str(path))
-
-        w = _get_watcher()
-        if not w.is_running:
-            w.start()
-        w.add_directory(str(path))
-
-        # Trigger initial indexing of existing files
-        idx = _get_indexer()
-        result = idx.index_folder(str(path))
-
+        _ensure_backend()
+        data = mcp_client.add_folder(str(path))
         return (
             f"FOLDER ADDED\n"
             f"============\n"
-            f"Path: {path.as_posix()}\n"
-            f"Watching: yes\n"
-            f"Initial index: {result.indexed} files indexed, "
-            f"{result.skipped} skipped, {result.failed} failed"
+            f"Path: {data.get('path', str(path))}\n"
+            f"Task ID: {data.get('task_id', 'unknown')}\n"
+            f"Status: {data.get('status', 'accepted')}\n"
+            f"Indexing started in background."
         )
 
     @mcp.tool()
@@ -338,29 +253,17 @@ def create_server(
         Returns:
             Confirmation message.
         """
-        path = Path(folder_path).resolve()
-        path_posix = path.as_posix()
-
-        mgr = _get_config_mgr()
-        mgr.remove_watch_dir(str(path))
-
-        w = _get_watcher()
-        w.remove_directory(str(path))
-
-        removed_count = 0
-        if remove_data:
-            s = _get_store()
-            removed_count = s.remove_files_for_folder(path_posix)
-
+        _ensure_backend()
+        data = mcp_client.remove_folder(folder_path, remove_data=remove_data)
         data_line = (
-            f"Data removed: {removed_count} files"
+            f"Data removed: {data.get('data_removed', 0)} files"
             if remove_data
             else "Data: kept (use remove_data=True to delete)"
         )
         return (
             f"FOLDER REMOVED\n"
             f"==============\n"
-            f"Path: {path_posix}\n"
+            f"Path: {data.get('path', folder_path)}\n"
             f"{data_line}"
         )
 
@@ -371,21 +274,22 @@ def create_server(
         Returns:
             Formatted list of watched directories from config.
         """
-        mgr = _get_config_mgr()
-        dirs = mgr.list_watch_dirs()
+        _ensure_backend()
+        data = mcp_client.list_folders()
+        folders = data.get("folders", [])
 
-        if not dirs:
+        if not folders:
             return "No folders configured. Use knowledge_add_folder to add one."
 
         lines = [
             "WATCHED FOLDERS",
             "=" * 16,
-            f"Total: {len(dirs)}",
+            f"Total: {len(folders)}",
             "",
         ]
-        for d in dirs:
-            exists = "active" if Path(d).is_dir() else "missing"
-            lines.append(f"  [{exists}] {d}")
+        for f in folders:
+            status = f.get("status", "unknown")
+            lines.append(f"  [{status}] {f['path']}")
 
         return "\n".join(lines)
 
@@ -396,8 +300,9 @@ def create_server(
         Returns:
             Formatted list of indexed files with chunk counts.
         """
-        s = _get_store()
-        files = s.list_indexed_files()
+        _ensure_backend()
+        data = mcp_client.list_files()
+        files = data.get("files", [])
 
         if not files:
             return "No files indexed yet. Use knowledge_ingest to add files."
@@ -555,78 +460,123 @@ def create_server(
         """
         from smart_search.reader import read_note as _read_note
 
-        return _read_note(note_path, config.watch_directories)
+        # Use live config from config manager for current watch dirs
+        mgr = _get_config_mgr()
+        watch_dirs = mgr.list_watch_dirs()
+        return _read_note(note_path, watch_dirs)
 
     return mcp
 
 
-def _format_file_result(result) -> str:
-    """Format a single-file indexing result as a human-readable string.
+def _format_search_response(data: dict) -> str:
+    """Format HTTP search response as MCP-friendly text.
 
     Args:
-        result: IndexFileResult from the indexer.
+        data: Search response dict from HTTP API.
 
     Returns:
-        Formatted status string.
+        Formatted search results string.
     """
-    if result.status == "failed":
+    results = data.get("results", [])
+    query = data.get("query", "")
+    mode = data.get("mode", "semantic")
+
+    if not results:
         return (
-            f"INGEST RESULT\n"
-            f"=============\n"
-            f"File: {result.file_path}\n"
-            f"Status: FAILED\n"
-            f"Error: {result.error}"
+            f"KNOWLEDGE SEARCH\n"
+            f"================\n"
+            f"Query: {query}\n"
+            f"Mode: {mode}\n"
+            f"No results found."
         )
-    return (
-        f"INGEST RESULT\n"
-        f"=============\n"
-        f"File: {result.file_path}\n"
-        f"Status: {result.status}\n"
-        f"Chunks: {result.chunk_count}"
-    )
+
+    lines = [
+        "KNOWLEDGE SEARCH",
+        "=" * 16,
+        f"Query: {query}",
+        f"Mode: {mode}",
+        f"Results: {len(results)}",
+        "",
+    ]
+
+    for r in results:
+        lines.append(f"--- Result {r['rank']} (score: {r['score']:.4f}) ---")
+        lines.append(f"Source: {r['source_path']}")
+        if r.get("section_path"):
+            lines.append(f"Section: {r['section_path']}")
+        if r.get("page_number"):
+            lines.append(f"Page: {r['page_number']}")
+        lines.append(f"Text: {r['text']}")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
-def _format_folder_result(result) -> str:
-    """Format a folder indexing result as a human-readable string.
-
-    Args:
-        result: IndexFolderResult from the indexer.
-
-    Returns:
-        Formatted summary string.
-    """
-    return (
-        f"INGEST RESULT\n"
-        f"=============\n"
-        f"Indexed: {result.indexed} files\n"
-        f"Skipped: {result.skipped} files (unchanged)\n"
-        f"Failed: {result.failed} files\n"
-        f"Total: {len(result.results)} files processed"
-    )
-
-
-def _format_stats(stats) -> str:
-    """Format IndexStats as a human-readable string.
+def _format_stats_response(data: dict) -> str:
+    """Format HTTP stats response as MCP-friendly text.
 
     Args:
-        stats: IndexStats from the chunk store.
+        data: Stats response dict from HTTP API.
 
     Returns:
-        Formatted multi-line string.
+        Formatted stats string.
     """
-    size_mb = stats.index_size_bytes / (1024 * 1024)
-    formats = ", ".join(stats.formats_indexed) if stats.formats_indexed else "none"
-    last = stats.last_indexed_at or "never"
+    size_mb = data.get("index_size_bytes", 0) / (1024 * 1024)
+    formats = ", ".join(data.get("formats_indexed", [])) or "none"
+    last = data.get("last_indexed_at") or "never"
 
     separator = "=" * 26
     return (
         f"KNOWLEDGE BASE STATISTICS\n"
         f"{separator}\n"
-        f"Documents indexed: {stats.document_count}\n"
-        f"Chunks stored: {stats.chunk_count}\n"
+        f"Documents indexed: {data.get('document_count', 0)}\n"
+        f"Chunks stored: {data.get('chunk_count', 0)}\n"
         f"Index size: {size_mb:.1f} MB\n"
         f"Last indexed: {last}\n"
         f"Formats indexed: {formats}"
+    )
+
+
+def _format_ingest_response(data: dict) -> str:
+    """Format HTTP ingest response as MCP-friendly text.
+
+    Args:
+        data: Ingest response dict from HTTP API.
+
+    Returns:
+        Formatted ingest result string.
+    """
+    status = data.get("status", "unknown")
+    path = data.get("path", "unknown")
+
+    if status == "failed":
+        return (
+            f"INGEST RESULT\n"
+            f"=============\n"
+            f"Path: {path}\n"
+            f"Status: FAILED\n"
+            f"Error: {data.get('error', 'unknown')}"
+        )
+
+    if status == "accepted":
+        return (
+            f"INGEST RESULT\n"
+            f"=============\n"
+            f"Path: {path}\n"
+            f"Status: Indexing started in background\n"
+            f"Task ID: {data.get('task_id', 'unknown')}\n"
+            f"Poll knowledge_stats() to check progress."
+        )
+
+    return (
+        f"INGEST RESULT\n"
+        f"=============\n"
+        f"Path: {path}\n"
+        f"Status: {status}\n"
+        f"Indexed: {data.get('indexed', 0)} files\n"
+        f"Skipped: {data.get('skipped', 0)} files\n"
+        f"Failed: {data.get('failed', 0)} files\n"
+        f"Chunks: {data.get('chunk_count', 0)}"
     )
 
 

@@ -11,6 +11,7 @@ dependencies = [
     "fastmcp",
     "markitdown[all]",
     "lancedb",
+    "pylance",
     "onnxruntime",
     "huggingface-hub",
     "transformers",

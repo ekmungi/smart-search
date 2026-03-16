@@ -98,6 +98,16 @@ def create_router(
             formats_indexed=s.formats_indexed,
         )
 
+    @router.get("/find-related")
+    def find_related_endpoint(
+        note_path: str = Query(..., description="Path to source note"),
+        limit: int = Query(10, ge=1, le=100),
+    ):
+        """Find notes related to a given note by vector similarity."""
+        engine = get_engine()
+        result = engine.find_related(note_path, limit=limit)
+        return {"note_path": note_path, "limit": limit, "result": result}
+
     @router.get("/search", response_model=SearchResponse)
     def search(
         q: str = Query(..., description="Search query"),

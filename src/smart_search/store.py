@@ -9,6 +9,8 @@ from typing import List
 import lancedb
 import pyarrow as pa
 
+from datetime import timedelta
+
 from smart_search.config import SmartSearchConfig
 from smart_search.models import Chunk, IndexStats, SearchResult
 
@@ -335,6 +337,11 @@ class ChunkStore:
         for source_path in files:
             self.delete_chunks_for_file(source_path)
             self.remove_file_record(source_path)
+
+        # Compact LanceDB and purge old versions to reclaim disk space
+        if files:
+            self._compact_and_cleanup()
+
         return len(files)
 
     def rebuild_table(self) -> None:
@@ -398,12 +405,20 @@ class ChunkStore:
             self.remove_file_record(source_path)
 
         if removed_files:
-            try:
-                self._table.optimize()
-            except Exception:
-                pass  # optimize requires pylance; skip if unavailable
+            self._compact_and_cleanup()
 
         return {"removed_count": len(removed_files), "removed_files": list(removed_files)}
+
+    def _compact_and_cleanup(self) -> None:
+        """Compact LanceDB fragments and purge old versions to reclaim disk space.
+
+        Requires pylance for actual compaction. Falls back silently if unavailable.
+        """
+        try:
+            self._table.compact_files()
+            self._table.cleanup_old_versions(older_than=timedelta(0))
+        except (ImportError, Exception):
+            pass  # pylance not installed or compaction failed
 
     def _chunk_to_record(self, chunk: Chunk) -> dict:
         """Convert a Chunk to a dict suitable for LanceDB insertion.
