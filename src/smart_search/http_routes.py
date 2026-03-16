@@ -287,6 +287,7 @@ def create_router(
                 task_id=t.task_id,
                 folder=t.folder,
                 state=t.state,
+                total=t.total,
                 indexed=t.indexed,
                 skipped=t.skipped,
                 failed=t.failed,

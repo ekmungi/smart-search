@@ -171,6 +171,7 @@ class IndexingTaskStatus(BaseModel):
     task_id: str
     folder: str
     state: str
+    total: int = 0
     indexed: int = 0
     skipped: int = 0
     failed: int = 0

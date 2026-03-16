@@ -4,6 +4,7 @@
 # Uses huggingface_hub for download, transformers for tokenization, onnxruntime
 # for inference. No torch/sentence-transformers dependency.
 
+import gc
 import threading
 import time
 from pathlib import Path
@@ -31,8 +32,13 @@ _MODEL_PREFIXES = {
 _DEFAULT_PREFIXES = (None, "Represent this sentence for searching relevant passages: ")
 
 # Maximum texts per ONNX inference call. Larger batches cause O(n) VRAM/RAM
-# growth; 32 is a practical cap that keeps peak memory bounded during indexing.
-_EMBED_BATCH_SIZE = 32
+# growth; 8 keeps peak memory well under 500 MB even with long sequences.
+_EMBED_BATCH_SIZE = 8
+
+# Maximum tokens per text. 512 covers our ~500-char chunks comfortably.
+# Higher values (e.g. 8192) cause massive memory usage when the tokenizer
+# pads all batch entries to the longest sequence length.
+_MAX_TOKEN_LENGTH = 512
 
 
 def _mean_pool(token_embeddings: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
@@ -263,7 +269,7 @@ class Embedder:
             texts,
             padding=True,
             truncation=True,
-            max_length=8192,
+            max_length=_MAX_TOKEN_LENGTH,
             return_tensors="np",
         )
         input_ids = encoded["input_ids"].astype(np.int64)
@@ -310,6 +316,10 @@ class Embedder:
             batch = prefixed[i : i + _EMBED_BATCH_SIZE]
             batch_embeddings = self._encode(batch)
             all_embeddings.extend(vec.tolist() for vec in batch_embeddings)
+            del batch_embeddings
+            # Free ONNX output tensors and tokenizer matrices between batches
+            if len(prefixed) > _EMBED_BATCH_SIZE:
+                gc.collect()
         return all_embeddings
 
     def embed_query(self, query: str) -> List[float]:

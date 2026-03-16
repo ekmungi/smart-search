@@ -154,10 +154,12 @@ export default function Dashboard() {
                 ...
               </p>
               <p className="text-xs text-text-secondary mt-1">
-                {activeTasks
-                  .filter((t) => t.state === "running")
-                  .reduce((sum, t) => sum + t.indexed, 0)}{" "}
-                documents indexed so far
+                {(() => {
+                  const running = activeTasks.filter((t) => t.state === "running" || t.state === "pending");
+                  const done = running.reduce((sum, t) => sum + t.indexed + t.skipped + t.failed, 0);
+                  const total = running.reduce((sum, t) => sum + t.total, 0);
+                  return total > 0 ? `${done} of ${total} files processed` : `${done} files processed`;
+                })()}
               </p>
             </div>
           </div>

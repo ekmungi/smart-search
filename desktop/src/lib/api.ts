@@ -39,6 +39,7 @@ export interface IndexingTask {
   task_id: string;
   folder: string;
   state: string;
+  total: number;
   indexed: number;
   skipped: number;
   failed: number;

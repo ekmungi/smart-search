@@ -118,16 +118,20 @@ export default function FolderManager() {
     // Fire-and-forget: POST /folders returns 202 immediately; indexing runs in background
     addFolder(folderPath)
       .then(async (result) => {
-        await refresh();
+        // Fetch both folder list and indexing status together so the task
+        // appears at the same time as the folder row (prevents the race where
+        // the row renders as "Indexed" before the poll picks up the new task).
+        const [, status] = await Promise.all([
+          refresh(),
+          fetchIndexingStatus(),
+        ]);
+        setIndexingTasks(status.tasks);
         setError(`Added ${result.path} -- indexing started (task ${result.task_id})`);
         setTimeout(() => setError(null), 4000);
       })
       .catch((e) => {
         setError(e instanceof Error ? e.message : "Failed to add folder");
       });
-
-    // Optimistically refresh folder list (folder appears before indexing completes)
-    setTimeout(() => refresh(), 500);
   };
 
   const handleRemove = async (path: string) => {
@@ -168,24 +172,26 @@ export default function FolderManager() {
       </div>
 
       {/* Indexing progress summary */}
-      {stats && stats.total_files > 0 && (
+      {(isIndexing || (stats && stats.total_files > 0)) && (
         <div className="bg-bg-surface rounded-lg p-3 mb-4 flex items-center gap-3">
           {isIndexing ? (
             <>
               <Loader size={14} className="text-accent-blue animate-spin shrink-0" />
               <span className="text-sm text-text-secondary">
                 Indexing in progress &mdash;{" "}
-                {indexingTasks
-                  .filter((t) => t.state === "running" || t.state === "pending")
-                  .reduce((sum, t) => sum + t.indexed, 0)}{" "}
-                documents indexed so far ({stats.chunk_count} chunks)
+                {(() => {
+                  const activeTasks = indexingTasks.filter((t) => t.state === "running" || t.state === "pending");
+                  const done = activeTasks.reduce((sum, t) => sum + t.indexed + t.skipped + t.failed, 0);
+                  const total = activeTasks.reduce((sum, t) => sum + t.total, 0);
+                  return total > 0 ? `${done} of ${total} files processed` : `${done} files processed`;
+                })()}
               </span>
             </>
           ) : (
             <>
               <CheckCircle size={14} className="text-accent-green shrink-0" />
               <span className="text-sm text-text-secondary">
-                {stats.document_count} files indexed ({stats.chunk_count} chunks)
+                {stats!.document_count} files indexed ({stats!.chunk_count} chunks)
               </span>
             </>
           )}
@@ -233,7 +239,13 @@ export default function FolderManager() {
                   {!folder.exists
                     ? "Missing"
                     : taskForFolder(folder.path)
-                      ? `Indexing... ${taskForFolder(folder.path)!.indexed} indexed`
+                      ? (() => {
+                          const t = taskForFolder(folder.path)!;
+                          const done = t.indexed + t.skipped + t.failed;
+                          return t.total > 0
+                            ? `Indexing... ${done} of ${t.total} files`
+                            : `Indexing... ${done} files`;
+                        })()
                       : completedTaskForFolder(folder.path)?.state === "failed"
                         ? `Failed: ${completedTaskForFolder(folder.path)!.error ?? "unknown error"}`
                         : completedTaskForFolder(folder.path)

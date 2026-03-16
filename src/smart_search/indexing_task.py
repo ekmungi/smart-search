@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -33,6 +34,7 @@ class IndexingStatus:
     task_id: str
     folder: str
     state: str  # "running", "completed", "failed", "cancelled"
+    total: int = 0
     indexed: int = 0
     skipped: int = 0
     failed: int = 0
@@ -67,6 +69,8 @@ class IndexingTaskManager:
         Returns:
             Task ID string for status tracking.
         """
+        # Normalize to forward slashes so paths match the folder list API
+        folder = Path(folder).as_posix()
         with self._lock:
             # Cancel existing task for this folder
             if folder in self._folder_to_task:
@@ -100,6 +104,7 @@ class IndexingTaskManager:
         Returns:
             True if a task was found and cancelled, False otherwise.
         """
+        folder = Path(folder).as_posix()
         with self._lock:
             task_id = self._folder_to_task.get(folder)
             if task_id and task_id in self._cancel_events:
@@ -143,6 +148,7 @@ class IndexingTaskManager:
         Returns:
             IndexingStatus or None if no task exists for this folder.
         """
+        folder = Path(folder).as_posix()
         task_id = self._folder_to_task.get(folder)
         if task_id:
             return self._tasks.get(task_id)
@@ -170,15 +176,36 @@ class IndexingTaskManager:
             cancel_event: Event to signal cancellation.
         """
         status = self._tasks[task_id]
+
+        def _on_progress(_file_path: str, file_result: "IndexFileResult") -> None:
+            """Update status counters in real-time as each file completes."""
+            if file_result.status == "indexed":
+                status.indexed += 1
+            elif file_result.status == "skipped":
+                status.skipped += 1
+            else:
+                status.failed += 1
+
         try:
-            result = indexer.index_folder(folder, cancel_event=cancel_event)
+            # Discover total file count before indexing starts
+            from smart_search.config import SmartSearchConfig
+            folder_p = Path(folder)
+            config = indexer._config
+            file_count = sum(
+                1 for p in folder_p.glob("**/*")
+                if p.is_file() and p.suffix.lower() in config.supported_extensions
+            )
+            status.total = file_count
+
+            result = indexer.index_folder(
+                folder,
+                cancel_event=cancel_event,
+                on_progress=_on_progress,
+            )
             if cancel_event.is_set():
                 status.state = "cancelled"
             else:
                 status.state = "completed"
-                status.indexed = result.indexed
-                status.skipped = result.skipped
-                status.failed = result.failed
         except Exception as e:
             status.state = "failed"
             status.error = str(e)
