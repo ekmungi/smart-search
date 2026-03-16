@@ -566,6 +566,13 @@ pub fn run() {
             register_mcp,
             update_shortcut,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Kill the backend sidecar/dev process when the app exits
+                let state = app.state::<BackendState>();
+                stop_backend(&state);
+            }
+        });
 }
