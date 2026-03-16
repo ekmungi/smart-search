@@ -27,6 +27,7 @@ _collect_packages = [
     "transformers",
     "tokenizers",
     "markitdown",
+    "magika",
 ]
 
 for pkg in _collect_packages:
