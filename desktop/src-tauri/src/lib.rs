@@ -342,11 +342,18 @@ fn start_dev_backend() -> Option<std::process::Child> {
 }
 
 /// Kill the backend child process if it is running.
+///
+/// First tries managed child handles (sidecar or dev). If neither exists
+/// (e.g. backend was already running when we started), falls back to
+/// killing whatever process holds port 9742 via taskkill on Windows.
 fn stop_backend(state: &BackendState) {
+    let mut killed_managed = false;
+
     // Stop sidecar child
     if let Ok(mut guard) = state.child.lock() {
         if let Some(child) = guard.take() {
             let _ = child.kill();
+            killed_managed = true;
         }
     }
     // Stop dev child
@@ -354,8 +361,53 @@ fn stop_backend(state: &BackendState) {
         if let Some(ref mut child) = *guard {
             let _ = child.kill();
             let _ = child.wait();
+            killed_managed = true;
         }
         *guard = None;
+    }
+
+    // Fallback: kill by port if we didn't manage the process
+    if !killed_managed {
+        kill_process_on_port(BACKEND_PORT);
+    }
+}
+
+/// Find and kill whatever process is listening on the given port.
+///
+/// Uses `netstat` to find the PID and `taskkill` to terminate it.
+/// Silently does nothing on failure (port already free, permissions, etc.).
+fn kill_process_on_port(port: u16) {
+    // netstat -ano | findstr :9742 → "  TCP  127.0.0.1:9742  ...  LISTENING  12345"
+    let output = StdCommand::new("cmd")
+        .args(["/C", &format!("netstat -ano | findstr :{}", port)])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+
+    let output = match output {
+        Ok(o) => o,
+        Err(_) => return,
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if !line.contains("LISTENING") {
+            continue;
+        }
+        // PID is the last whitespace-separated token
+        if let Some(pid_str) = line.split_whitespace().last() {
+            if let Ok(pid) = pid_str.parse::<u32>() {
+                if pid > 0 {
+                    let _ = StdCommand::new("taskkill")
+                        .args(["/F", "/PID", &pid.to_string()])
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status();
+                    log::info!("Killed orphan backend process PID {} on port {}", pid, port);
+                    return;
+                }
+            }
+        }
     }
 }
 
