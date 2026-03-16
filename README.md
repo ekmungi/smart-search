@@ -1,38 +1,114 @@
-# smart-search
+# Smart Search
 
-Local-first MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX, and HTML documents. Runs entirely on CPU with no cloud dependencies, no GPU required. Designed to make your personal knowledge base searchable from Claude Code.
+Local-first semantic search for your documents. Index Markdown, PDF, DOCX, PPTX, XLSX, and HTML files into a personal knowledge base searchable from Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on CPU -- no cloud, no GPU, no subscriptions.
 
-**Version:** 0.3.2
-
----
-
-## What It Does
-
-- Indexes Markdown notes, PDFs, DOCX, PPTX, XLSX, and HTML files into a searchable knowledge base
-- Single pipeline: all non-Markdown files converted to Markdown via MarkItDown, then chunked by headings
-- Generates embeddings with nomic-embed-text-v1.5 (ONNX, CPU-optimized)
-- Stores vectors in LanceDB and metadata in SQLite -- both file-based, no server needed
-- Watches directories for changes and re-indexes automatically
-- Exposes MCP tools to Claude Code: search, stats, ingest, folder management, related notes
-- CLI for config, watch directories, model management, and index operations with tqdm progress bars
-- Persistent config.json with OS-convention data directory
+**Version:** 0.8.1 | **License:** MIT
 
 ---
 
-## Prerequisites
+## Why Smart Search?
 
-- Python 3.11 or later
+If you use Obsidian with Smart Connections, you've probably hit these walls:
+
+- **Obsidian freezes** on large vaults. Smart Connections runs embedding in-process (Transformers.js/WASM), blocking the UI thread. A 5,000-note vault can hang Obsidian for minutes during indexing.
+- **$30/month paywall** for features that should be free. Block-level search, PDF support, and ChatGPT integration are locked behind Smart Connections Pro.
+- **Markdown-only**. Research PDFs, meeting DOCX files, slide decks -- none of these are searchable unless you manually convert them.
+- **Cosine-only search**. No keyword fallback, no hybrid ranking. Semantic search alone misses exact-match queries ("find all mentions of HIPAA 164.312").
+- **Single developer risk**. One maintainer, restrictive license, no API.
+
+Smart Search fixes all of this:
+
+| Pain Point | Smart Connections | Smart Search |
+|------------|-------------------|--------------|
+| Obsidian freezing | In-process JS embedding | Out-of-process Python server (zero freezes) |
+| PDF/DOCX/PPTX support | Pro only ($30/mo) | Free, all formats |
+| Search quality | Cosine-only, bge-micro-v2 (384d) | Hybrid search (semantic + keyword + RRF), snowflake-arctic-embed-m-v2.0 (256d MRL) |
+| API access | None | MCP + REST + CLI |
+| Embedding model | Fixed, low quality | Swappable, curated registry with quality scores |
+| License | Restrictive | MIT |
+| Price | $30/month for Pro | Free forever |
+
+---
+
+## Features
+
+### Search
+
+- **Hybrid search** (default): combines vector similarity with FTS5 keyword matching via Reciprocal Rank Fusion
+- **Semantic mode**: pure vector search with configurable relevance threshold
+- **Keyword mode**: BM25 ranking via SQLite FTS5 with porter stemming
+- **Folder filtering**: restrict results to specific directories
+- **Find related**: discover similar documents by averaging chunk embeddings
+
+### Indexing
+
+- **Six formats**: `.md`, `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html`
+- **Single pipeline**: all non-Markdown files converted via MarkItDown, then chunked by headings
+- **Background indexing**: non-blocking with per-folder progress, cancellation, and auto-resume on restart
+- **Hash-based dedup**: unchanged files are skipped automatically
+- **Ephemeral indexes**: create temporary `.smart-search/` indexes inside any folder
+
+### Desktop App
+
+- **Tauri v2 + React** desktop application with warm dark theme
+- **Quick Search**: `Ctrl+Space` global hotkey opens a floating search overlay (configurable shortcut)
+- **Dashboard**: index stats, per-folder status, model download progress
+- **Folder Manager**: add/remove watch directories with drag-and-drop
+- **Settings**: font scaling, embedding model selection, Matryoshka dimension picker, relevance threshold, autostart, MCP registration
+- **Repair Index**: one-click maintenance (orphan removal, FTS5 rebuild, LanceDB compaction, compatibility check)
+- **System tray**: background operation with tray icon
+
+### Embedding
+
+- **Default model**: snowflake-arctic-embed-m-v2.0 (int8 ONNX, 297MB, 0.554 MTEB retrieval)
+- **Matryoshka truncation**: 256-dim default, configurable per model
+- **Lazy loading**: model loads on demand, unloads after 60s idle to free RAM
+- **Curated registry**: switchable models with quality/size metadata
+- **CPU-only**: ONNX Runtime, no GPU required
+
+### Architecture
+
+- **Out-of-process**: all heavy lifting in Python, Obsidian/desktop stays responsive
+- **MCP server**: 11 tools for Claude Code integration
+- **REST API**: 20 endpoints on `localhost:9742`
+- **CLI**: `smart-search` command with subcommands for all operations
+- **File-based storage**: LanceDB (vectors) + SQLite (metadata + FTS5), no database server
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+
 - [`uv`](https://github.com/astral-sh/uv) (recommended) or `pip`
 
-The embedding model (`nomic-ai/nomic-embed-text-v1.5`) downloads from Hugging Face on first run and caches locally. No internet connection is required after that.
+### Install
+
+```bash
+uv pip install git+https://github.com/ekmungi/smart-search.git
+```
+
+### Register with Claude Code
+
+```bash
+claude mcp add smart-search -- smart-search
+```
+
+### Use
+
+In Claude Code:
+```
+"Add C:/Users/me/vault to the knowledge base"
+"Search my knowledge base for transformer architecture"
+"Find notes related to meeting-notes/2026-03-10.md"
+```
 
 ---
 
-## Installation
+## Installation Options
 
 ### Option A: Install from GitHub (recommended)
-
-Install directly from the repository -- no PyPI account needed:
 
 ```bash
 uv pip install git+https://github.com/ekmungi/smart-search.git
@@ -46,15 +122,7 @@ pip install git+https://github.com/ekmungi/smart-search.git
 
 This creates the `smart-search` command on your PATH.
 
-### Option B: Install from PyPI (when published)
-
-```bash
-uv pip install smart-search
-```
-
-### Option C: Local development install
-
-Clone and install in editable mode:
+### Option B: Local development install
 
 ```bash
 git clone https://github.com/ekmungi/smart-search.git
@@ -62,38 +130,35 @@ cd smart-search
 uv pip install -e ".[dev]"
 ```
 
+### Option C: Desktop app
+
+Download the installer from the Releases page. The desktop app bundles the Python backend as a sidecar -- no Python installation required.
+
 ### Verify installation
 
 ```bash
-which smart-search    # Unix/Git Bash
-where smart-search    # Windows CMD
+smart-search stats
 ```
-
-Should print a path like `.../Scripts/smart-search` (Windows) or `.../bin/smart-search` (Unix).
 
 ---
 
 ## MCP Server Setup
 
-After installation, register smart-search as an MCP server with Claude Code. Choose one method:
+Register smart-search as an MCP server with Claude Code:
 
 ### Method 1: `claude mcp add` (recommended)
-
-If you installed via Option A or B (smart-search is on your PATH):
 
 ```bash
 claude mcp add smart-search -- smart-search
 ```
 
-If using a virtual environment where smart-search is installed:
+With a virtual environment:
 
 ```bash
 claude mcp add smart-search -- /path/to/venv/Scripts/smart-search
 ```
 
 ### Method 2: `.mcp.json` file
-
-Create or edit `.mcp.json` in your project root:
 
 ```json
 {
@@ -105,21 +170,7 @@ Create or edit `.mcp.json` in your project root:
 }
 ```
 
-If smart-search is not on your global PATH, use the full path:
-
-```json
-{
-  "mcpServers": {
-    "smart-search": {
-      "command": "/path/to/venv/Scripts/smart-search"
-    }
-  }
-}
-```
-
-### Method 3: Python module (no install)
-
-If you prefer not to install the package:
+### Method 3: Python module
 
 ```json
 {
@@ -137,43 +188,46 @@ If you prefer not to install the package:
 
 ---
 
-## Quick Start
-
-1. Install: `uv pip install git+https://github.com/ekmungi/smart-search.git`
-2. Register: `claude mcp add smart-search -- smart-search`
-3. In Claude Code, ingest your documents:
-   - "Use knowledge_ingest to index `C:/Users/me/Documents/notes`"
-4. Search:
-   - "Search my knowledge base for transformer architecture"
-
----
-
-## Cheatsheet
-
-### CLI Commands
+## CLI Cheatsheet
 
 ```bash
+# Index management
 smart-search stats                           # Index stats and data directory
-smart-search config show                     # Show current configuration
+smart-search index ingest /path              # Index a file or folder
+smart-search index ingest /path --ephemeral  # Create a local .smart-search/ index
+smart-search index list                      # List all indexed files
+smart-search index rebuild                   # Re-index all watched directories
+smart-search index remove /path              # Remove files from index
+
+# Search
+smart-search search "query"                  # Hybrid search (default)
+smart-search search "query" --mode semantic  # Vector-only search
+smart-search search "query" --mode keyword   # FTS5 keyword search
+smart-search search "query" --folder /path   # Search within a folder
+smart-search search "query" --limit 5        # Limit results
+
+# Watch directories
 smart-search watch list                      # List watched directories
 smart-search watch add /path/to/dir          # Add a watch directory
 smart-search watch remove /path/to/dir       # Remove a watch directory
-smart-search index list                      # List all indexed files
-smart-search index ingest /path              # Index a file or folder
-smart-search index ingest /path --ephemeral  # Create a local .smart-search/ index
-smart-search index rebuild                   # Re-index all watched directories
-smart-search index remove /path              # Remove files from index
-smart-search search "query"                  # Search the knowledge base
-smart-search search "query" --folder /path   # Search within a folder
-smart-search search "query" --limit 5        # Limit results
-smart-search search "query" --ephemeral /path # Search a local index
-smart-search temp list                       # List ephemeral indexes
-smart-search temp cleanup /path              # Remove an ephemeral index
+
+# Configuration
+smart-search config show                     # Show current configuration
 smart-search model show                      # Show current embedding model
 smart-search model set model-name --dim 256  # Change embedding model
+
+# Server
+smart-search serve                           # Start HTTP server (port 9742)
+smart-search mcp                             # Start MCP server (stdio)
+
+# Ephemeral indexes
+smart-search temp list                       # List ephemeral indexes
+smart-search temp cleanup /path              # Remove an ephemeral index
 ```
 
-### Claude Code Prompts
+---
+
+## Claude Code Prompts
 
 | Task | Prompt |
 |------|--------|
@@ -186,103 +240,55 @@ smart-search model set model-name --dim 256  # Change embedding model
 | Find related notes | "Find notes related to meeting-notes/2026-03-10.md" |
 | Read a note | "Read the note at projects/smart-search.md" |
 | Force re-index | "Re-index C:/Users/me/vault with force=true" |
-| Temp index a folder | "Create a temporary index of C:/Users/me/Downloads/papers" |
+| Temp index | "Create a temporary index of C:/Users/me/Downloads/papers" |
 | Search temp index | "Search the temp index at C:/Users/me/Downloads/papers for transformers" |
 | Clean up temp index | "Clean up the temporary index at C:/Users/me/Downloads/papers" |
-| List temp indexes | "List all ephemeral indexes" |
 
 ---
 
 ## MCP Tools
 
-The server exposes the following tools to Claude Code.
-
-### `knowledge_search`
-
-Search the knowledge base for document chunks matching a natural language query.
-
-| Parameter  | Type            | Required | Default    | Description                                              |
-|------------|-----------------|----------|------------|----------------------------------------------------------|
-| `query`    | string          | Yes      | -          | Natural language search query                            |
-| `limit`    | integer         | No       | `10`       | Maximum number of chunks to return                       |
-| `mode`     | string          | No       | `"hybrid"` | Search mode: `semantic`, `keyword`, or `hybrid`          |
-| `doc_types`| list of strings | No       | `null`     | Filter by file type, e.g. `["pdf"]` or `["pdf", "md"]`  |
-| `folder`   | string          | No       | `null`     | Restrict results to a folder path prefix                 |
-
-Returns formatted results with source file path, page number, section heading, chunk text, and relevance score.
-
-> **Note (v0.2):** All three mode values currently execute semantic search. Keyword and hybrid modes using SQLite FTS5 + Reciprocal Rank Fusion are planned for v0.3.
-
-### `knowledge_stats`
-
-Returns statistics about the indexed knowledge base: document count, chunk count, index size, last indexed timestamp, and formats present.
-
-No parameters.
-
-### `knowledge_ingest`
-
-Index a file or folder into the knowledge base.
-
-| Parameter | Type    | Required | Default | Description                                    |
-|-----------|---------|----------|---------|------------------------------------------------|
-| `path`    | string  | Yes      | -       | Absolute path to a file or folder to ingest    |
-| `force`   | boolean | No       | `false` | Re-index even if file hash is unchanged        |
-
-Supports `.md`, `.pdf`, `.docx`, `.pptx`, `.xlsx`, and `.html` files. Uses hash-based change detection to skip unchanged files.
-
-### `knowledge_add_folder`
-
-Add a folder to the watch list and trigger initial indexing.
-
-| Parameter     | Type   | Required | Description                        |
-|---------------|--------|----------|------------------------------------|
-| `folder_path` | string | Yes      | Absolute path to the folder        |
-
-### `knowledge_remove_folder`
-
-Stop watching a folder. Optionally remove its indexed data.
-
-| Parameter     | Type    | Required | Default | Description                              |
-|---------------|---------|----------|---------|------------------------------------------|
-| `folder_path` | string  | Yes      | -       | Path to the folder                       |
-| `remove_data` | boolean | No       | `false` | Also delete indexed chunks from this folder |
-
-### `knowledge_list_folders`
-
-List all watched directories and their status. No parameters.
-
-### `knowledge_list_files`
-
-List all indexed files with chunk counts and timestamps. No parameters.
-
-### `find_related`
-
-Find notes similar to a given note by averaging its embeddings.
-
-| Parameter   | Type    | Required | Default | Description                       |
-|-------------|---------|----------|---------|-----------------------------------|
-| `note_path` | string  | Yes      | -       | Path to the source note           |
-| `limit`     | integer | No       | `10`    | Maximum number of related notes   |
-
-### `read_note`
-
-Read a note's content by path, with safety validation against path traversal.
-
-| Parameter   | Type   | Required | Description                        |
-|-------------|--------|----------|------------------------------------|
-| `note_path` | string | Yes      | Relative path to the note          |
+| Tool | Description |
+|------|-------------|
+| `knowledge_search` | Search with query, mode (semantic/keyword/hybrid), folder filter, doc type filter |
+| `knowledge_stats` | Index statistics: documents, chunks, size, formats |
+| `knowledge_ingest` | Index a file or folder (background for directories) |
+| `knowledge_add_folder` | Add a folder to the watch list and trigger indexing |
+| `knowledge_remove_folder` | Stop watching a folder, optionally delete data |
+| `knowledge_list_folders` | List watched directories and their status |
+| `knowledge_list_files` | List indexed files with chunk counts |
+| `find_related` | Find documents similar to a given note |
+| `read_note` | Read a note's content (supports PDF, DOCX via MarkItDown) |
+| `knowledge_temp_index` | Create an ephemeral index inside a folder |
+| `knowledge_temp_cleanup` | Delete an ephemeral index |
 
 ---
 
-## File Watching
+## REST API
 
-smart-search can watch directories and automatically re-index files when they change. Configure via environment variable:
+The HTTP server runs on `localhost:9742` with 20 endpoints:
 
-```bash
-SMART_SEARCH_WATCH_DIRECTORIES='["C:/Users/me/notes", "C:/Users/me/papers"]'
-```
-
-The watcher monitors all subdirectories recursively. Files matching exclude patterns (`.git`, `.obsidian`, `node_modules`, etc.) are ignored. Deleted files are automatically removed from the index.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Server health, version, uptime |
+| GET | `/api/stats` | Index statistics |
+| GET | `/api/search?q=...&mode=hybrid` | Search with mode, folder filter |
+| GET | `/api/folders` | List watched folders |
+| POST | `/api/folders` | Add folder (returns 202, background indexing) |
+| DELETE | `/api/folders?path=...` | Remove folder |
+| GET | `/api/files` | List indexed files |
+| POST | `/api/ingest` | Index file (sync) or folder (202 async) |
+| GET | `/api/indexing/status` | Background indexing progress |
+| GET | `/api/config` | Current configuration |
+| PUT | `/api/config` | Update configuration |
+| GET | `/api/models` | Available embedding models |
+| GET | `/api/model/status` | Model cache status |
+| GET | `/api/model/loaded` | Model memory status |
+| GET | `/api/find-related?note_path=...` | Find related documents |
+| POST | `/api/repair` | Run index maintenance (orphans, FTS5, compaction) |
+| POST | `/api/ephemeral/index` | Create ephemeral index |
+| GET | `/api/ephemeral` | List ephemeral indexes |
+| DELETE | `/api/ephemeral?folder_path=...` | Delete ephemeral index |
 
 ---
 
@@ -290,97 +296,80 @@ The watcher monitors all subdirectories recursively. Files matching exclude patt
 
 ### Data Directory
 
-smart-search stores its data (vectors, metadata, config.json) in an OS-convention directory:
-
-| OS      | Default Path                              |
-|---------|-------------------------------------------|
-| Windows | `%LOCALAPPDATA%\smart-search`             |
-| Linux   | `~/.local/share/smart-search`             |
-| macOS   | `~/.local/share/smart-search`             |
+| OS | Default Path |
+|----|--------------|
+| Windows | `%LOCALAPPDATA%\smart-search` |
+| Linux | `~/.local/share/smart-search` |
+| macOS | `~/.local/share/smart-search` |
 
 Override with: `SMART_SEARCH_DATA_DIR=/custom/path`
 
 ### config.json
 
-Persistent configuration is stored in `config.json` in the data directory. Managed via CLI (`smart-search config show`, `smart-search watch add`) or MCP tools (`knowledge_add_folder`, `knowledge_remove_folder`).
+Persistent configuration stored in the data directory. Managed via CLI, REST API, or desktop Settings panel.
 
 ### Environment Variables
 
-All settings can be overridden with environment variables prefixed `SMART_SEARCH_`.
+All settings can be overridden with `SMART_SEARCH_` prefixed variables:
 
-| Environment Variable                  | Default                            | Description                                      |
-|---------------------------------------|------------------------------------|--------------------------------------------------|
-| `SMART_SEARCH_EMBEDDING_MODEL`        | `nomic-ai/nomic-embed-text-v1.5`   | Hugging Face model identifier                    |
-| `SMART_SEARCH_EMBEDDING_DIMENSIONS`   | `768`                              | Output vector dimensions                         |
-| `SMART_SEARCH_EMBEDDING_BACKEND`      | `onnx`                             | Backend: `onnx` or `pytorch`                     |
-| `SMART_SEARCH_CHUNK_MAX_TOKENS`       | `512`                              | Maximum tokens per chunk                         |
-| `SMART_SEARCH_LANCEDB_PATH`           | `<data_dir>/vectors`               | Directory for LanceDB vector store               |
-| `SMART_SEARCH_SQLITE_PATH`            | `<data_dir>/metadata.db`           | Path to SQLite metadata database                 |
-| `SMART_SEARCH_LANCEDB_TABLE_NAME`     | `chunks`                           | LanceDB table name                               |
-| `SMART_SEARCH_SUPPORTED_EXTENSIONS`   | `[".pdf", ".docx", ".md", ".pptx", ".xlsx", ".html"]` | File types to index                              |
-| `SMART_SEARCH_WATCH_DIRECTORIES`      | `[]`                               | Directories to watch for changes                 |
-| `SMART_SEARCH_EXCLUDE_PATTERNS`       | `[".git", ".obsidian", ...]`       | Path components to exclude from indexing         |
-| `SMART_SEARCH_BLOCK_CHUNKING_ENABLED` | `true`                             | Enable heading-based Markdown chunking           |
-| `SMART_SEARCH_MIN_CHUNK_LENGTH`       | `50`                               | Minimum chunk length in characters               |
-| `SMART_SEARCH_WATCHER_DEBOUNCE_SECONDS` | `2.0`                            | Debounce window for file watcher                 |
-| `SMART_SEARCH_SEARCH_DEFAULT_LIMIT`   | `10`                               | Default result count                             |
-| `SMART_SEARCH_SEARCH_DEFAULT_MODE`    | `hybrid`                           | Default search mode                              |
-| `SMART_SEARCH_NOMIC_DOCUMENT_PREFIX`  | `search_document: `                | Task prefix for document text at index time      |
-| `SMART_SEARCH_NOMIC_QUERY_PREFIX`     | `search_query: `                   | Task prefix for queries at search time           |
-
-Paths are resolved to absolute at startup relative to the working directory.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SMART_SEARCH_EMBEDDING_MODEL` | `Snowflake/snowflake-arctic-embed-m-v2.0` | Embedding model |
+| `SMART_SEARCH_EMBEDDING_DIMENSIONS` | `256` | Vector dimensions (Matryoshka) |
+| `SMART_SEARCH_WATCH_DIRECTORIES` | `[]` | Directories to watch |
+| `SMART_SEARCH_SEARCH_DEFAULT_MODE` | `hybrid` | Default search mode |
+| `SMART_SEARCH_RELEVANCE_THRESHOLD` | `0.30` | Minimum similarity score (semantic mode) |
+| `SMART_SEARCH_CHUNK_MAX_TOKENS` | `512` | Maximum tokens per chunk |
+| `SMART_SEARCH_SUPPORTED_EXTENSIONS` | `[".pdf", ".docx", ".md", ".pptx", ".xlsx", ".html"]` | File types to index |
+| `SMART_SEARCH_EXCLUDE_PATTERNS` | `[".git", ".obsidian", "node_modules", ...]` | Excluded directories |
+| `SMART_SEARCH_WATCHER_DEBOUNCE_SECONDS` | `2.0` | File watcher debounce |
+| `SMART_SEARCH_SEARCH_DEFAULT_LIMIT` | `10` | Default result count |
 
 ---
 
-## Indexing Documents
-
-### Via MCP (recommended)
-
-In Claude Code, ask to ingest files:
+## Architecture
 
 ```
-"Ingest all documents in C:/Users/me/papers"
-"Index this file: C:/Users/me/notes/meeting.md"
-"Re-index C:/Users/me/papers with force=true"
+User Interfaces
+  Claude Code  <-- MCP (stdio) --> server.py (thin HTTP proxy)
+  Desktop App  <-- HTTP REST -->  http.py (FastAPI, port 9742)
+  CLI          <-- direct -->     cli.py
+
+Backend (Python)
+  http.py / http_routes.py       FastAPI app, 20 endpoints
+  server.py / mcp_client.py      MCP server, proxies to HTTP
+  search.py                      Hybrid search: vector + FTS5 + RRF fusion
+  fts.py                         FTS5 keyword search, BM25 ranking
+  fusion.py                      Reciprocal Rank Fusion (k=60)
+  indexer.py                     Document ingestion pipeline
+  markitdown_parser.py           File -> Markdown conversion
+  markdown_chunker.py            Heading-based section splitting
+  embedder.py                    ONNX embedding with lazy load/unload
+  store.py                       LanceDB vectors + SQLite metadata + FTS5
+  startup.py                     Orphan reconciliation, FTS5 backfill, repair
+  watcher.py                     Watchdog file watcher with debounce
+  indexing_task.py               Background task manager with cancellation
+  config_manager.py              Persistent config.json
+
+Storage (file-based, no server)
+  LanceDB      vectors/ directory (columnar, sub-50ms search)
+  SQLite       metadata.db (indexed_files + chunks_fts virtual table)
+
+Desktop (Tauri v2)
+  Rust         System tray, sidecar manager, global shortcut
+  React        Dashboard, Folder Manager, Settings, Quick Search
 ```
 
-### Via Python API
+Data flow: File -> MarkItDown (non-.md) -> Markdown -> MarkdownChunker -> Chunks -> Embedder -> LanceDB + SQLite FTS5
 
-```python
-from smart_search.config import get_config
-from smart_search.embedder import Embedder
-from smart_search.markdown_chunker import MarkdownChunker
-from smart_search.store import ChunkStore
-from smart_search.indexer import DocumentIndexer
-
-config = get_config()
-store = ChunkStore(config)
-store.initialize()
-
-indexer = DocumentIndexer(
-    config=config,
-    embedder=Embedder(config),
-    store=store,
-    markdown_chunker=MarkdownChunker(config),
-)
-
-# Index a single file
-result = indexer.index_file("/path/to/document.pdf")
-print(result.status, result.chunk_count)
-
-# Index a folder (recursively finds .md, .pdf, .docx, .pptx, .xlsx, .html)
-result = indexer.index_folder("/path/to/documents")
-print(f"Indexed: {result.indexed}, Skipped: {result.skipped}, Failed: {result.failed}")
-```
-
-Files already indexed at the same content hash are skipped automatically. Pass `force=True` to re-index regardless.
+Search flow (hybrid): query -> vector search + FTS5 keyword search -> RRF fusion -> ranked results
 
 ---
 
 ## Running Tests
 
 ```bash
-# Fast tests only (default, no ML model loading)
+# Fast tests only (default)
 pytest
 
 # All tests including slow integration tests
@@ -390,68 +379,28 @@ pytest -m ""
 pytest --cov=smart_search --cov-report=term-missing
 ```
 
-Slow tests are marked with `@pytest.mark.slow` and require ML models to be downloaded.
-
----
-
-## Project Structure
-
-```
-src/smart_search/
-  server.py            - FastMCP entry point; MCP tool definitions (lazy imports for fast startup)
-  cli.py               - CLI with subcommands (stats, config, watch, index, search, model)
-  indexer.py            - Document ingestion pipeline (chunk, embed, store, dedup)
-  markitdown_parser.py  - MarkItDown wrapper: converts any file to Markdown
-  markdown_chunker.py   - Heading-based Markdown section splitter
-  watcher.py            - Watchdog file watcher with debounce and runtime add/remove
-  embedder.py           - nomic-embed-text-v1.5 ONNX embedding generation
-  store.py              - LanceDB vector store + SQLite metadata store
-  search.py             - Semantic search with Smart Context formatting and folder filter
-  models.py             - Pydantic models: Chunk, SearchResult, IndexStats
-  config.py             - Settings with SMART_SEARCH_ env var overrides
-  config_manager.py     - Persistent config.json with atomic writes
-  data_dir.py           - OS-convention data directory resolution
-  protocols.py          - Extension point protocols (Embedder, Chunker, Enricher, Retriever)
-  index_metadata.py     - Index metadata tracking in SQLite
-  reader.py             - Note reader with path traversal safety
-
-tests/
-  test_server.py             - MCP tool registration, dispatch, folder tools
-  test_cli.py                - CLI subcommand tests
-  test_indexer.py            - Indexer pipeline and routing
-  test_markitdown_parser.py  - MarkItDown document conversion
-  test_markdown_chunker.py   - Markdown heading-based chunking
-  test_watcher.py            - File watcher, debounce, runtime management
-  test_store.py              - LanceDB, SQLite, file listing, folder removal
-  test_search.py             - Search formatting, filtering, folder filter
-  test_config.py             - Config fields, env vars, data dir defaults
-  test_config_manager.py     - Config manager CRUD and persistence
-  test_data_dir.py           - Data directory resolution
-  test_protocols.py          - Protocol compliance tests
-  test_index_metadata.py     - Index metadata tracking
-  test_models.py             - Pydantic model validation
-  test_embedder.py           - Embedder (slow: loads ONNX model)
-```
+350+ tests covering all modules. Slow tests (marked `@pytest.mark.slow`) require ML models to be downloaded.
 
 ---
 
 ## Tech Stack
 
-| Component        | Library / Model                                        |
-|------------------|--------------------------------------------------------|
-| MCP server       | FastMCP                                                |
-| Document parsing | MarkItDown (PDF, DOCX, PPTX, XLSX, HTML)               |
-| Markdown parsing | Custom heading-based splitter (no dependencies)        |
-| Pipeline         | All files -> MarkItDown -> MarkdownChunker (single path) |
-| Embeddings       | nomic-ai/nomic-embed-text-v1.5 via sentence-transformers + ONNX |
-| Vector store     | LanceDB (file-based, no server)                        |
-| Metadata store   | SQLite (Python stdlib)                                 |
-| File watching    | Watchdog                                               |
-| Config           | pydantic-settings                                      |
-| Build            | Hatchling                                              |
+| Component | Technology |
+|-----------|-----------|
+| MCP server | FastMCP |
+| HTTP server | FastAPI + Uvicorn |
+| Document parsing | MarkItDown (PDF, DOCX, PPTX, XLSX, HTML) |
+| Markdown parsing | Custom heading-based splitter |
+| Embeddings | snowflake-arctic-embed-m-v2.0 via ONNX Runtime |
+| Vector store | LanceDB (file-based, columnar) |
+| Metadata + FTS | SQLite (FTS5 with porter stemming) |
+| Search fusion | Reciprocal Rank Fusion (RRF, k=60) |
+| File watching | Watchdog |
+| Desktop | Tauri v2 + React + Tailwind CSS v4 |
+| Build | Hatchling (Python), PyInstaller (sidecar), NSIS (installer) |
 
 ---
 
 ## License
 
-MIT
+MIT -- all features free forever. No paywalls, no subscriptions, no telemetry.
