@@ -101,8 +101,16 @@ export default function QuickSearch() {
     setLoading(true);
     setError(null);
     try {
-      const res = await searchDocuments(q, MAX_RESULTS);
-      setResults(res.results);
+      // Fetch more results than needed so dedup still yields enough unique files
+      const res = await searchDocuments(q, MAX_RESULTS * 3);
+      // Deduplicate by file: keep highest-scoring chunk per source_path
+      const seen = new Set<string>();
+      const deduped = res.results.filter((hit) => {
+        if (seen.has(hit.source_path)) return false;
+        seen.add(hit.source_path);
+        return true;
+      }).slice(0, MAX_RESULTS);
+      setResults(deduped);
       setSelectedIndex(0);
       // Model is now loaded after a successful search
       setWarmingUp(false);
