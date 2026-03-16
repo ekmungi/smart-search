@@ -125,7 +125,8 @@ def create_server(
 
         _ensure_backend()
         data = mcp_client.search(
-            query=query, limit=limit, folder=folder, doc_types=doc_types,
+            query=query, limit=limit, mode=mode,
+            folder=folder, doc_types=doc_types,
         )
         return _format_search_response(data)
 

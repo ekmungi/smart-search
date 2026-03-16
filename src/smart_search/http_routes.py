@@ -23,6 +23,7 @@ from smart_search.http_models import (
     EphemeralIndexRequest,
     EphemeralIndexResponse,
     EphemeralListResponse,
+    RepairResponse,
     FileInfo,
     FilesResponse,
     FolderInfo,
@@ -120,6 +121,7 @@ def create_router(
     def search(
         q: str = Query(..., description="Search query"),
         limit: int = Query(10, ge=1, le=100),
+        mode: str = Query("hybrid", description="Search mode: semantic, keyword, hybrid"),
         folder: str = Query(None, description="Folder prefix filter"),
         doc_types: str = Query(None, description="Comma-separated types"),
     ):
@@ -131,7 +133,8 @@ def create_router(
             else None
         )
         results = engine.search_results(
-            query=q, limit=limit, doc_types=types_list, folder=folder,
+            query=q, limit=limit, mode=mode,
+            doc_types=types_list, folder=folder,
         )
         hits = [
             SearchHit(
@@ -147,7 +150,7 @@ def create_router(
             for r in results
         ]
         return SearchResponse(
-            query=q, mode="semantic", total=len(hits), results=hits,
+            query=q, mode=mode, total=len(hits), results=hits,
         )
 
     @router.get("/folders", response_model=FoldersResponse)
@@ -486,5 +489,18 @@ def create_router(
         return EphemeralCleanupResponse(
             folder=path_posix, removed=removed,
         )
+
+    @router.post("/repair", response_model=RepairResponse)
+    def repair():
+        """Run all index maintenance operations.
+
+        Removes orphan chunks, rebuilds FTS5 from LanceDB, compacts
+        LanceDB, and checks index compatibility. Returns a summary
+        of all operations performed.
+        """
+        from smart_search.startup import repair_index
+
+        result = repair_index(get_store(), config, config.sqlite_path)
+        return RepairResponse(**result)
 
     return router

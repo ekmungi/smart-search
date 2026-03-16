@@ -87,9 +87,14 @@ def create_app(
 
         # Run startup checks (non-blocking, log-only)
         try:
-            from smart_search.startup import check_index_compatibility, reconcile_orphans
+            from smart_search.startup import (
+                backfill_fts_if_needed,
+                check_index_compatibility,
+                reconcile_orphans,
+            )
             check_index_compatibility(config, config.sqlite_path)
             reconcile_orphans(get_store())
+            backfill_fts_if_needed(get_store())
         except Exception as e:
             _logger.warning("Startup checks failed (non-fatal): %s", e)
 

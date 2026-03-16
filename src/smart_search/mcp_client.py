@@ -92,6 +92,7 @@ def get_stats(base_url: str = DEFAULT_BASE_URL) -> Dict[str, Any]:
 def search(
     query: str,
     limit: int = 10,
+    mode: str = "hybrid",
     folder: Optional[str] = None,
     doc_types: Optional[List[str]] = None,
     base_url: str = DEFAULT_BASE_URL,
@@ -101,6 +102,7 @@ def search(
     Args:
         query: Search query string.
         limit: Maximum results.
+        mode: Search mode - semantic, keyword, or hybrid (default hybrid).
         folder: Optional folder filter.
         doc_types: Optional document type filter.
         base_url: Backend base URL.
@@ -108,7 +110,7 @@ def search(
     Returns:
         Search response dict with query, mode, total, results.
     """
-    params = {"q": query, "limit": str(limit)}
+    params = {"q": query, "limit": str(limit), "mode": mode}
     if folder:
         params["folder"] = folder
     if doc_types:

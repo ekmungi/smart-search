@@ -218,3 +218,20 @@ export async function fetchIndexingStatus(): Promise<IndexingStatusResponse> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+export interface RepairResponse {
+  orphans_removed: number;
+  orphan_files: string[];
+  fts_rebuilt: boolean;
+  fts_rows: number;
+  compacted: boolean;
+  compatible: boolean;
+  mismatches: Record<string, unknown>;
+}
+
+/** Run all index maintenance operations: orphan removal, FTS5 rebuild, compaction. */
+export async function repairIndex(): Promise<RepairResponse> {
+  const res = await fetch(`${BASE_URL}/repair`, { method: "POST" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}

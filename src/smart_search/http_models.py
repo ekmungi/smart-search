@@ -238,3 +238,15 @@ class EphemeralCleanupResponse(BaseModel):
 
     folder: str
     removed: bool
+
+
+class RepairResponse(BaseModel):
+    """Result of running all index repair operations."""
+
+    orphans_removed: int
+    orphan_files: List[str]
+    fts_rebuilt: bool
+    fts_rows: int
+    compacted: bool
+    compatible: bool
+    mismatches: dict

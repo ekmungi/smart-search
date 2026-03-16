@@ -8,8 +8,9 @@ import {
   fetchConfig,
   updateConfig,
   fetchModels,
+  repairIndex,
 } from "../lib/api";
-import type { ModelInfo } from "../lib/api";
+import type { ModelInfo, RepairResponse } from "../lib/api";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 
 /** Font size range for the proportional scaling slider. */
@@ -39,6 +40,8 @@ export default function Settings() {
     dims: number;
   } | null>(null);
   const [reindexing, setReindexing] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+  const [repairResult, setRepairResult] = useState<RepairResponse | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -174,6 +177,21 @@ export default function Settings() {
     }
   };
 
+  /** Run all index maintenance operations. */
+  const handleRepairIndex = async () => {
+    setRepairing(true);
+    setRepairResult(null);
+    setError(null);
+    try {
+      const result = await repairIndex();
+      setRepairResult(result);
+    } catch {
+      setError("Index repair failed");
+    } finally {
+      setRepairing(false);
+    }
+  };
+
   if (loading) {
     return <p className="text-text-secondary text-sm">Loading settings...</p>;
   }
@@ -274,6 +292,28 @@ export default function Settings() {
             value={String(config.shortcut_key || "Ctrl+Space")}
             onChange={handleShortcutChange}
           />
+        </SettingRow>
+        <SettingRow
+          label="Repair Index"
+          description="Remove orphans, rebuild keyword index, compact storage"
+        >
+          <div className="flex items-center gap-3">
+            {repairResult && (
+              <span className="text-xs text-text-muted">
+                Removed {repairResult.orphans_removed} orphans, rebuilt{" "}
+                {repairResult.fts_rows} FTS rows, compacted:{" "}
+                {repairResult.compacted ? "yes" : "no"}
+              </span>
+            )}
+            <button
+              onClick={handleRepairIndex}
+              disabled={repairing}
+              className="px-3 py-1 text-sm bg-bg-elevated text-text-primary rounded hover:bg-border disabled:opacity-50 flex items-center gap-1"
+            >
+              {repairing && <Loader2 size={14} className="animate-spin" />}
+              {repairing ? "Repairing..." : "Repair"}
+            </button>
+          </div>
         </SettingRow>
       </Section>
 

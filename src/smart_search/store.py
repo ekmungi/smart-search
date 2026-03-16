@@ -80,6 +80,17 @@ class ChunkStore:
                 indexed_at  TEXT NOT NULL
             )"""
         )
+
+        # FTS5 virtual table for keyword search (hybrid search v0.8)
+        self._sqlite_conn.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                text,
+                id UNINDEXED,
+                source_path UNINDEXED,
+                source_type UNINDEXED,
+                tokenize='porter unicode61'
+            )"""
+        )
         self._sqlite_conn.commit()
 
     def close(self) -> None:
@@ -93,7 +104,7 @@ class ChunkStore:
             self._sqlite_conn = None
 
     def upsert_chunks(self, chunks: List[Chunk]) -> None:
-        """Insert or replace chunks in LanceDB.
+        """Insert or replace chunks in LanceDB and FTS5.
 
         Deletes existing chunks with matching IDs before inserting,
         ensuring idempotent upsert behavior.
@@ -112,12 +123,27 @@ class ChunkStore:
             except Exception:
                 pass  # Row may not exist
 
-        # Insert new chunks
+        # Remove old FTS5 entries for these chunk IDs
+        for cid in chunk_ids:
+            self._sqlite_conn.execute(
+                "DELETE FROM chunks_fts WHERE id = ?", (cid,)
+            )
+
+        # Insert new chunks into LanceDB
         records = [self._chunk_to_record(c) for c in chunks]
         self._table.add(records)
 
+        # Insert into FTS5 for keyword search
+        for c in chunks:
+            self._sqlite_conn.execute(
+                "INSERT INTO chunks_fts (text, id, source_path, source_type) "
+                "VALUES (?, ?, ?, ?)",
+                (c.text, c.id, c.source_path, c.source_type),
+            )
+        self._sqlite_conn.commit()
+
     def delete_chunks_for_file(self, source_path: str) -> int:
-        """Remove all chunks for a given source file.
+        """Remove all chunks for a given source file from LanceDB and FTS5.
 
         Args:
             source_path: The source_path value stored in chunks.
@@ -131,6 +157,13 @@ class ChunkStore:
             # Escape single quotes in path
             escaped = source_path.replace("'", "''")
             self._table.delete(f"source_path = '{escaped}'")
+
+            # Remove from FTS5
+            self._sqlite_conn.execute(
+                "DELETE FROM chunks_fts WHERE source_path = ?",
+                (source_path,),
+            )
+            self._sqlite_conn.commit()
         return count
 
     def get_chunks_for_file(self, source_path: str) -> List[Chunk]:
@@ -390,6 +423,18 @@ class ChunkStore:
 
         # Clear SQLite records -- old embeddings are invalid
         self._sqlite_conn.execute("DELETE FROM indexed_files")
+
+        # Rebuild FTS5 table (drop and recreate to clear all entries)
+        self._sqlite_conn.execute("DROP TABLE IF EXISTS chunks_fts")
+        self._sqlite_conn.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                text,
+                id UNINDEXED,
+                source_path UNINDEXED,
+                source_type UNINDEXED,
+                tokenize='porter unicode61'
+            )"""
+        )
         self._sqlite_conn.commit()
 
     def reconcile(self) -> dict:

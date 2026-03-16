@@ -1,7 +1,8 @@
-# Tests for SearchEngine: search logic and Smart Context formatting.
+# Tests for SearchEngine: search logic, mode routing, and Smart Context formatting.
 
+import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -258,3 +259,121 @@ class TestFindRelated:
         ]
         result = search_engine.find_related("notes/source.md")
         assert "other.md" in result
+
+
+class TestSearchModeRouting:
+    """Tests for semantic/keyword/hybrid mode routing."""
+
+    def test_semantic_mode(self, search_engine, mock_store):
+        """mode='semantic' uses only vector search."""
+        results = search_engine.search_results("test", mode="semantic")
+        assert isinstance(results, list)
+        mock_store.vector_search.assert_called()
+
+    def test_keyword_mode(self, tmp_config, mock_embedder, tmp_path):
+        """mode='keyword' uses FTS5 and returns matching results."""
+        # Create a real SQLite DB with FTS5 for keyword search
+        db_path = str(tmp_path / "metadata.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                text, id UNINDEXED, source_path UNINDEXED,
+                source_type UNINDEXED, tokenize='porter unicode61'
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO chunks_fts (text, id, source_path, source_type) "
+            "VALUES (?, ?, ?, ?)",
+            ("FHIR interoperability standard", "chunk_1", "/docs/fhir.md", "md"),
+        )
+        conn.commit()
+
+        mock_store = MagicMock()
+        mock_store._sqlite_conn = conn
+
+        engine = SearchEngine(tmp_config, mock_embedder, mock_store)
+        results = engine.search_results("FHIR", mode="keyword")
+
+        assert len(results) == 1
+        assert results[0].chunk.id == "chunk_1"
+        # keyword mode should NOT call vector_search
+        mock_store.vector_search.assert_not_called()
+        conn.close()
+
+    def test_hybrid_mode(self, tmp_config, mock_embedder, tmp_path):
+        """mode='hybrid' combines vector and keyword results."""
+        db_path = str(tmp_path / "metadata.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                text, id UNINDEXED, source_path UNINDEXED,
+                source_type UNINDEXED, tokenize='porter unicode61'
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO chunks_fts (text, id, source_path, source_type) "
+            "VALUES (?, ?, ?, ?)",
+            ("FHIR interoperability standard", "kw_chunk", "/docs/fhir.md", "md"),
+        )
+        conn.commit()
+
+        mock_store = MagicMock()
+        mock_store._sqlite_conn = conn
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.9, source="/docs/other.pdf"),
+        ]
+
+        engine = SearchEngine(tmp_config, mock_embedder, mock_store)
+        results = engine.search_results("FHIR", mode="hybrid")
+
+        # Should have results from both sources (RRF merged)
+        assert len(results) >= 1
+        conn.close()
+
+    def test_default_is_hybrid(self, search_engine, mock_store):
+        """Default mode is 'hybrid'."""
+        # Verify the default parameter value
+        import inspect
+        sig = inspect.signature(search_engine.search_results)
+        mode_param = sig.parameters["mode"]
+        assert mode_param.default == "hybrid"
+
+    def test_keyword_skips_threshold(self, tmp_config, mock_embedder, tmp_path):
+        """Keyword mode returns results regardless of relevance_threshold."""
+        # Set a very high threshold that would filter out semantic results
+        tmp_config_high = tmp_config.model_copy(
+            update={"relevance_threshold": 0.99}
+        )
+
+        db_path = str(tmp_path / "metadata.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                text, id UNINDEXED, source_path UNINDEXED,
+                source_type UNINDEXED, tokenize='porter unicode61'
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO chunks_fts (text, id, source_path, source_type) "
+            "VALUES (?, ?, ?, ?)",
+            ("testing keyword results", "chunk_1", "/docs/test.md", "md"),
+        )
+        conn.commit()
+
+        mock_store = MagicMock()
+        mock_store._sqlite_conn = conn
+
+        engine = SearchEngine(tmp_config_high, mock_embedder, mock_store)
+        results = engine.search_results("testing", mode="keyword")
+
+        # Keyword mode should still return results despite high threshold
+        assert len(results) >= 1
+        conn.close()
+
+    def test_format_results_shows_mode(self, search_engine, mock_store):
+        """Formatted output shows the correct mode string."""
+        result = search_engine.search("test", mode="hybrid")
+        assert "Mode: hybrid" in result
+
+        result = search_engine.search("test", mode="semantic")
+        assert "Mode: semantic" in result

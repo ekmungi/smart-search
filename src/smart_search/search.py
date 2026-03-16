@@ -1,16 +1,21 @@
 # Search logic with Smart Context formatting for Claude-ready output.
 
 import json
+import logging
 from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 
 from smart_search.config import SmartSearchConfig
-from smart_search.models import SearchResult
+from smart_search.fts import keyword_search
+from smart_search.fusion import reciprocal_rank_fusion
+from smart_search.models import Chunk, SearchResult
 from smart_search.store import ChunkStore
 
 if TYPE_CHECKING:
     from smart_search.embedder import Embedder
+
+logger = logging.getLogger(__name__)
 
 # Maximum characters to display per chunk in results
 _MAX_TEXT_LENGTH = 500
@@ -51,24 +56,25 @@ class SearchEngine:
     ) -> List[SearchResult]:
         """Execute search and return raw SearchResult objects.
 
-        Same filtering logic as search() but returns structured data
-        instead of formatted strings. Used by the HTTP API layer.
+        Dispatches to semantic, keyword, or hybrid search based on mode.
+        Hybrid combines vector + FTS5 via Reciprocal Rank Fusion.
 
         Args:
             query: Natural language search query.
             limit: Maximum number of results.
-            mode: Search mode (semantic/keyword/hybrid). v0.1: all use semantic.
+            mode: Search mode - "semantic", "keyword", or "hybrid".
             doc_types: Optional filter by document type (e.g., ["pdf"]).
             folder: Optional folder prefix to restrict results.
 
         Returns:
             List of SearchResult objects ranked by relevance.
         """
-        query_vec = self._embedder.embed_query(query)
-        results = self._store.vector_search(query_vec, limit=limit)
-
-        # Filter out low-relevance noise (vector search always returns results)
-        results = [r for r in results if r.score >= self._config.relevance_threshold]
+        if mode == "keyword":
+            results = self._keyword_search(query, limit)
+        elif mode == "semantic":
+            results = self._semantic_search(query, limit)
+        else:
+            results = self._hybrid_search(query, limit)
 
         # Apply doc_types filter if specified
         if doc_types:
@@ -88,6 +94,85 @@ class SearchEngine:
             ]
 
         return results
+
+    def _semantic_search(self, query: str, limit: int) -> List[SearchResult]:
+        """Vector-only search with relevance threshold filtering.
+
+        Args:
+            query: Search query string.
+            limit: Maximum results.
+
+        Returns:
+            Filtered and ranked SearchResult list.
+        """
+        query_vec = self._embedder.embed_query(query)
+        results = self._store.vector_search(query_vec, limit=limit)
+        return [r for r in results if r.score >= self._config.relevance_threshold]
+
+    def _keyword_search(self, query: str, limit: int) -> List[SearchResult]:
+        """FTS5 keyword-only search. Skips relevance_threshold.
+
+        FTS5 only returns actual matches so threshold is unnecessary.
+
+        Args:
+            query: Search query string.
+            limit: Maximum results.
+
+        Returns:
+            Ranked SearchResult list from FTS5 matches.
+        """
+        conn = self._store._sqlite_conn
+        if conn is None:
+            return []
+
+        fts_hits = keyword_search(conn, query, limit=limit)
+        results = []
+        for rank, hit in enumerate(fts_hits, start=1):
+            chunk = Chunk(
+                id=hit["id"],
+                source_path=hit["source_path"],
+                source_type=hit["source_type"],
+                content_type="text",
+                text=hit["text"],
+                section_path="[]",
+                embedding=[],
+                indexed_at="",
+                model_name="",
+            )
+            # Normalize BM25 score: FTS5 bm25() returns negative values
+            # (more negative = more relevant), so negate for 0..1 range
+            bm25 = hit.get("bm25_score", 0.0)
+            score = max(0.0, -bm25) if bm25 < 0 else 0.0
+            results.append(SearchResult(rank=rank, score=round(score, 4), chunk=chunk))
+        return results
+
+    def _hybrid_search(self, query: str, limit: int) -> List[SearchResult]:
+        """Combine vector + keyword search via Reciprocal Rank Fusion.
+
+        Over-fetches limit*2 from each source, fuses with RRF, and
+        truncates to the requested limit.
+
+        Args:
+            query: Search query string.
+            limit: Maximum results.
+
+        Returns:
+            Fused and ranked SearchResult list.
+        """
+        overfetch = limit * 2
+        semantic_results = self._semantic_search(query, overfetch)
+        keyword_results = self._keyword_search(query, overfetch)
+
+        if not semantic_results and not keyword_results:
+            return []
+        if not keyword_results:
+            return semantic_results[:limit]
+        if not semantic_results:
+            return keyword_results[:limit]
+
+        return reciprocal_rank_fusion(
+            semantic_results, keyword_results, k=60, limit=limit,
+        )
 
     def search(
         self,
@@ -227,7 +312,7 @@ class SearchEngine:
             "=" * 25,
             f"Query: {query}",
             f"Results: {len(results)} chunks from {len(sources)} documents",
-            f"Mode: semantic",
+            f"Mode: {mode}",
             "",
         ]
 
