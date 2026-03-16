@@ -91,7 +91,7 @@ export default function FolderManager() {
   /** Return the most recent completed/failed task for a given folder path. */
   const completedTaskForFolder = (path: string): IndexingTask | undefined =>
     indexingTasks.find(
-      (t) => (t.state === "done" || t.state === "failed") && t.folder === path,
+      (t) => (t.state === "completed" || t.state === "failed") && t.folder === path,
     );
 
   const handleAdd = async () => {
@@ -191,8 +191,10 @@ export default function FolderManager() {
                 <Loader size={16} className="text-accent-blue animate-spin shrink-0" />
               ) : completedTaskForFolder(folder.path)?.state === "failed" ? (
                 <AlertCircle size={16} className="text-accent-red shrink-0" />
-              ) : (
+              ) : completedTaskForFolder(folder.path)?.state === "completed" ? (
                 <CheckCircle size={16} className="text-accent-green shrink-0" />
+              ) : (
+                <Loader size={16} className="text-text-muted animate-spin shrink-0" />
               )}
               <div className="min-w-0">
                 <p className="text-sm truncate">{folder.path}</p>
@@ -209,9 +211,9 @@ export default function FolderManager() {
                         })()
                       : completedTaskForFolder(folder.path)?.state === "failed"
                         ? `Failed: ${completedTaskForFolder(folder.path)!.error ?? "unknown error"}`
-                        : completedTaskForFolder(folder.path)
+                        : completedTaskForFolder(folder.path)?.state === "completed"
                           ? `Done -- ${completedTaskForFolder(folder.path)!.indexed} indexed, ${completedTaskForFolder(folder.path)!.skipped} skipped`
-                          : "Indexed"}
+                          : "Pending"}
                 </p>
               </div>
             </div>

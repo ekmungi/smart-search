@@ -97,18 +97,18 @@ def create_app(
         # Hash-based skip ensures already-indexed files are not re-processed.
         try:
             from smart_search.data_dir import get_data_dir
-            cfg_path = get_data_dir() / "config.json"
-            if cfg_path.exists():
-                resume_mgr = ConfigManager(str(cfg_path))
-                live_cfg = resume_mgr.load()
-                folders = live_cfg.get("watch_directories", [])
-                if folders:
-                    _logger.info("Startup: resuming indexing for %d watched folders", len(folders))
-                    for folder in folders:
-                        _logger.info("Startup: queuing %s", folder)
-                        get_task_mgr().submit(folder, get_indexer())
+            data_dir = get_data_dir()
+            resume_mgr = ConfigManager(data_dir)
+            live_cfg = resume_mgr.load()
+            folders = live_cfg.get("watch_directories", [])
+            print(f"Startup: {len(folders)} watched folders to resume", flush=True)
+            for folder in folders:
+                print(f"Startup: queuing {folder}", flush=True)
+                get_task_mgr().submit(folder, get_indexer())
         except Exception as e:
-            _logger.error("Startup: auto-resume failed: %s", e, exc_info=True)
+            import traceback
+            print(f"Startup: auto-resume FAILED: {e}", flush=True)
+            traceback.print_exc()
 
         yield
         if _watcher is not None and getattr(_watcher, "is_running", False):
