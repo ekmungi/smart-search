@@ -72,6 +72,9 @@ class ChunkStore:
         self._sqlite_conn = sqlite3.connect(
             self._config.sqlite_path, check_same_thread=False
         )
+        # WAL mode allows concurrent reads during writes so stats/search
+        # queries aren't blocked while indexing threads write to the DB.
+        self._sqlite_conn.execute("PRAGMA journal_mode=WAL")
         self._sqlite_conn.execute(
             """CREATE TABLE IF NOT EXISTS indexed_files (
                 source_path TEXT PRIMARY KEY,
@@ -232,21 +235,19 @@ class ChunkStore:
         Returns:
             IndexStats with document count, chunk count, size, formats.
         """
-        # Chunk count via LanceDB count_rows() -- no data loaded into RAM
-        try:
-            chunk_count = self._table.count_rows()
-        except Exception:
-            chunk_count = 0
-
-        # Document count, formats, and last indexed from SQLite (already tracked)
+        # All stats from SQLite only -- avoids LanceDB contention during
+        # indexing and filesystem scans on OneDrive folders.
         doc_count = 0
+        chunk_count = 0
         formats: list[str] = []
         last_indexed = None
+        total_files = 0
         if self._sqlite_conn:
             row = self._sqlite_conn.execute(
-                "SELECT COUNT(DISTINCT source_path) FROM indexed_files"
+                "SELECT COUNT(*), COALESCE(SUM(chunk_count), 0) FROM indexed_files"
             ).fetchone()
             doc_count = row[0] if row else 0
+            chunk_count = row[1] if row else 0
 
             # Derive formats from file extensions in source_path
             path_rows = self._sqlite_conn.execute(
@@ -268,15 +269,9 @@ class ChunkStore:
         # Calculate index size on disk
         index_size = self._calculate_index_size()
 
-        # Count total supported files across watch directories
-        # Use override if provided, else fall back to startup config
-        dirs = watch_directories if watch_directories is not None else self._config.watch_directories
-        total_files = 0
-        for watch_dir in dirs:
-            watch_path = Path(watch_dir)
-            if watch_path.is_dir():
-                for ext in self._config.supported_extensions:
-                    total_files += len(list(watch_path.rglob(f"*{ext}")))
+        # Total files: use SQLite doc_count (already indexed) as the baseline.
+        # This avoids expensive rglob scans on OneDrive folders during polling.
+        total_files = doc_count
 
         return IndexStats(
             document_count=doc_count,
@@ -532,18 +527,27 @@ class ChunkStore:
     def _calculate_index_size(self) -> int:
         """Calculate total size of LanceDB and SQLite files on disk.
 
+        Best-effort: returns 0 if files are locked during active indexing
+        rather than blocking the stats endpoint.
+
         Returns:
             Total size in bytes.
         """
         total = 0
-        lance_path = Path(self._config.lancedb_path)
-        if lance_path.exists():
-            for f in lance_path.rglob("*"):
-                if f.is_file():
-                    total += f.stat().st_size
+        try:
+            lance_path = Path(self._config.lancedb_path)
+            if lance_path.exists():
+                for f in lance_path.rglob("*"):
+                    try:
+                        if f.is_file():
+                            total += f.stat().st_size
+                    except OSError:
+                        pass
 
-        sqlite_path = Path(self._config.sqlite_path)
-        if sqlite_path.exists():
-            total += sqlite_path.stat().st_size
+            sqlite_path = Path(self._config.sqlite_path)
+            if sqlite_path.exists():
+                total += sqlite_path.stat().st_size
+        except OSError:
+            pass
 
         return total
