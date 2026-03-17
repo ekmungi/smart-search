@@ -171,27 +171,36 @@ def create_app(
         """Get or create the SearchEngine singleton (thread-safe)."""
         nonlocal _engine
         if _engine is None:
+            # Build heavy deps outside lock so model loading doesn't block
+            # other getters (get_store, get_config_mgr) on other threads.
+            from smart_search.embedder import Embedder
+            from smart_search.search import SearchEngine as _SE
+            store = get_store()
+            embedder = Embedder(config)
             with _singleton_lock:
                 if _engine is None:
-                    from smart_search.embedder import Embedder
-                    from smart_search.search import SearchEngine as _SE
-                    _engine = _SE(config, Embedder(config), get_store())
+                    _engine = _SE(config, embedder, store)
         return _engine
 
     def get_indexer():
         """Get or create the DocumentIndexer singleton (thread-safe)."""
         nonlocal _indexer
         if _indexer is None:
+            # Build heavy deps outside lock so model loading doesn't block
+            # other getters (get_store, get_config_mgr) on other threads.
+            from smart_search.embedder import Embedder
+            from smart_search.indexer import DocumentIndexer as _DI
+            from smart_search.markdown_chunker import MarkdownChunker
+            store = get_store()
+            embedder = Embedder(config)
+            chunker = MarkdownChunker(config)
             with _singleton_lock:
                 if _indexer is None:
-                    from smart_search.embedder import Embedder
-                    from smart_search.indexer import DocumentIndexer as _DI
-                    from smart_search.markdown_chunker import MarkdownChunker
                     _indexer = _DI(
                         config=config,
-                        embedder=Embedder(config),
-                        store=get_store(),
-                        markdown_chunker=MarkdownChunker(config),
+                        embedder=embedder,
+                        store=store,
+                        markdown_chunker=chunker,
                     )
         return _indexer
 

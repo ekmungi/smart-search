@@ -41,26 +41,31 @@ export default function Dashboard() {
 
   useEffect(() => {
     const poll = async () => {
+      // Health and stats are independent: stats may fail during indexing
+      // (DB contention) but health should still update the status dot.
       try {
-        const [h, s] = await Promise.all([fetchHealth(), fetchStats()]);
+        const h = await fetchHealth();
         setHealth(h);
-        setStats(s);
         setError(null);
-        // Backend is up -- clear startup and failure tracking
         setStartingUp(false);
         failingSince.current = null;
       } catch {
         setHealth(null);
         setError("Backend not reachable");
-        // Record when failures started
         if (failingSince.current === null) {
           failingSince.current = Date.now();
         }
-        // After 30s of continuous failure, treat as truly offline
         const elapsed = Date.now() - failingSince.current;
         if (elapsed >= 30_000) {
           setStartingUp(false);
         }
+      }
+      // Stats fetch is best-effort; failure does not affect health status.
+      try {
+        const s = await fetchStats();
+        setStats(s);
+      } catch {
+        // Stats may time out during heavy indexing -- keep previous values
       }
     };
 
