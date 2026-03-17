@@ -1,6 +1,6 @@
 [package]
 name = "smart-search-desktop"
-version = "0.8.3"
+version = "0.8.4"
 description = "Smart Search Desktop App -- knowledge infrastructure manager"
 authors = ["Anant Vemuri"]
 license = "MIT"

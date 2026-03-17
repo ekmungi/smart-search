@@ -61,8 +61,9 @@ def _compute_max_concurrent() -> int:
     """Determine max concurrent indexing tasks based on available resources.
 
     Checks CPU cores and available RAM. Each indexing task needs roughly
-    1.5 GB of headroom (ONNX model + tokenizer + buffers). Caps at 2
-    to avoid overwhelming the system.
+    1.5 GB of headroom (ONNX model + tokenizer + buffers). Caps at 1
+    to halve peak memory — sequential folder indexing is acceptable for
+    background work (B53).
 
     Returns:
         Max concurrent tasks (always at least 1).
@@ -78,7 +79,7 @@ def _compute_max_concurrent() -> int:
         # Allow one task per 2 cores
         by_cpu = max(1, cpu_cores // 2)
 
-        limit = min(by_ram, by_cpu, 2)
+        limit = min(by_ram, by_cpu, 1)
         _logger.info(
             "Resource check: %.1f GB available, %d cores -> max %d concurrent tasks",
             available_gb, cpu_cores, limit,
@@ -116,6 +117,7 @@ class IndexingStatus:
     failed: int = 0
     error: Optional[str] = None
     failed_files: List[Dict[str, str]] = field(default_factory=list)
+    processed_files: List[Dict[str, str]] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
 
@@ -257,15 +259,33 @@ class IndexingTaskManager:
         status = self._tasks[task_id]
 
         def _on_progress(_file_path: str, file_result: "IndexFileResult") -> None:
-            """Update status counters in real-time as each file completes."""
+            """Update status counters and per-file log in real-time."""
+            file_name = _file_path.replace("\\", "/").split("/")[-1]
             if file_result.status == "indexed":
                 status.indexed += 1
+                status.processed_files.append({
+                    "name": file_name,
+                    "path": _file_path,
+                    "status": "indexed",
+                    "chunks": str(file_result.chunk_count),
+                })
             elif file_result.status == "skipped":
                 status.skipped += 1
+                status.processed_files.append({
+                    "name": file_name,
+                    "path": _file_path,
+                    "status": "skipped",
+                })
             else:
                 status.failed += 1
                 status.failed_files.append({
                     "path": _file_path,
+                    "error": file_result.error or "unknown",
+                })
+                status.processed_files.append({
+                    "name": file_name,
+                    "path": _file_path,
+                    "status": "failed",
                     "error": file_result.error or "unknown",
                 })
                 _logger.warning(
@@ -274,13 +294,15 @@ class IndexingTaskManager:
                 )
 
         try:
-            # Discover total file count before waiting for semaphore (lightweight)
+            # Discover total file count before waiting for semaphore (lightweight).
+            # Uses shared discover_files() for consistent, deduplicated counts (B48).
+            from smart_search.indexer import discover_files
+
             folder_p = Path(folder)
             config = indexer._config
-            file_count = sum(
-                1 for p in folder_p.glob("**/*")
-                if p.is_file() and p.suffix.lower() in config.supported_extensions
-            )
+            discovered = discover_files(folder_p, config.supported_extensions)
+            file_count = len(discovered)
+            del discovered  # Free the list; only the count is needed here
             status.total = file_count
 
             # Wait for resource slot before starting heavy work

@@ -29,6 +29,7 @@ from smart_search.http_models import (
     RepairResponse,
     FailedFileInfo,
     FileInfo,
+    ProcessedFileInfo,
     FilesResponse,
     FolderInfo,
     FoldersResponse,
@@ -87,7 +88,7 @@ def create_router(
         """Server health check with version and uptime."""
         return HealthResponse(
             status="ok",
-            version="0.8.3",
+            version="0.8.4",
             uptime_seconds=round(get_uptime(), 1),
         )
 
@@ -322,6 +323,13 @@ def create_router(
                 failed_files=[
                     FailedFileInfo(path=f["path"], error=f["error"])
                     for f in getattr(t, "failed_files", [])
+                ],
+                processed_files=[
+                    ProcessedFileInfo(
+                        name=f["name"], path=f["path"], status=f["status"],
+                        chunks=f.get("chunks"), error=f.get("error"),
+                    )
+                    for f in getattr(t, "processed_files", [])
                 ],
             )
             for t in all_tasks

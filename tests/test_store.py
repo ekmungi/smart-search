@@ -1,7 +1,7 @@
 # Tests for ChunkStore: LanceDB vector storage + SQLite metadata.
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, PropertyMock
 
 import numpy as np
 import pytest
@@ -189,6 +189,49 @@ class TestStoreExtensions:
         """Removing from nonexistent folder returns 0."""
         removed = initialized_store.remove_files_for_folder("C:/nonexistent")
         assert removed == 0
+
+
+class TestCachedIndexSize:
+    """Tests for _get_cached_index_size() time-based caching (B54)."""
+
+    def test_stats_includes_lancedb_size(self, initialized_store):
+        """Index size should include LanceDB directory, not just SQLite."""
+        # Insert some data so LanceDB has files on disk
+        chunks = [_make_chunk(idx=i) for i in range(3)]
+        initialized_store.upsert_chunks(chunks)
+        initialized_store.record_file_indexed("/docs/test.pdf", "hash", 3)
+
+        stats = initialized_store.get_stats()
+        # The full index size (LanceDB + SQLite) should be larger
+        # than just the SQLite file
+        sqlite_size = Path(initialized_store._config.sqlite_path).stat().st_size
+        assert stats.index_size_bytes >= sqlite_size
+
+    def test_cache_returns_same_value_within_60s(self, initialized_store):
+        """Two calls within 60s only compute index size once."""
+        with patch.object(initialized_store, "_calculate_index_size", return_value=1000) as mock_calc:
+            size1 = initialized_store._get_cached_index_size()
+            size2 = initialized_store._get_cached_index_size()
+        assert size1 == size2 == 1000
+        mock_calc.assert_called_once()
+
+    def test_cache_refreshes_after_60s(self, initialized_store):
+        """After 60s, the cache is refreshed with a new calculation."""
+        with patch.object(initialized_store, "_calculate_index_size", return_value=1000) as mock_calc:
+            initialized_store._get_cached_index_size()
+            # Simulate 61 seconds passing
+            initialized_store._cached_index_size_at -= 61.0
+            initialized_store._get_cached_index_size()
+        assert mock_calc.call_count == 2
+
+    def test_cache_returns_stale_on_error(self, initialized_store):
+        """On error, returns the stale cached value instead of crashing."""
+        # Prime the cache
+        initialized_store._cached_index_size = 5000
+        initialized_store._cached_index_size_at = 0.0  # Force refresh
+        with patch.object(initialized_store, "_calculate_index_size", side_effect=OSError("locked")):
+            size = initialized_store._get_cached_index_size()
+        assert size == 5000
 
 
 class TestReconcile:

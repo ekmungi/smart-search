@@ -5,11 +5,29 @@ behavior using mock indexers with controllable blocking."""
 
 import threading
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from smart_search.indexing_task import IndexingTaskManager, IndexingStatus
+from smart_search.indexing_task import (
+    IndexingTaskManager,
+    IndexingStatus,
+    _compute_max_concurrent,
+)
+
+
+def test_compute_max_concurrent_returns_one():
+    """Max concurrent tasks should always be 1 (B53 fix)."""
+    result = _compute_max_concurrent()
+    assert result == 1
+
+
+def test_compute_max_concurrent_capped_at_one():
+    """Even with high resources, max concurrent is capped at 1."""
+    with patch("smart_search.indexing_task._get_available_ram_gb", return_value=32.0), \
+         patch("smart_search.indexing_task.os.cpu_count", return_value=16):
+        result = _compute_max_concurrent()
+    assert result == 1
 
 
 def test_submit_task_returns_task_id():

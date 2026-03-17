@@ -459,19 +459,16 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Auto-register MCP on first launch if sidecar is available.
+/// Auto-register MCP on every launch if the sidecar path has changed.
 ///
-/// Checks for a `.mcp_registered` flag file in %LOCALAPPDATA%\smart-search.
-/// If missing and the sidecar exe exists, registers and writes the flag.
+/// Stores the registered sidecar path in a `.mcp_registered` flag file in
+/// %LOCALAPPDATA%\smart-search. Re-registers whenever the current sidecar
+/// path differs from the stored one (e.g., after reinstall to a new location).
 fn auto_register_mcp_if_needed() {
     let flag_dir = dirs_next::data_local_dir()
         .map(|d| d.join("smart-search"))
         .unwrap_or_default();
     let flag_file = flag_dir.join(".mcp_registered");
-
-    if flag_file.exists() {
-        return;
-    }
 
     // Only auto-register if the sidecar exe is present (production install)
     let exe_path = match std::env::current_exe() {
@@ -486,6 +483,15 @@ fn auto_register_mcp_if_needed() {
     }
 
     let path_str = sidecar.to_string_lossy().to_string();
+
+    // Skip registration if the stored path matches the current sidecar path
+    if let Ok(stored) = std::fs::read_to_string(&flag_file) {
+        if stored.trim() == path_str {
+            return;
+        }
+        log::info!("MCP sidecar path changed: {} -> {}", stored.trim(), path_str);
+    }
+
     let result = StdCommand::new("claude")
         .args([
             "mcp", "add", "-s", "user",
@@ -498,8 +504,8 @@ fn auto_register_mcp_if_needed() {
     if let Ok(status) = result {
         if status.success() {
             let _ = std::fs::create_dir_all(&flag_dir);
-            let _ = std::fs::write(&flag_file, "registered");
-            log::info!("MCP auto-registered on first launch");
+            let _ = std::fs::write(&flag_file, &path_str);
+            log::info!("MCP auto-registered with path: {}", path_str);
         }
     }
 }

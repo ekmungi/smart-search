@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from smart_search.config import SmartSearchConfig
-from smart_search.indexer import DocumentIndexer
+from smart_search.indexer import DocumentIndexer, _get_rss_mb, discover_files
 from smart_search.models import Chunk
 from smart_search.store import ChunkStore
 
@@ -83,6 +83,94 @@ def indexer_with_md(tmp_config, mock_md_chunker, mock_embedder):
         store=store,
         markdown_chunker=mock_md_chunker,
     ), mock_md_chunker
+
+
+class TestDiscoverFiles:
+    """Tests for the discover_files() helper."""
+
+    def test_discovers_supported_files(self, tmp_path):
+        """Finds .md and .pdf files in a directory."""
+        (tmp_path / "a.md").write_text("# Note A")
+        (tmp_path / "b.pdf").write_bytes(b"%PDF")
+        (tmp_path / "c.txt").write_text("ignored")
+        extensions = {".md", ".pdf"}
+        result = discover_files(tmp_path, extensions)
+        assert len(result) == 2
+        names = {p.name for p in result}
+        assert names == {"a.md", "b.pdf"}
+
+    def test_deduplicates_symlinks(self, tmp_path):
+        """Symlink to an already-discovered file is not counted twice."""
+        real_file = tmp_path / "real.md"
+        real_file.write_text("# Real")
+        link = tmp_path / "link.md"
+        try:
+            link.symlink_to(real_file)
+        except OSError:
+            pytest.skip("Symlinks not supported on this OS/filesystem")
+        result = discover_files(tmp_path, {".md"})
+        assert len(result) == 1
+
+    def test_recursive_false_skips_subdirs(self, tmp_path):
+        """Non-recursive mode only finds files in the root folder."""
+        (tmp_path / "root.md").write_text("# Root")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "nested.md").write_text("# Nested")
+        result = discover_files(tmp_path, {".md"}, recursive=False)
+        assert len(result) == 1
+        assert result[0].name == "root.md"
+
+    def test_returns_resolved_paths(self, tmp_path):
+        """All returned paths are fully resolved (absolute, no symlinks)."""
+        (tmp_path / "note.md").write_text("# Note")
+        result = discover_files(tmp_path, {".md"})
+        assert all(p.is_absolute() for p in result)
+        assert all(p == p.resolve() for p in result)
+
+    def test_empty_folder_returns_empty(self, tmp_path):
+        """Empty folder returns an empty list."""
+        result = discover_files(tmp_path, {".md", ".pdf"})
+        assert result == []
+
+
+class TestGetRssMb:
+    """Tests for the _get_rss_mb() RSS helper."""
+
+    def test_returns_non_negative_int(self):
+        """RSS should be a non-negative integer."""
+        rss = _get_rss_mb()
+        assert isinstance(rss, int)
+        assert rss >= 0
+
+    def test_returns_reasonable_value(self):
+        """Running Python process should use at least some memory."""
+        rss = _get_rss_mb()
+        # Python process should use at least 10 MB
+        assert rss >= 10
+
+
+class TestGcCollectFrequency:
+    """Tests for gc.collect frequency during folder indexing (B53)."""
+
+    @patch("smart_search.markitdown_parser.convert_to_markdown", return_value="# Converted\nContent")
+    @patch("smart_search.indexer.gc.collect")
+    def test_gc_collect_every_2_files(self, mock_gc, mock_convert, indexer, tmp_path):
+        """gc.collect is called at least 3 times when indexing 6 files."""
+        for i in range(6):
+            (tmp_path / f"doc{i}.pdf").write_bytes(f"%PDF fake {i}".encode())
+        indexer.index_folder(str(tmp_path))
+        assert mock_gc.call_count >= 3
+
+    @patch("smart_search.indexer.gc.collect")
+    def test_gc_collect_on_failure(self, mock_gc, indexer, tmp_path):
+        """gc.collect is called after a failed file."""
+        bad = tmp_path / "bad.pdf"
+        bad.write_bytes(b"%PDF")
+        # Make index_file fail by patching convert_to_markdown to raise
+        with patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("boom")):
+            indexer.index_folder(str(tmp_path))
+        assert mock_gc.call_count >= 1
 
 
 class TestIndexFile:

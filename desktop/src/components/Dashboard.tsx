@@ -191,10 +191,12 @@ export default function Dashboard() {
               </p>
               <p className="text-xs text-text-secondary mt-1">
                 {(() => {
-                  const running = activeTasks.filter((t) => t.state === "running" || t.state === "pending");
-                  const done = running.reduce((sum, t) => sum + t.indexed + t.skipped + t.failed, 0);
-                  const total = running.reduce((sum, t) => sum + t.total, 0);
-                  return total > 0 ? `${done} of ${total} files processed` : `${done} files processed`;
+                  // Include all tasks (running + completed) for accurate totals
+                  const done = activeTasks.reduce((sum, t) => sum + t.indexed + t.skipped + t.failed, 0);
+                  const total = activeTasks.reduce((sum, t) => sum + t.total, 0);
+                  const failed = activeTasks.reduce((sum, t) => sum + t.failed, 0);
+                  const detail = failed > 0 ? `, ${failed} failed` : "";
+                  return total > 0 ? `${done} of ${total} files processed${detail}` : `${done} files processed${detail}`;
                 })()}
               </p>
             </div>

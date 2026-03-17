@@ -1,6 +1,13 @@
 // HTTP client for the smart-search backend REST API.
 
-const BASE_URL = "http://127.0.0.1:9742/api";
+/** Backend port for direct connections (production mode). */
+const BACKEND_PORT = 9742;
+
+/** In dev mode, Vite proxies /api to the backend so all requests are
+ *  same-origin -- avoids WebView2 cross-origin POST failures (B47). */
+const BASE_URL = import.meta.env.DEV
+  ? "/api"
+  : `http://127.0.0.1:${BACKEND_PORT}/api`;
 
 /** Default timeout for API requests in milliseconds. */
 const API_TIMEOUT_MS = 30_000;
@@ -53,6 +60,14 @@ export interface AddFolderResponse {
   status: string;
 }
 
+export interface ProcessedFile {
+  name: string;
+  path: string;
+  status: string; // "indexed" | "skipped" | "failed"
+  chunks?: string;
+  error?: string;
+}
+
 export interface IndexingTask {
   task_id: string;
   folder: string;
@@ -62,6 +77,7 @@ export interface IndexingTask {
   skipped: number;
   failed: number;
   error: string | null;
+  processed_files: ProcessedFile[];
 }
 
 export interface IndexingStatusResponse {

@@ -3,6 +3,7 @@
 import gc
 import hashlib
 import logging
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,127 @@ from smart_search.store import ChunkStore
 
 if TYPE_CHECKING:
     from smart_search.embedder import Embedder
+
+
+def _get_rss_mb() -> int:
+    """Get current process RSS in megabytes using OS-native APIs.
+
+    Returns:
+        RSS in MB, or 0 if unavailable.
+    """
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            # Windows: use kernel32.K32GetProcessMemoryInfo
+            class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            pmc = PROCESS_MEMORY_COUNTERS()
+            pmc.cb = ctypes.sizeof(pmc)
+            handle = ctypes.windll.kernel32.GetCurrentProcess()
+            ctypes.windll.psapi.GetProcessMemoryInfo(
+                handle, ctypes.byref(pmc), pmc.cb,
+            )
+            return int(pmc.WorkingSetSize / (1024 * 1024))
+        else:
+            import resource
+            # On macOS resource returns bytes; on Linux it returns KB
+            usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            if os.uname().sysname == "Darwin":
+                return int(usage / (1024 * 1024))
+            return int(usage / 1024)
+    except Exception:
+        return 0
+
+
+def _convert_with_timeout(
+    convert_fn: Callable[[str], str],
+    file_path: str,
+    timeout: int = 120,
+) -> str:
+    """Run a file conversion function with a timeout.
+
+    Prevents MarkItDown from blocking the indexing thread indefinitely
+    on problematic files (e.g. complex PDFs).
+
+    Args:
+        convert_fn: Callable that takes a file path and returns markdown text.
+        file_path: Path to the file to convert.
+        timeout: Max seconds to wait (default 120).
+
+    Returns:
+        Converted markdown text.
+
+    Raises:
+        TimeoutError: If conversion exceeds the timeout.
+    """
+    result: list[str] = []
+    error: list[Exception] = []
+
+    def _worker() -> None:
+        try:
+            result.append(convert_fn(file_path))
+        except Exception as e:
+            error.append(e)
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+
+    if thread.is_alive():
+        _logger.warning("Conversion timed out after %ds: %s", timeout, file_path)
+        raise TimeoutError(f"File conversion timed out after {timeout}s: {file_path}")
+    if error:
+        raise error[0]
+    return result[0]
+
+
+def discover_files(
+    folder: Path,
+    extensions: set[str],
+    recursive: bool = True,
+) -> list[Path]:
+    """Discover supported files in a folder, resolved and deduplicated.
+
+    Resolves symlinks and normalizes paths so the same physical file
+    is never counted twice (fixes B48: 94 vs 93 discrepancy).
+
+    Args:
+        folder: Root folder to scan.
+        extensions: Set of lowercase extensions including dot (e.g. {".md", ".pdf"}).
+        recursive: If True, scan subdirectories.
+
+    Returns:
+        Sorted list of unique resolved Paths.
+    """
+    pattern = "**/*" if recursive else "*"
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for p in folder.glob(pattern):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in extensions:
+            continue
+        resolved = p.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            result.append(resolved)
+    result.sort()
+    _logger.debug("discover_files: %d unique files in %s", len(result), folder)
+    return result
 
 
 @dataclass(frozen=True)
@@ -126,7 +248,9 @@ class DocumentIndexer:
             else:
                 from smart_search.markitdown_parser import convert_to_markdown
 
-                markdown_text = convert_to_markdown(str(path))
+                markdown_text = _convert_with_timeout(
+                    convert_to_markdown, str(path), timeout=120,
+                )
                 source_type = path.suffix.lower().lstrip(".")
                 chunks = self._markdown_chunker.chunk_text(
                     markdown_text,
@@ -156,6 +280,7 @@ class DocumentIndexer:
                 for c, emb in zip(chunks, embeddings)
             ]
             del chunks
+            del embeddings
 
             # Delete old chunks and insert new ones
             self._store.delete_chunks_for_file(source_path)
@@ -171,10 +296,11 @@ class DocumentIndexer:
             )
 
             _logger.debug(
-                "Indexed %s: %d chunks from %d KB file",
+                "Indexed %s: %d chunks from %d KB file (RSS: %d MB)",
                 file_path,
                 chunk_count,
                 file_size_kb,
+                _get_rss_mb(),
             )
             return IndexFileResult(
                 file_path=str(path),
@@ -216,11 +342,7 @@ class DocumentIndexer:
         failed = 0
 
         # Collect files first so callers can know the total count.
-        pattern = "**/*" if recursive else "*"
-        files = sorted(
-            p for p in folder.glob(pattern)
-            if p.is_file() and p.suffix.lower() in self._config.supported_extensions
-        )
+        files = discover_files(folder, self._config.supported_extensions, recursive)
         _logger.info("Discovered %d supported files in %s", len(files), folder_path)
 
         for path in files:
@@ -230,14 +352,15 @@ class DocumentIndexer:
             results.append(result)
             if result.status == "indexed":
                 indexed += 1
-                # Reclaim MarkItDown/ONNX buffers periodically (every 10 files)
-                # to avoid accumulating memory across the entire batch.
-                if indexed % 10 == 0:
+                # Reclaim MarkItDown/ONNX buffers every 2 files to keep
+                # peak RSS below ~2 GB during large batch indexing (B53).
+                if indexed % 2 == 0:
                     gc.collect()
             elif result.status == "skipped":
                 skipped += 1
             else:
                 failed += 1
+                gc.collect()
             if on_progress is not None:
                 on_progress(str(path), result)
 

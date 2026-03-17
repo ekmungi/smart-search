@@ -1,8 +1,8 @@
 // Icon sidebar for navigation between views.
 
-import { LayoutDashboard, FolderOpen, Settings } from "lucide-react";
+import { LayoutDashboard, FolderOpen, ScrollText, Settings } from "lucide-react";
 
-type View = "dashboard" | "folders" | "settings";
+type View = "dashboard" | "folders" | "log" | "settings";
 
 interface Props {
   activeView: View;
@@ -12,6 +12,7 @@ interface Props {
 const items: { id: View; icon: typeof LayoutDashboard; label: string }[] = [
   { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { id: "folders", icon: FolderOpen, label: "Folders" },
+  { id: "log", icon: ScrollText, label: "Indexing Log" },
   { id: "settings", icon: Settings, label: "Settings" },
 ];
 

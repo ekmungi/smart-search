@@ -172,6 +172,16 @@ class FailedFileInfo(BaseModel):
     error: str
 
 
+class ProcessedFileInfo(BaseModel):
+    """Per-file status for the indexing log. Session-only (not persisted)."""
+
+    name: str
+    path: str
+    status: str  # "indexed", "skipped", "failed"
+    chunks: Optional[str] = None
+    error: Optional[str] = None
+
+
 class IndexingTaskStatus(BaseModel):
     """Status of a single indexing task."""
 
@@ -184,6 +194,7 @@ class IndexingTaskStatus(BaseModel):
     failed: int = 0
     error: Optional[str] = None
     failed_files: list[FailedFileInfo] = []
+    processed_files: list[ProcessedFileInfo] = []
 
 
 class IndexingStatusResponse(BaseModel):

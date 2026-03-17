@@ -7,9 +7,10 @@ import { Minus, X } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./components/Dashboard";
 import FolderManager from "./components/FolderManager";
+import IndexingLog from "./components/IndexingLog";
 import Settings from "./components/Settings";
 
-type View = "dashboard" | "folders" | "settings";
+type View = "dashboard" | "folders" | "log" | "settings";
 
 function App() {
   const [activeView, setActiveView] = useState<View>("dashboard");
@@ -61,6 +62,7 @@ function App() {
         <main className="flex-1 overflow-auto p-6">
           {activeView === "dashboard" && <Dashboard />}
           {activeView === "folders" && <FolderManager />}
+          {activeView === "log" && <IndexingLog />}
           {activeView === "settings" && <Settings />}
         </main>
       </div>

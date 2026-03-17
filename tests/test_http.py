@@ -146,7 +146,7 @@ class TestHealth:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["version"] == "0.8.3"
+        assert data["version"] == "0.8.4"
 
     def test_includes_uptime(self, client):
         resp = client.get("/api/health")

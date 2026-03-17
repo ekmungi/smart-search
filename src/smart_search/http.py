@@ -4,6 +4,8 @@
 Used by the Tauri desktop shell and any HTTP client. Shares the same
 data directory and components as the MCP server."""
 
+import logging
+import os
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -51,6 +53,15 @@ def create_app(
     Returns:
         Configured FastAPI application.
     """
+    # Configure logging for the smart_search package. Reads
+    # SMART_SEARCH_LOG_LEVEL env var (default: INFO). Set to DEBUG
+    # to see per-file RSS diagnostics during indexing.
+    log_level = os.environ.get("SMART_SEARCH_LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     if config is None:
         # Merge persisted config.json values into runtime config
         base = get_config()
@@ -145,7 +156,7 @@ def create_app(
 
     app = FastAPI(
         title="Smart Search API",
-        version="0.8.3",
+        version="0.8.4",
         lifespan=lifespan,
     )
 

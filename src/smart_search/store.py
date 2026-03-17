@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
@@ -32,6 +33,8 @@ class ChunkStore:
         self._db = None
         self._table = None
         self._sqlite_conn = None
+        self._cached_index_size: int = 0
+        self._cached_index_size_at: float = 0.0
 
     def initialize(self) -> None:
         """Create LanceDB database/table and SQLite schema.
@@ -286,10 +289,9 @@ class ChunkStore:
             if ts_row and ts_row[0]:
                 last_indexed = ts_row[0]
 
-        # Index size: use SQLite file size only (fast). LanceDB dir walk
-        # can block during active indexing due to file locks.
-        sqlite_path = Path(self._config.sqlite_path)
-        index_size = sqlite_path.stat().st_size if sqlite_path.exists() else 0
+        # Index size: LanceDB + SQLite with 60s cache to avoid blocking
+        # during active indexing (B54). Falls back to stale cache on error.
+        index_size = self._get_cached_index_size()
 
         # Total files: use SQLite doc_count (already indexed) as the baseline.
         # This avoids expensive rglob scans on OneDrive folders during polling.
@@ -585,6 +587,27 @@ class ChunkStore:
             indexed_at=record["indexed_at"],
             model_name=record["model_name"],
         )
+
+    def _get_cached_index_size(self) -> int:
+        """Return total index size with a 60-second time-based cache.
+
+        Avoids blocking the stats endpoint during active writes while
+        still reporting the full LanceDB + SQLite size (B54).
+
+        Returns:
+            Total size in bytes (may be up to 60s stale).
+        """
+        now = time.monotonic()
+        if now - self._cached_index_size_at < 60.0:
+            return self._cached_index_size
+        try:
+            size = self._calculate_index_size()
+            self._cached_index_size = size
+            self._cached_index_size_at = now
+            return size
+        except Exception:
+            # Return stale cache on any error (file locks, etc.)
+            return self._cached_index_size
 
     def _calculate_index_size(self) -> int:
         """Calculate total size of LanceDB and SQLite files on disk.

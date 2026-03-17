@@ -204,9 +204,10 @@ export default function FolderManager() {
                       ? (() => {
                           const t = taskForFolder(folder.path)!;
                           const done = t.indexed + t.skipped + t.failed;
+                          const detail = t.failed > 0 ? `, ${t.failed} failed` : "";
                           return t.total > 0
-                            ? `Indexing... ${done} of ${t.total} files`
-                            : `Indexing... ${done} files`;
+                            ? `Indexing... ${done} of ${t.total}${detail}`
+                            : `Indexing... ${done} files${detail}`;
                         })()
                       : completedTaskForFolder(folder.path)?.state === "failed"
                         ? `Failed: ${completedTaskForFolder(folder.path)!.error ?? "unknown error"}`
