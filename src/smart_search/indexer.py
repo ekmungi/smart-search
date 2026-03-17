@@ -120,7 +120,8 @@ class DocumentIndexer:
         try:
             # Route by extension: .md files are chunked directly;
             # all other types are converted to Markdown via MarkItDown first.
-            if path.suffix.lower() == ".md":
+            is_binary = path.suffix.lower() != ".md"
+            if not is_binary:
                 chunks = self._markdown_chunker.chunk_file(str(path))
             else:
                 from smart_search.markitdown_parser import convert_to_markdown
@@ -135,8 +136,11 @@ class DocumentIndexer:
                 del markdown_text
             if not chunks:
                 # Record in SQLite even with 0 chunks so the file is not
-                # retried on every restart (e.g. scanned PDFs without OCR).
-                self._store.record_file_indexed(source_path, file_hash, 0)
+                # retried on every restart. Binary files (PDF, DOCX, etc.)
+                # with no text are tagged needs_ocr for future retry.
+                self._store.record_file_indexed(
+                    source_path, file_hash, 0, needs_ocr=is_binary,
+                )
                 return IndexFileResult(
                     file_path=str(path), status="indexed", chunk_count=0,
                 )
