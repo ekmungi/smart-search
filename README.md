@@ -2,7 +2,7 @@
 
 Local-first semantic search for your documents. Index Markdown, PDF, DOCX, PPTX, XLSX, and HTML files into a personal knowledge base searchable from Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on CPU -- no cloud, no GPU, no subscriptions.
 
-**Version:** 0.8.2 | **License:** MIT
+**Version:** 0.8.3 | **License:** MIT
 
 ---
 
