@@ -425,4 +425,4 @@ pytest --cov=smart_search --cov-report=term-missing
 
 ## License
 
-MIT -- no paywalls, no subscriptions, no telemetry.
+MIT
