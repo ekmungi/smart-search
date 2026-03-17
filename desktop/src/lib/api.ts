@@ -3,7 +3,7 @@
 const BASE_URL = "http://127.0.0.1:9742/api";
 
 /** Default timeout for API requests in milliseconds. */
-const API_TIMEOUT_MS = 5000;
+const API_TIMEOUT_MS = 30_000;
 
 /** Fetch with timeout using AbortController. Throws on timeout. */
 async function fetchWithTimeout(
@@ -142,7 +142,7 @@ export async function fetchFolders(): Promise<FoldersResponse> {
 
 /** Add a folder to the watch list and trigger indexing. */
 export async function addFolder(path: string): Promise<AddFolderResponse> {
-  const res = await fetchWithTimeout(`${BASE_URL}/folders`, {
+  const res = await fetch(`${BASE_URL}/folders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
@@ -160,7 +160,7 @@ export async function removeFolder(
   removeData = false,
 ): Promise<void> {
   const params = new URLSearchParams({ path, remove_data: String(removeData) });
-  const res = await fetchWithTimeout(`${BASE_URL}/folders?${params}`, {
+  const res = await fetch(`${BASE_URL}/folders?${params}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -168,7 +168,7 @@ export async function removeFolder(
 
 /** Trigger re-indexing of a folder. */
 export async function reindexFolder(path: string): Promise<void> {
-  const res = await fetchWithTimeout(`${BASE_URL}/ingest`, {
+  const res = await fetch(`${BASE_URL}/ingest`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, force: true }),
@@ -207,7 +207,7 @@ export async function fetchModelStatus(): Promise<ModelStatusResponse> {
 export async function updateConfig(
   config: Record<string, unknown>,
 ): Promise<ConfigUpdateResponse> {
-  const res = await fetchWithTimeout(`${BASE_URL}/config`, {
+  const res = await fetch(`${BASE_URL}/config`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ config }),
@@ -249,8 +249,7 @@ export interface RepairResponse {
 
 /** Run all index maintenance operations: orphan removal, FTS5 rebuild, compaction. */
 export async function repairIndex(): Promise<RepairResponse> {
-  // Repair can take 30s+ on large indexes; use extended timeout.
-  const res = await fetchWithTimeout(`${BASE_URL}/repair`, { method: "POST" }, 60_000);
+  const res = await fetch(`${BASE_URL}/repair`, { method: "POST" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

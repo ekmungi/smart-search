@@ -71,9 +71,10 @@ def create_app(
 
     # Mutable dict avoids nonlocal for start_time assignment in lifespan
     state = {"start_time": 0.0}
-    # Lock protects lazy singleton creation from races between the
+    # RLock protects lazy singleton creation from races between the
     # background startup thread and incoming HTTP request handlers.
-    _singleton_lock = threading.Lock()
+    # Must be reentrant because get_indexer/get_engine call get_store internally.
+    _singleton_lock = threading.RLock()
     _engine = search_engine
     _store = store
     _indexer = indexer
