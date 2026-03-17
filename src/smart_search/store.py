@@ -75,6 +75,13 @@ class ChunkStore:
         # WAL mode allows concurrent reads during writes so stats/search
         # queries aren't blocked while indexing threads write to the DB.
         self._sqlite_conn.execute("PRAGMA journal_mode=WAL")
+        # Separate read-only connection for stats queries. WAL only enables
+        # concurrent reads on *different* connections; the write connection
+        # serializes all operations including reads.
+        self._sqlite_read_conn = sqlite3.connect(
+            self._config.sqlite_path, check_same_thread=False
+        )
+        self._sqlite_read_conn.execute("PRAGMA journal_mode=WAL")
         self._sqlite_conn.execute(
             """CREATE TABLE IF NOT EXISTS indexed_files (
                 source_path TEXT PRIMARY KEY,
@@ -102,6 +109,9 @@ class ChunkStore:
         Call before deleting the backing directory (e.g. ephemeral
         indexes on Windows) to release file locks.
         """
+        if self._sqlite_read_conn:
+            self._sqlite_read_conn.close()
+            self._sqlite_read_conn = None
         if self._sqlite_conn:
             self._sqlite_conn.close()
             self._sqlite_conn = None
@@ -235,22 +245,24 @@ class ChunkStore:
         Returns:
             IndexStats with document count, chunk count, size, formats.
         """
-        # All stats from SQLite only -- avoids LanceDB contention during
-        # indexing and filesystem scans on OneDrive folders.
+        # All stats from the read-only SQLite connection -- avoids blocking
+        # on the write connection used by indexing threads. WAL mode enables
+        # concurrent reads on separate connections.
         doc_count = 0
         chunk_count = 0
         formats: list[str] = []
         last_indexed = None
         total_files = 0
-        if self._sqlite_conn:
-            row = self._sqlite_conn.execute(
+        conn = self._sqlite_read_conn
+        if conn:
+            row = conn.execute(
                 "SELECT COUNT(*), COALESCE(SUM(chunk_count), 0) FROM indexed_files"
             ).fetchone()
             doc_count = row[0] if row else 0
             chunk_count = row[1] if row else 0
 
             # Derive formats from file extensions in source_path
-            path_rows = self._sqlite_conn.execute(
+            path_rows = conn.execute(
                 "SELECT DISTINCT source_path FROM indexed_files"
             ).fetchall()
             ext_set = set()
@@ -260,14 +272,16 @@ class ChunkStore:
                     ext_set.add(ext)
             formats = sorted(ext_set)
 
-            ts_row = self._sqlite_conn.execute(
+            ts_row = conn.execute(
                 "SELECT MAX(indexed_at) FROM indexed_files"
             ).fetchone()
             if ts_row and ts_row[0]:
                 last_indexed = ts_row[0]
 
-        # Calculate index size on disk
-        index_size = self._calculate_index_size()
+        # Index size: use SQLite file size only (fast). LanceDB dir walk
+        # can block during active indexing due to file locks.
+        sqlite_path = Path(self._config.sqlite_path)
+        index_size = sqlite_path.stat().st_size if sqlite_path.exists() else 0
 
         # Total files: use SQLite doc_count (already indexed) as the baseline.
         # This avoids expensive rglob scans on OneDrive folders during polling.
