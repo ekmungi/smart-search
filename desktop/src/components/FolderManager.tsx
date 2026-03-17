@@ -211,7 +211,12 @@ export default function FolderManager() {
                       : completedTaskForFolder(folder.path)?.state === "failed"
                         ? `Failed: ${completedTaskForFolder(folder.path)!.error ?? "unknown error"}`
                         : completedTaskForFolder(folder.path)?.state === "completed"
-                          ? `Indexed -- ${completedTaskForFolder(folder.path)!.indexed + completedTaskForFolder(folder.path)!.skipped} files`
+                          ? (() => {
+                              const ct = completedTaskForFolder(folder.path)!;
+                              const parts = [`${ct.indexed + ct.skipped} indexed`];
+                              if (ct.failed > 0) parts.push(`${ct.failed} failed`);
+                              return parts.join(", ");
+                            })()
                           : "Pending"}
                 </p>
               </div>
