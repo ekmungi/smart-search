@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { CheckCircle, XCircle, ScrollText } from "lucide-react";
-import { fetchIndexingStatus, type ProcessedFile, type IndexingTask } from "../lib/api";
+import { fetchIndexingStatus, type ProcessedFile } from "../lib/api";
 
 export default function IndexingLog() {
   const [files, setFiles] = useState<ProcessedFile[]>([]);
