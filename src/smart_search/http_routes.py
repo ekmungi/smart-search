@@ -27,6 +27,7 @@ from smart_search.http_models import (
     EphemeralIndexResponse,
     EphemeralListResponse,
     RepairResponse,
+    FailedFileInfo,
     FileInfo,
     FilesResponse,
     FolderInfo,
@@ -318,6 +319,10 @@ def create_router(
                 skipped=t.skipped,
                 failed=t.failed,
                 error=t.error,
+                failed_files=[
+                    FailedFileInfo(path=f["path"], error=f["error"])
+                    for f in getattr(t, "failed_files", [])
+                ],
             )
             for t in all_tasks
         ]

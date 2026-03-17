@@ -165,6 +165,13 @@ class ModelsResponse(BaseModel):
     models: List[ModelInfoResponse]
 
 
+class FailedFileInfo(BaseModel):
+    """Info about a file that failed to index."""
+
+    path: str
+    error: str
+
+
 class IndexingTaskStatus(BaseModel):
     """Status of a single indexing task."""
 
@@ -176,6 +183,7 @@ class IndexingTaskStatus(BaseModel):
     skipped: int = 0
     failed: int = 0
     error: Optional[str] = None
+    failed_files: list[FailedFileInfo] = []
 
 
 class IndexingStatusResponse(BaseModel):

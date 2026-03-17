@@ -115,6 +115,7 @@ class IndexingStatus:
     skipped: int = 0
     failed: int = 0
     error: Optional[str] = None
+    failed_files: List[Dict[str, str]] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
 
@@ -263,6 +264,14 @@ class IndexingTaskManager:
                 status.skipped += 1
             else:
                 status.failed += 1
+                status.failed_files.append({
+                    "path": _file_path,
+                    "error": file_result.error or "unknown",
+                })
+                _logger.warning(
+                    "Task %s: FAILED %s -- %s",
+                    task_id, _file_path, file_result.error,
+                )
 
         try:
             # Discover total file count before waiting for semaphore (lightweight)
