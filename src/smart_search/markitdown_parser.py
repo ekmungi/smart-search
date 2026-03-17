@@ -24,10 +24,8 @@ def convert_to_markdown(file_path: str) -> str:
         file_path: Path to the file to convert.
 
     Returns:
-        Markdown text content, or empty string if file exceeds size limit.
-
-    Raises:
-        ValueError: If conversion fails or produces empty output.
+        Markdown text content, or empty string if conversion produces no text
+        (e.g. scanned PDFs without OCR text layer) or file exceeds size limit.
     """
     file_size = Path(file_path).stat().st_size
     if file_size > MAX_FILE_SIZE_BYTES:
@@ -47,5 +45,8 @@ def convert_to_markdown(file_path: str) -> str:
     text_content = result.text_content
     del result
     if not text_content or not text_content.strip():
-        raise ValueError(f"MarkItDown produced empty output for {file_path}")
+        _logger.warning(
+            "No extractable text in %s (may need OCR)", file_path,
+        )
+        return ""
     return text_content

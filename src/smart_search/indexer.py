@@ -134,6 +134,9 @@ class DocumentIndexer:
                 )
                 del markdown_text
             if not chunks:
+                # Record in SQLite even with 0 chunks so the file is not
+                # retried on every restart (e.g. scanned PDFs without OCR).
+                self._store.record_file_indexed(source_path, file_hash, 0)
                 return IndexFileResult(
                     file_path=str(path), status="indexed", chunk_count=0,
                 )
