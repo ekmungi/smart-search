@@ -1,32 +1,20 @@
 # Smart Search
 
-Local-first semantic search for your documents. Index Markdown, PDF, DOCX, PPTX, XLSX, and HTML files into a personal knowledge base searchable from Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on CPU -- no cloud, no GPU, no subscriptions.
+A personal, local-first knowledge management system. Index your Markdown notes, PDFs, DOCX, PPTX, XLSX, and HTML files into a searchable knowledge base that connects with everything running locally -- Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on your machine: no cloud, no GPU, no subscriptions.
 
-**Version:** 0.8.3 | **License:** MIT
+**Version:** 0.8.4 | **License:** MIT
 
 ---
 
 ## Why Smart Search?
 
-If you use Obsidian with Smart Connections, you've probably hit these walls:
+Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. Smart Search brings it together:
 
-- **Obsidian freezes** on large vaults. Smart Connections runs embedding in-process (Transformers.js/WASM), blocking the UI thread. A 5,000-note vault can hang Obsidian for minutes during indexing.
-- **$30/month paywall** for features that should be free. Block-level search, PDF support, and ChatGPT integration are locked behind Smart Connections Pro.
-- **Markdown-only**. Research PDFs, meeting DOCX files, slide decks -- none of these are searchable unless you manually convert them.
-- **Cosine-only search**. No keyword fallback, no hybrid ranking. Semantic search alone misses exact-match queries ("find all mentions of HIPAA 164.312").
-- **Single developer risk**. One maintainer, restrictive license, no API.
-
-Smart Search fixes all of this:
-
-| Pain Point | Smart Connections | Smart Search |
-|------------|-------------------|--------------|
-| Obsidian freezing | In-process JS embedding | Out-of-process Python server (zero freezes) |
-| PDF/DOCX/PPTX support | Pro only ($30/mo) | Free, all formats |
-| Search quality | Cosine-only, bge-micro-v2 (384d) | Hybrid search (semantic + keyword + RRF), snowflake-arctic-embed-m-v2.0 (256d MRL) |
-| API access | None | MCP + REST + CLI |
-| Embedding model | Fixed, low quality | Swappable, curated registry with quality scores |
-| License | Restrictive | MIT |
-| Price | $30/month for Pro | Free forever |
+- **Search everything locally.** Six document formats indexed into one knowledge base with hybrid search (semantic + keyword + reranking). Find what you need whether you remember the exact phrase or just the concept.
+- **Connect with your tools.** MCP server for Claude Code, REST API for scripts and automation, CLI for power users, desktop app for visual management. One index, many interfaces.
+- **Stay responsive.** All heavy lifting runs in an out-of-process Python server. Your editor, your Obsidian vault, your desktop -- nothing freezes during indexing.
+- **Own your data.** Everything stays on disk -- LanceDB vectors and SQLite metadata in a local directory. No cloud sync, no telemetry, no accounts. MIT licensed.
+- **Keep it lightweight.** CPU-only ONNX embeddings with lazy loading. The model loads when you search, unloads after 60 seconds idle. Steady-state RAM under 200MB.
 
 ---
 
@@ -413,7 +401,7 @@ pytest -m ""
 pytest --cov=smart_search --cov-report=term-missing
 ```
 
-350+ tests covering all modules. Slow tests (marked `@pytest.mark.slow`) require ML models to be downloaded.
+370+ tests covering all modules. Slow tests (marked `@pytest.mark.slow`) require ML models to be downloaded.
 
 ---
 
@@ -437,4 +425,4 @@ pytest --cov=smart_search --cov-report=term-missing
 
 ## License
 
-MIT -- all features free forever. No paywalls, no subscriptions, no telemetry.
+MIT -- no paywalls, no subscriptions, no telemetry.
