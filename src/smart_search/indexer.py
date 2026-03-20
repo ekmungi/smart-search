@@ -60,7 +60,8 @@ def _get_rss_mb() -> int:
             if os.uname().sysname == "Darwin":
                 return int(usage / (1024 * 1024))
             return int(usage / 1024)
-    except Exception:
+    except (OSError, AttributeError, ImportError):
+        _logger.debug("Failed to get process RSS", exc_info=True)
         return 0
 
 

@@ -1,16 +1,49 @@
 // HTTP client for the smart-search backend REST API.
 
-/** Backend port for direct connections (production mode). */
-const BACKEND_PORT = 9742;
+import { BACKEND_PORT, API_TIMEOUT_MS } from "./constants";
+import type {
+  HealthResponse,
+  StatsResponse,
+  FoldersResponse,
+  AddFolderResponse,
+  IndexingStatusResponse,
+  ConfigResponse,
+  ConfigUpdateResponse,
+  ModelStatusResponse,
+  ModelLoadedResponse,
+  ModelsResponse,
+  SearchResponse,
+  RepairResponse,
+  SmartSearchConfig,
+} from "./api-types";
+
+// Re-export all types so existing imports like `import { type FolderInfo } from "../lib/api"` keep working.
+export type {
+  HealthResponse,
+  StatsResponse,
+  FolderInfo,
+  FoldersResponse,
+  AddFolderResponse,
+  ProcessedFile,
+  IndexingTask,
+  IndexingStatusResponse,
+  ConfigResponse,
+  ConfigUpdateResponse,
+  ModelStatusResponse,
+  ModelLoadedResponse,
+  ModelInfo,
+  ModelsResponse,
+  SearchHit,
+  SearchResponse,
+  RepairResponse,
+  SmartSearchConfig,
+} from "./api-types";
 
 /** In dev mode, Vite proxies /api to the backend so all requests are
  *  same-origin -- avoids WebView2 cross-origin POST failures (B47). */
 const BASE_URL = import.meta.env.DEV
   ? "/api"
   : `http://127.0.0.1:${BACKEND_PORT}/api`;
-
-/** Default timeout for API requests in milliseconds. */
-const API_TIMEOUT_MS = 30_000;
 
 /** Fetch with timeout using AbortController. Throws on timeout. */
 async function fetchWithTimeout(
@@ -27,133 +60,31 @@ async function fetchWithTimeout(
   }
 }
 
-export interface HealthResponse {
-  status: string;
-  version: string;
-  uptime_seconds: number;
-}
-
-export interface StatsResponse {
-  document_count: number;
-  chunk_count: number;
-  index_size_bytes: number;
-  index_size_mb: number;
-  total_files: number;
-  last_indexed_at: string | null;
-  formats_indexed: string[];
-}
-
-export interface FolderInfo {
-  path: string;
-  exists: boolean;
-  status: string;
-}
-
-export interface FoldersResponse {
-  total: number;
-  folders: FolderInfo[];
-}
-
-export interface AddFolderResponse {
-  path: string;
-  task_id: string;
-  status: string;
-}
-
-export interface ProcessedFile {
-  name: string;
-  path: string;
-  status: string; // "indexed" | "skipped" | "failed"
-  chunks?: string;
-  error?: string;
-}
-
-export interface IndexingTask {
-  task_id: string;
-  folder: string;
-  state: string;
-  total: number;
-  indexed: number;
-  skipped: number;
-  failed: number;
-  error: string | null;
-  processed_files: ProcessedFile[];
-}
-
-export interface IndexingStatusResponse {
-  active: number;
-  tasks: IndexingTask[];
-}
-
-export interface ConfigResponse {
-  config: Record<string, unknown>;
-}
-
-export interface ModelStatusResponse {
-  cached: boolean;
-  model_name: string;
-}
-
-export interface ModelLoadedResponse {
-  loaded: boolean;
-}
-
-export interface ModelInfo {
-  model_id: string;
-  display_name: string;
-  size_mb: number;
-  mteb_retrieval: number;
-  native_dims: number;
-  mrl_dims: number[];
-  default_dims: number;
-  modalities: string[];
-  description: string;
-}
-
-export interface ModelsResponse {
-  models: ModelInfo[];
-}
-
-export interface ConfigUpdateResponse {
-  config: Record<string, unknown>;
-  requires_reindex: boolean;
-}
-
-export interface SearchHit {
-  rank: number;
-  score: number;
-  source_path: string;
-  source_type: string;
-  text: string;
-  page_number: number | null;
-}
-
-export interface SearchResponse {
-  query: string;
-  mode: string;
-  total: number;
-  results: SearchHit[];
+/** Parse a response as JSON, throwing a descriptive error on failure. */
+async function handleResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(body || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
 }
 
 /** Fetch server health status. */
 export async function fetchHealth(): Promise<HealthResponse> {
   const res = await fetchWithTimeout(`${BASE_URL}/health`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<HealthResponse>(res);
 }
 
 /** Fetch index statistics. */
 export async function fetchStats(): Promise<StatsResponse> {
   const res = await fetchWithTimeout(`${BASE_URL}/stats`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<StatsResponse>(res);
 }
 
 /** Fetch watched folder list. */
 export async function fetchFolders(): Promise<FoldersResponse> {
   const res = await fetchWithTimeout(`${BASE_URL}/folders`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<FoldersResponse>(res);
 }
 
 /** Add a folder to the watch list and trigger indexing. */
@@ -163,11 +94,7 @@ export async function addFolder(path: string): Promise<AddFolderResponse> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
-  }
-  return res.json();
+  return handleResponse<AddFolderResponse>(res);
 }
 
 /** Remove a folder from the watch list. */
@@ -179,7 +106,10 @@ export async function removeFolder(
   const res = await fetch(`${BASE_URL}/folders?${params}`, {
     method: "DELETE",
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(body || `HTTP ${res.status}`);
+  }
 }
 
 /** Trigger re-indexing of a folder. */
@@ -189,14 +119,16 @@ export async function reindexFolder(path: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, force: true }),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(body || `HTTP ${res.status}`);
+  }
 }
 
 /** Fetch current configuration. */
 export async function fetchConfig(): Promise<ConfigResponse> {
   const res = await fetchWithTimeout(`${BASE_URL}/config`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<ConfigResponse>(res);
 }
 
 /** Search indexed documents with optional folder filter. */
@@ -208,64 +140,47 @@ export async function searchDocuments(
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   if (folder) params.set("folder", folder);
   const res = await fetchWithTimeout(`${BASE_URL}/search?${params}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<SearchResponse>(res);
 }
 
 /** Check if the embedding model is cached locally. */
 export async function fetchModelStatus(): Promise<ModelStatusResponse> {
   const res = await fetchWithTimeout(`${BASE_URL}/model/status`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<ModelStatusResponse>(res);
 }
 
 /** Update configuration keys. Returns whether re-indexing is needed. */
 export async function updateConfig(
-  config: Record<string, unknown>,
+  config: Partial<SmartSearchConfig>,
 ): Promise<ConfigUpdateResponse> {
   const res = await fetch(`${BASE_URL}/config`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ config }),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<ConfigUpdateResponse>(res);
 }
 
 /** Check if the embedding model is currently loaded in memory. */
 export async function fetchModelLoaded(): Promise<ModelLoadedResponse> {
   const res = await fetchWithTimeout(`${BASE_URL}/model/loaded`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<ModelLoadedResponse>(res);
 }
 
 /** Fetch the list of available embedding models. */
 export async function fetchModels(): Promise<ModelsResponse> {
   const res = await fetchWithTimeout(`${BASE_URL}/models`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<ModelsResponse>(res);
 }
 
 /** Fetch the current background indexing task status. */
 export async function fetchIndexingStatus(): Promise<IndexingStatusResponse> {
   const res = await fetchWithTimeout(`${BASE_URL}/indexing/status`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-export interface RepairResponse {
-  orphans_removed: number;
-  orphan_files: string[];
-  fts_rebuilt: boolean;
-  fts_rows: number;
-  compacted: boolean;
-  compatible: boolean;
-  mismatches: Record<string, unknown>;
+  return handleResponse<IndexingStatusResponse>(res);
 }
 
 /** Run all index maintenance operations: orphan removal, FTS5 rebuild, compaction. */
 export async function repairIndex(): Promise<RepairResponse> {
   const res = await fetch(`${BASE_URL}/repair`, { method: "POST" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return handleResponse<RepairResponse>(res);
 }

@@ -11,6 +11,12 @@ import {
   type StatsResponse,
   type IndexingTask,
 } from "../lib/api";
+import {
+  POLL_STATS_MS,
+  POLL_INDEXING_ACTIVE_MS,
+  POLL_INDEXING_IDLE_MS,
+  POLL_MODEL_MS,
+} from "../lib/constants";
 import StatsCard from "./StatsCard";
 
 /** Format seconds into human-readable duration (e.g. "2h 15m", "3d 4h"). */
@@ -70,7 +76,7 @@ export default function Dashboard() {
     };
 
     poll();
-    const interval = setInterval(poll, 5000);
+    const interval = setInterval(poll, POLL_STATS_MS);
     return () => clearInterval(interval);
   }, []);
 
@@ -87,7 +93,7 @@ export default function Dashboard() {
         if (!cancelled) {
           setActiveTasks(status.tasks);
           // When no active tasks, switch to slow polling (10s) to reduce load
-          const nextDelay = status.active > 0 ? 2000 : 10000;
+          const nextDelay = status.active > 0 ? POLL_INDEXING_ACTIVE_MS : POLL_INDEXING_IDLE_MS;
           if (intervalId !== null) clearInterval(intervalId);
           if (!cancelled) {
             intervalId = setInterval(checkIndexing, nextDelay);
@@ -99,7 +105,7 @@ export default function Dashboard() {
     };
 
     checkIndexing();
-    intervalId = setInterval(checkIndexing, 2000);
+    intervalId = setInterval(checkIndexing, POLL_INDEXING_ACTIVE_MS);
 
     return () => {
       cancelled = true;
@@ -128,7 +134,7 @@ export default function Dashboard() {
 
     // Poll every 3s while model is downloading, stop once cached
     if (modelCached !== true) {
-      const interval = setInterval(checkModel, 3000);
+      const interval = setInterval(checkModel, POLL_MODEL_MS);
       return () => {
         cancelled = true;
         clearInterval(interval);

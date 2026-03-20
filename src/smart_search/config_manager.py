@@ -104,7 +104,7 @@ class ConfigManager:
             if self._config_path.exists():
                 self._config_path.unlink()
             Path(tmp_path).rename(self._config_path)
-        except Exception:
+        except OSError:
             Path(tmp_path).unlink(missing_ok=True)
             raise
 

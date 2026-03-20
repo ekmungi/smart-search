@@ -9,6 +9,7 @@ import Dashboard from "./components/Dashboard";
 import FolderManager from "./components/FolderManager";
 import IndexingLog from "./components/IndexingLog";
 import Settings from "./components/Settings";
+import { STORAGE_KEY_CLOSE_TO_TRAY } from "./lib/constants";
 
 type View = "dashboard" | "folders" | "log" | "settings";
 
@@ -19,7 +20,7 @@ function App() {
 
   /** Close button: hide to tray if enabled, otherwise quit the app. */
   const handleClose = useCallback(async () => {
-    const closeToTray = localStorage.getItem("smart-search-close-to-tray") !== "false";
+    const closeToTray = localStorage.getItem(STORAGE_KEY_CLOSE_TO_TRAY) !== "false";
     if (closeToTray) {
       await appWindow.hide();
     } else {

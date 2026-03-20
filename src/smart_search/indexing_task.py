@@ -53,7 +53,8 @@ def _get_available_ram_gb() -> float:
                     if line.startswith("MemAvailable:"):
                         return int(line.split()[1]) / (1024 ** 2)
             return 4.0
-    except Exception:
+    except (OSError, ImportError, AttributeError):
+        _logger.debug("Failed to get available RAM", exc_info=True)
         return 4.0
 
 
@@ -85,7 +86,8 @@ def _compute_max_concurrent() -> int:
             available_gb, cpu_cores, limit,
         )
         return limit
-    except Exception:
+    except (OSError, ImportError, AttributeError):
+        _logger.debug("Failed to compute max concurrent tasks", exc_info=True)
         return 1  # Safe fallback
 
 if TYPE_CHECKING:

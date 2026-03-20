@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from smart_search.config import SmartSearchConfig, get_config
 from smart_search.config_manager import ConfigManager
+from smart_search.constants import APP_VERSION, DEFAULT_HOST, DEFAULT_HTTP_PORT
 from smart_search.data_dir import get_data_dir
 from smart_search.http_routes import create_router
 from smart_search.indexing_task import IndexingTaskManager
@@ -156,7 +157,7 @@ def create_app(
 
     app = FastAPI(
         title="Smart Search API",
-        version="0.8.4",
+        version=APP_VERSION,
         lifespan=lifespan,
     )
 
@@ -282,12 +283,12 @@ def create_app(
     return app
 
 
-def main(host: str = "127.0.0.1", port: int = 9742):
+def main(host: str = DEFAULT_HOST, port: int = DEFAULT_HTTP_PORT):
     """Start the HTTP API server with uvicorn.
 
     Args:
         host: Bind address (default localhost only).
-        port: Listen port (default 9742).
+        port: Listen port (default DEFAULT_HTTP_PORT).
     """
     import uvicorn
 

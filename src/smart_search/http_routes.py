@@ -14,18 +14,13 @@ from fastapi import APIRouter, HTTPException, Query
 from starlette.responses import JSONResponse
 
 from smart_search.config import SmartSearchConfig
+from smart_search.constants import APP_VERSION, BYTES_PER_MB
 from smart_search.http_models import (
     AddFolderRequest,
     AddFolderResponse,
     ConfigResponse,
     ConfigUpdateRequest,
     ConfigUpdateResponse,
-    EphemeralCleanupRequest,
-    EphemeralCleanupResponse,
-    EphemeralEntryInfo,
-    EphemeralIndexRequest,
-    EphemeralIndexResponse,
-    EphemeralListResponse,
     RepairResponse,
     FailedFileInfo,
     FileInfo,
@@ -38,15 +33,13 @@ from smart_search.http_models import (
     IndexingTaskStatus,
     IngestRequest,
     IngestResponse,
-    ModelInfoResponse,
-    ModelLoadedResponse,
-    ModelStatusResponse,
-    ModelsResponse,
     RemoveFolderResponse,
     SearchHit,
     SearchResponse,
     StatsResponse,
 )
+from smart_search.http_routes_ephemeral import create_ephemeral_router
+from smart_search.http_routes_model import create_model_router
 
 
 def create_router(
@@ -83,12 +76,16 @@ def create_router(
     """
     router = APIRouter(prefix="/api")
 
+    # Include sub-routers for ephemeral and model endpoints
+    router.include_router(create_ephemeral_router(get_registry))
+    router.include_router(create_model_router(get_engine, get_config_mgr, config))
+
     @router.get("/health", response_model=HealthResponse)
     def health():
         """Server health check with version and uptime."""
         return HealthResponse(
             status="ok",
-            version="0.8.4",
+            version=APP_VERSION,
             uptime_seconds=round(get_uptime(), 1),
         )
 
@@ -106,7 +103,7 @@ def create_router(
             document_count=s.document_count,
             chunk_count=s.chunk_count,
             index_size_bytes=s.index_size_bytes,
-            index_size_mb=round(s.index_size_bytes / (1024 * 1024), 2),
+            index_size_mb=round(s.index_size_bytes / BYTES_PER_MB, 2),
             total_files=s.total_files,
             last_indexed_at=s.last_indexed_at,
             formats_indexed=s.formats_indexed,
@@ -354,12 +351,12 @@ def create_router(
         old_model = current.get("embedding_model")
         old_dims = current.get("embedding_dimensions")
 
-        current.update(req.config)
-        mgr.save(current)
+        merged = {**current, **req.config}
+        mgr.save(merged)
 
         # Detect embedding config change requiring re-index
-        new_model = current.get("embedding_model")
-        new_dims = current.get("embedding_dimensions")
+        new_model = merged.get("embedding_model")
+        new_dims = merged.get("embedding_dimensions")
         requires_reindex = (new_model != old_model) or (new_dims != old_dims)
 
         if requires_reindex:
@@ -373,139 +370,7 @@ def create_router(
                 get_task_mgr().submit(folder, get_indexer())
 
         return ConfigUpdateResponse(
-            config=current, requires_reindex=requires_reindex,
-        )
-
-    @router.get("/models", response_model=ModelsResponse)
-    def list_models():
-        """List all curated embedding models with metadata."""
-        from smart_search.model_registry import list_models as _list
-
-        models = [
-            ModelInfoResponse(
-                model_id=m.model_id,
-                display_name=m.display_name,
-                size_mb=m.size_mb,
-                mteb_retrieval=m.mteb_retrieval,
-                native_dims=m.native_dims,
-                mrl_dims=m.mrl_dims,
-                default_dims=m.default_dims,
-                modalities=m.modalities,
-                description=m.description,
-            )
-            for m in _list()
-        ]
-        return ModelsResponse(models=models)
-
-    @router.get("/model/status", response_model=ModelStatusResponse)
-    def model_status():
-        """Check whether the embedding model is cached locally.
-
-        Reads from ConfigManager for live config (B4 fix), falling
-        back to startup config if no persisted value exists.
-        """
-        from smart_search.embedder import Embedder
-
-        live_config = get_config_mgr().load()
-        model_name = live_config.get("embedding_model", config.embedding_model)
-        return ModelStatusResponse(
-            cached=Embedder.is_model_cached(model_name),
-            model_name=model_name,
-        )
-
-    @router.get("/model/loaded", response_model=ModelLoadedResponse)
-    def model_loaded():
-        """Check whether the embedding model is currently loaded in memory."""
-        engine = get_engine()
-        is_loaded = getattr(engine._embedder, "is_loaded", True)
-        return ModelLoadedResponse(loaded=is_loaded)
-
-    @router.post(
-        "/ephemeral/index", response_model=EphemeralIndexResponse,
-    )
-    def ephemeral_index(req: EphemeralIndexRequest):
-        """Create an ephemeral index inside a folder.
-
-        Creates a .smart-search/ directory with a local LanceDB + SQLite
-        index. Independent of the global knowledge base.
-        """
-        from smart_search.ephemeral_store import (
-            calculate_ephemeral_size,
-            create_ephemeral_components,
-        )
-
-        path = Path(req.folder_path).resolve()
-        if not path.is_dir():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Directory not found: {req.folder_path}",
-            )
-
-        components = create_ephemeral_components(str(path))
-        indexer_local = components["indexer"]
-        result = indexer_local.index_folder(str(path), force=req.force)
-
-        registry = get_registry()
-        size = calculate_ephemeral_size(str(path))
-
-        # Explicitly close SQLite connection so Windows can delete the
-        # .smart-search/ directory later (avoids WinError 32).
-        components["store"].close()
-        del components
-        total_chunks = sum(
-            r.chunk_count for r in result.results if r.status == "indexed"
-        )
-        registry.register(path.as_posix(), total_chunks, size)
-
-        return EphemeralIndexResponse(
-            folder=path.as_posix(),
-            index_location=f"{path.as_posix()}/.smart-search/",
-            files_indexed=result.indexed,
-            files_skipped=result.skipped,
-            files_failed=result.failed,
-            total_chunks=total_chunks,
-            index_size_kb=round(size / 1024, 1),
-        )
-
-    @router.get("/ephemeral", response_model=EphemeralListResponse)
-    def ephemeral_list():
-        """List all registered ephemeral indexes, pruning stale entries."""
-        registry = get_registry()
-        pruned = registry.prune_stale()
-        entries = registry.list_all()
-
-        active = [
-            EphemeralEntryInfo(
-                folder_path=e.folder_path,
-                chunk_count=e.chunk_count,
-                size_kb=round(e.size_bytes / 1024, 1),
-                created_at=e.created_at,
-            )
-            for e in entries
-        ]
-        return EphemeralListResponse(
-            active=active, pruned=[str(p) for p in pruned],
-        )
-
-    @router.delete(
-        "/ephemeral", response_model=EphemeralCleanupResponse,
-    )
-    def ephemeral_cleanup(
-        folder_path: str = Query(
-            ..., description="Folder path to clean up",
-        ),
-    ):
-        """Delete an ephemeral index and deregister it."""
-        from smart_search.ephemeral_store import remove_ephemeral_index
-
-        path = Path(folder_path).resolve()
-        path_posix = path.as_posix()
-
-        removed = remove_ephemeral_index(str(path))
-        get_registry().deregister(path_posix)
-
-        return EphemeralCleanupResponse(
-            folder=path_posix, removed=removed,
+            config=merged, requires_reindex=requires_reindex,
         )
 
     @router.post("/repair", response_model=RepairResponse)

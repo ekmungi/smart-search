@@ -1,11 +1,16 @@
 # Factory for folder-local ephemeral indexes stored in .smart-search/ subdirectories.
 
+import gc
+import logging
 import shutil
+
 from pathlib import Path
 from typing import Any, Dict
 
 from smart_search.config import SmartSearchConfig
 from smart_search.store import ChunkStore
+
+_logger = logging.getLogger(__name__)
 
 
 def create_ephemeral_components(folder_path: str) -> Dict[str, Any]:
@@ -124,8 +129,8 @@ def remove_ephemeral_index(folder_path: str) -> bool:
                 store_db = str(Path(obj._config.sqlite_path).resolve())
                 if store_db == ephemeral_db:
                     obj.close()
-            except Exception:
-                pass
+            except (OSError, AttributeError):
+                _logger.debug("Failed to close ephemeral ChunkStore", exc_info=True)
     gc.collect()
 
     shutil.rmtree(smart_search_dir)

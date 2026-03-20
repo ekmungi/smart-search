@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smart-search"
-version = "0.8.4"
+version = "0.8.5"
 description = "Local MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX, and HTML documents"
 requires-python = ">=3.11"
 dependencies = [
@@ -34,6 +34,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    "pytest-timeout",
     "reportlab",
     "python-docx",
     "httpx",
@@ -50,4 +51,5 @@ download = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not slow'"
+timeout = 30
 markers = ["slow: Tests that load ML models or process real files"]

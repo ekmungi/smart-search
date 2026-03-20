@@ -19,6 +19,7 @@ import {
   type FolderInfo,
   type IndexingTask,
 } from "../lib/api";
+import { POLL_INDEXING_ACTIVE_MS, POLL_INDEXING_IDLE_MS } from "../lib/constants";
 
 export default function FolderManager() {
   const [folders, setFolders] = useState<FolderInfo[]>([]);
@@ -61,7 +62,7 @@ export default function FolderManager() {
           setFolders(foldersRes.folders);
 
           // Slow down when no active tasks
-          const nextDelay = status.active > 0 ? 2000 : 10000;
+          const nextDelay = status.active > 0 ? POLL_INDEXING_ACTIVE_MS : POLL_INDEXING_IDLE_MS;
           if (intervalId !== null) clearInterval(intervalId);
           if (!cancelled) {
             intervalId = setInterval(checkIndexing, nextDelay);
@@ -73,7 +74,7 @@ export default function FolderManager() {
     };
 
     checkIndexing();
-    intervalId = setInterval(checkIndexing, 2000);
+    intervalId = setInterval(checkIndexing, POLL_INDEXING_ACTIVE_MS);
 
     return () => {
       cancelled = true;

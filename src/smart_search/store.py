@@ -1,26 +1,29 @@
 # LanceDB vector storage + SQLite metadata for chunk persistence and search.
 
-import os
+import logging
 import sqlite3
-import time
-from datetime import datetime, timezone
+
+_logger = logging.getLogger(__name__)
+from datetime import timedelta
 from pathlib import Path
 from typing import List
 
 import lancedb
 import pyarrow as pa
 
-from datetime import timedelta
-
 from smart_search.config import SmartSearchConfig
-from smart_search.models import Chunk, IndexStats, SearchResult
+from smart_search.models import Chunk, SearchResult
+from smart_search.store_sqlite import SqliteMetadataStore
+from smart_search.store_stats import StatsStoreMixin
 
 
-class ChunkStore:
+class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
     """Stores and retrieves document chunks using LanceDB (vectors) and SQLite (metadata).
 
     LanceDB handles vector storage and similarity search.
     SQLite tracks which files have been indexed and their content hashes.
+    Inherits SqliteMetadataStore for file record operations and
+    StatsStoreMixin for index statistics.
     """
 
     def __init__(self, config: SmartSearchConfig) -> None:
@@ -144,8 +147,8 @@ class ChunkStore:
         for cid in chunk_ids:
             try:
                 self._table.delete(f'id = "{cid}"')
-            except Exception:
-                pass  # Row may not exist
+            except (OSError, ValueError):
+                _logger.debug("Delete for chunk id %s failed (row may not exist)", cid, exc_info=True)
 
         # Remove old FTS5 entries for these chunk IDs
         for cid in chunk_ids:
@@ -208,7 +211,8 @@ class ChunkStore:
                 .to_list()
             )
             return [self._record_to_chunk(r) for r in results]
-        except Exception:
+        except (OSError, ValueError, KeyError):
+            _logger.debug("get_chunks_for_file failed for %s", source_path, exc_info=True)
             return []
 
     def vector_search(
@@ -241,181 +245,6 @@ class ChunkStore:
             )
 
         return search_results
-
-    def get_stats(self, watch_directories: list[str] | None = None) -> IndexStats:
-        """Get statistics about the indexed knowledge base.
-
-        Uses count_rows() and SQLite queries instead of loading all data
-        into memory, keeping RAM usage constant regardless of index size.
-
-        Args:
-            watch_directories: Optional override for watch dirs. When provided,
-                uses these instead of the startup config dirs. Enables live
-                config (B22) — stats reflect current ConfigManager state.
-
-        Returns:
-            IndexStats with document count, chunk count, size, formats.
-        """
-        # All stats from the read-only SQLite connection -- avoids blocking
-        # on the write connection used by indexing threads. WAL mode enables
-        # concurrent reads on separate connections.
-        doc_count = 0
-        chunk_count = 0
-        formats: list[str] = []
-        last_indexed = None
-        total_files = 0
-        conn = self._sqlite_read_conn
-        if conn:
-            row = conn.execute(
-                "SELECT COUNT(*), COALESCE(SUM(chunk_count), 0) FROM indexed_files"
-            ).fetchone()
-            doc_count = row[0] if row else 0
-            chunk_count = row[1] if row else 0
-
-            # Derive formats from file extensions in source_path
-            path_rows = conn.execute(
-                "SELECT DISTINCT source_path FROM indexed_files"
-            ).fetchall()
-            ext_set = set()
-            for r in path_rows:
-                ext = Path(r[0]).suffix.lower()
-                if ext:
-                    ext_set.add(ext)
-            formats = sorted(ext_set)
-
-            ts_row = conn.execute(
-                "SELECT MAX(indexed_at) FROM indexed_files"
-            ).fetchone()
-            if ts_row and ts_row[0]:
-                last_indexed = ts_row[0]
-
-        # Index size: LanceDB + SQLite with 60s cache to avoid blocking
-        # during active indexing (B54). Falls back to stale cache on error.
-        index_size = self._get_cached_index_size()
-
-        # Total files: use SQLite doc_count (already indexed) as the baseline.
-        # This avoids expensive rglob scans on OneDrive folders during polling.
-        total_files = doc_count
-
-        return IndexStats(
-            document_count=doc_count,
-            chunk_count=chunk_count,
-            index_size_bytes=index_size,
-            total_files=total_files,
-            last_indexed_at=last_indexed,
-            formats_indexed=formats,
-        )
-
-    def is_file_indexed(self, source_path: str, file_hash: str) -> bool:
-        """Check if a file is already indexed with the given hash.
-
-        Args:
-            source_path: Path to the document file.
-            file_hash: SHA-256 hash of the file contents.
-
-        Returns:
-            True if the file is indexed at exactly this hash.
-        """
-        cursor = self._sqlite_conn.execute(
-            "SELECT file_hash FROM indexed_files WHERE source_path = ?",
-            (source_path,),
-        )
-        row = cursor.fetchone()
-        return row is not None and row[0] == file_hash
-
-    def remove_file_record(self, source_path: str) -> None:
-        """Remove the indexed_files record for a source file.
-
-        Called when a watched file is deleted. Does nothing if the
-        record does not exist.
-
-        Args:
-            source_path: Path to the document file.
-        """
-        self._sqlite_conn.execute(
-            "DELETE FROM indexed_files WHERE source_path = ?",
-            (source_path,),
-        )
-        self._sqlite_conn.commit()
-
-    def record_file_indexed(
-        self, source_path: str, file_hash: str, chunk_count: int,
-        needs_ocr: bool = False,
-    ) -> None:
-        """Record that a file has been indexed.
-
-        Args:
-            source_path: Path to the document file.
-            file_hash: SHA-256 hash of the file contents.
-            chunk_count: Number of chunks produced from this file.
-            needs_ocr: True if the file produced no text and needs OCR
-                to be indexed properly. These files are skipped on restart
-                but can be retried when OCR support is added.
-        """
-        now = datetime.now(timezone.utc).isoformat()
-        self._sqlite_conn.execute(
-            """INSERT OR REPLACE INTO indexed_files
-               (source_path, file_hash, chunk_count, indexed_at, needs_ocr)
-               VALUES (?, ?, ?, ?, ?)""",
-            (source_path, file_hash, chunk_count, now, int(needs_ocr)),
-        )
-        self._sqlite_conn.commit()
-
-    def get_needs_ocr_files(self) -> list[dict]:
-        """List files that need OCR to be indexed properly.
-
-        Returns:
-            List of dicts with source_path and indexed_at.
-        """
-        cursor = self._sqlite_conn.execute(
-            "SELECT source_path, indexed_at FROM indexed_files WHERE needs_ocr = 1"
-        )
-        return [
-            {"source_path": row[0], "indexed_at": row[1]}
-            for row in cursor.fetchall()
-        ]
-
-    def clear_needs_ocr(self, source_paths: list[str] | None = None) -> int:
-        """Clear needs_ocr flag and hash so files are re-indexed on next run.
-
-        Args:
-            source_paths: Specific files to clear. If None, clears all.
-
-        Returns:
-            Number of files cleared.
-        """
-        if source_paths:
-            placeholders = ",".join("?" for _ in source_paths)
-            cursor = self._sqlite_conn.execute(
-                f"DELETE FROM indexed_files WHERE needs_ocr = 1 AND source_path IN ({placeholders})",
-                source_paths,
-            )
-        else:
-            cursor = self._sqlite_conn.execute(
-                "DELETE FROM indexed_files WHERE needs_ocr = 1"
-            )
-        self._sqlite_conn.commit()
-        return cursor.rowcount
-
-    def list_indexed_files(self) -> list:
-        """List all indexed files with metadata.
-
-        Returns:
-            List of dicts with source_path, file_hash, chunk_count, indexed_at.
-        """
-        cursor = self._sqlite_conn.execute(
-            "SELECT source_path, file_hash, chunk_count, indexed_at "
-            "FROM indexed_files ORDER BY indexed_at DESC"
-        )
-        return [
-            {
-                "source_path": row[0],
-                "file_hash": row[1],
-                "chunk_count": row[2],
-                "indexed_at": row[3],
-            }
-            for row in cursor.fetchall()
-        ]
 
     def remove_files_for_folder(self, folder_path: str) -> int:
         """Remove all indexed files under a folder prefix.
@@ -455,8 +284,8 @@ class ChunkStore:
         # Drop existing LanceDB table
         try:
             self._db.drop_table(self._config.lancedb_table_name)
-        except Exception:
-            pass
+        except (OSError, ValueError):
+            _logger.debug("drop_table failed (table may not exist)", exc_info=True)
 
         # Recreate with current config dimensions
         schema = pa.schema([
@@ -531,8 +360,8 @@ class ChunkStore:
         try:
             self._table.compact_files()
             self._table.cleanup_old_versions(older_than=timedelta(0))
-        except (ImportError, Exception):
-            pass  # pylance not installed or compaction failed
+        except (ImportError, OSError, ValueError):
+            _logger.debug("LanceDB compaction failed (pylance may not be installed)", exc_info=True)
 
     def _chunk_to_record(self, chunk: Chunk) -> dict:
         """Convert a Chunk to a dict suitable for LanceDB insertion.
@@ -588,51 +417,3 @@ class ChunkStore:
             model_name=record["model_name"],
         )
 
-    def _get_cached_index_size(self) -> int:
-        """Return total index size with a 60-second time-based cache.
-
-        Avoids blocking the stats endpoint during active writes while
-        still reporting the full LanceDB + SQLite size (B54).
-
-        Returns:
-            Total size in bytes (may be up to 60s stale).
-        """
-        now = time.monotonic()
-        if now - self._cached_index_size_at < 60.0:
-            return self._cached_index_size
-        try:
-            size = self._calculate_index_size()
-            self._cached_index_size = size
-            self._cached_index_size_at = now
-            return size
-        except Exception:
-            # Return stale cache on any error (file locks, etc.)
-            return self._cached_index_size
-
-    def _calculate_index_size(self) -> int:
-        """Calculate total size of LanceDB and SQLite files on disk.
-
-        Best-effort: returns 0 if files are locked during active indexing
-        rather than blocking the stats endpoint.
-
-        Returns:
-            Total size in bytes.
-        """
-        total = 0
-        try:
-            lance_path = Path(self._config.lancedb_path)
-            if lance_path.exists():
-                for f in lance_path.rglob("*"):
-                    try:
-                        if f.is_file():
-                            total += f.stat().st_size
-                    except OSError:
-                        pass
-
-            sqlite_path = Path(self._config.sqlite_path)
-            if sqlite_path.exists():
-                total += sqlite_path.stat().st_size
-        except OSError:
-            pass
-
-        return total

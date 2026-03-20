@@ -44,7 +44,7 @@ def keyword_search(
                LIMIT ?""",
             (f'"{safe_query}"', limit),
         )
-    except Exception:
+    except sqlite3.OperationalError:
         # Fallback: try individual terms joined with OR
         terms = query.split()
         if not terms:
@@ -60,7 +60,8 @@ def keyword_search(
                    LIMIT ?""",
                 (or_query, limit),
             )
-        except Exception:
+        except sqlite3.OperationalError:
+            logger.debug("FTS5 keyword search failed for query: %s", query, exc_info=True)
             return []
 
     return [
@@ -104,7 +105,8 @@ def backfill_fts(conn: sqlite3.Connection, table, batch_size: int = 1000) -> int
     """
     try:
         total_rows = table.count_rows()
-    except Exception:
+    except (OSError, ValueError):
+        logger.debug("Failed to count LanceDB rows for FTS backfill", exc_info=True)
         return 0
 
     if total_rows == 0:
@@ -121,7 +123,8 @@ def backfill_fts(conn: sqlite3.Connection, table, batch_size: int = 1000) -> int
                 .offset(offset)
                 .to_list()
             )
-        except Exception:
+        except (OSError, ValueError):
+            logger.debug("FTS backfill batch at offset %d failed", offset, exc_info=True)
             break
 
         if not rows:
@@ -191,7 +194,7 @@ def get_chunks_by_ids(table, chunk_ids: List[str]) -> Dict[str, Chunk]:
                     indexed_at=row["indexed_at"],
                     model_name=row["model_name"],
                 )
-        except Exception:
-            pass  # Skip chunks that can't be retrieved
+        except (OSError, ValueError, KeyError):
+            logger.debug("Failed to retrieve chunk %s from LanceDB", cid, exc_info=True)
 
     return result

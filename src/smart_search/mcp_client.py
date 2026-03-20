@@ -73,7 +73,7 @@ def is_backend_running(base_url: str = DEFAULT_BASE_URL) -> bool:
     try:
         _request("GET", "/api/health", base_url=base_url, timeout=2.0)
         return True
-    except (ConnectionError, Exception):
+    except (ConnectionError, OSError, TimeoutError):
         return False
 
 

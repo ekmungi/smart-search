@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef } from "react";
 import { CheckCircle, XCircle, ScrollText } from "lucide-react";
 import { fetchIndexingStatus, type ProcessedFile } from "../lib/api";
+import { POLL_INDEXING_ACTIVE_MS } from "../lib/constants";
 
 export default function IndexingLog() {
   const [files, setFiles] = useState<ProcessedFile[]>([]);
@@ -37,7 +38,7 @@ export default function IndexingLog() {
     };
 
     poll();
-    const id = setInterval(poll, 2000);
+    const id = setInterval(poll, POLL_INDEXING_ACTIVE_MS);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 

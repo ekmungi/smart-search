@@ -92,7 +92,8 @@ def backfill_fts_if_needed(store: ChunkStore) -> Dict:
 
     try:
         lance_count = table.count_rows()
-    except Exception:
+    except (OSError, ValueError):
+        logger.debug("Failed to count LanceDB rows during FTS backfill check", exc_info=True)
         lance_count = 0
 
     if lance_count == 0:
@@ -145,7 +146,8 @@ def repair_index(store: ChunkStore, config: SmartSearchConfig, db_path: str) -> 
     compacted = True
     try:
         store._compact_and_cleanup()
-    except Exception:
+    except (ImportError, OSError, ValueError):
+        logger.debug("LanceDB compaction failed during repair", exc_info=True)
         compacted = False
 
     # Step 4: Check index compatibility (model/dimension mismatches)
