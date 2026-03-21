@@ -155,11 +155,13 @@ class IndexingTaskManager:
         # Normalize to forward slashes so paths match the folder list API
         folder = Path(folder).as_posix()
         with self._lock:
-            # Cancel existing task for this folder
+            # Cancel and remove existing task for this folder
             if folder in self._folder_to_task:
                 old_id = self._folder_to_task[folder]
                 if old_id in self._cancel_events:
                     self._cancel_events[old_id].set()
+                    del self._cancel_events[old_id]
+                self._tasks.pop(old_id, None)
 
             task_id = str(uuid.uuid4())[:8]
             cancel_event = threading.Event()
