@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, List, Optional
 import numpy as np
 
 from smart_search.config import SmartSearchConfig
+from smart_search.constants import OVERFETCH_MULTIPLIER
 from smart_search.fts import keyword_search
 from smart_search.fusion import reciprocal_rank_fusion
 from smart_search.models import Chunk, SearchResult
@@ -149,8 +150,8 @@ class SearchEngine:
     def _hybrid_search(self, query: str, limit: int) -> List[SearchResult]:
         """Combine vector + keyword search via Reciprocal Rank Fusion.
 
-        Over-fetches limit*2 from each source, fuses with RRF, and
-        truncates to the requested limit.
+        Over-fetches limit*OVERFETCH_MULTIPLIER from each source, fuses
+        with RRF, and truncates to the requested limit.
 
         Args:
             query: Search query string.
@@ -159,7 +160,7 @@ class SearchEngine:
         Returns:
             Fused and ranked SearchResult list.
         """
-        overfetch = limit * 2
+        overfetch = limit * OVERFETCH_MULTIPLIER
         semantic_results = self._semantic_search(query, overfetch)
         keyword_results = self._keyword_search(query, overfetch)
 
@@ -171,7 +172,8 @@ class SearchEngine:
             return keyword_results[:limit]
 
         return reciprocal_rank_fusion(
-            semantic_results, keyword_results, k=60, limit=limit,
+            semantic_results, keyword_results,
+            k=self._config.rrf_k, limit=limit,
         )
 
     def search(

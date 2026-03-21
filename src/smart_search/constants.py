@@ -11,5 +11,8 @@ BYTES_PER_MB = 1024 * 1024
 DEFAULT_HTTP_PORT = 9742
 DEFAULT_HOST = "127.0.0.1"
 
+# Search retrieval settings
+OVERFETCH_MULTIPLIER = 5  # Fetch limit*N from each source before fusion
+
 # Application metadata
-APP_VERSION = "0.8.5"
+APP_VERSION = "0.10.0"

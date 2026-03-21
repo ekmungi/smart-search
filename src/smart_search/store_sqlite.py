@@ -105,6 +105,19 @@ class SqliteMetadataStore:
         self._sqlite_conn.commit()
         return cursor.rowcount
 
+    def clear_all_file_hashes(self) -> int:
+        """Clear all file hashes to force re-indexing on next ingest.
+
+        Deletes all indexed_files records so hash-based skip no longer
+        applies. Called when chunk config changes require a full re-index.
+
+        Returns:
+            Number of file records cleared.
+        """
+        cursor = self._sqlite_conn.execute("DELETE FROM indexed_files")
+        self._sqlite_conn.commit()
+        return cursor.rowcount
+
     def list_indexed_files(self) -> list:
         """List all indexed files with metadata.
 

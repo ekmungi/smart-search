@@ -102,7 +102,8 @@ export default function QuickSearch() {
     setError(null);
     try {
       // Fetch more results than needed so dedup still yields enough unique files
-      const res = await searchDocuments(q, MAX_RESULTS * 3);
+      // Over-fetch 4x to allow dedup to still yield enough unique files
+      const res = await searchDocuments(q, MAX_RESULTS * 4);
       // Deduplicate by file: keep highest-scoring chunk per source_path
       const seen = new Set<string>();
       const deduped = res.results.filter((hit) => {

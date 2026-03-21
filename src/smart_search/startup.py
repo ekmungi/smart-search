@@ -21,12 +21,17 @@ logger = logging.getLogger(__name__)
 def check_index_compatibility(config: SmartSearchConfig, db_path: str) -> Dict:
     """Check if the current config matches the index metadata.
 
+    Compares embedding model/dimensions and chunk config (max_words,
+    min_words, overlap_words). If chunk config changed, clears file
+    hashes to force a full re-index on next ingest.
+
     Args:
         config: Current SmartSearchConfig.
         db_path: Path to SQLite database.
 
     Returns:
-        Dict with 'compatible' (bool) and 'mismatches' (dict).
+        Dict with 'compatible' (bool), 'mismatches' (dict),
+        and 'chunk_config_changed' (bool).
     """
     metadata = IndexMetadata(db_path)
     metadata.initialize()
@@ -34,8 +39,16 @@ def check_index_compatibility(config: SmartSearchConfig, db_path: str) -> Dict:
     current = {
         "embedding_model": config.embedding_model,
         "embedding_dimensions": str(config.embedding_dimensions),
+        "chunk_max_words": str(config.chunk_max_words),
+        "chunk_min_words": str(config.chunk_min_words),
+        "chunk_overlap_words": str(config.chunk_overlap_words),
     }
     mismatches = metadata.check_mismatch(current)
+
+    # Detect chunk-config-only changes (don't require table rebuild,
+    # just re-indexing of files via hash cache clear)
+    chunk_keys = {"chunk_max_words", "chunk_min_words", "chunk_overlap_words"}
+    chunk_changed = bool(chunk_keys & set(mismatches.keys()))
 
     if mismatches:
         for key, (stored, current_val) in mismatches.items():
@@ -45,7 +58,15 @@ def check_index_compatibility(config: SmartSearchConfig, db_path: str) -> Dict:
                 key, stored, current_val,
             )
 
-    return {"compatible": len(mismatches) == 0, "mismatches": mismatches}
+    # Update stored metadata to current values so the check only fires once
+    for key, val in current.items():
+        metadata.set(key, val)
+
+    return {
+        "compatible": len(mismatches) == 0,
+        "mismatches": mismatches,
+        "chunk_config_changed": chunk_changed,
+    }
 
 
 def reconcile_orphans(store: ChunkStore) -> Dict:
@@ -65,6 +86,56 @@ def reconcile_orphans(store: ChunkStore) -> Dict:
             result["removed_files"],
         )
     return result
+
+
+def migrate_fts_schema_if_needed(store: ChunkStore) -> Dict:
+    """Rebuild FTS5 if source_path is UNINDEXED (pre-v0.9 schema).
+
+    Checks the FTS5 table definition for 'source_path UNINDEXED'. If found,
+    drops and recreates with source_path indexed, then backfills from LanceDB.
+
+    Args:
+        store: Initialized ChunkStore instance.
+
+    Returns:
+        Dict with 'migrated' (bool) and 'count' (int rows rebuilt).
+    """
+    conn = store._sqlite_conn
+    table = store._table
+    if conn is None or table is None:
+        return {"migrated": False, "count": 0}
+
+    # Check if source_path is UNINDEXED in the current FTS5 schema
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_fts'"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return {"migrated": False, "count": 0}
+
+    if row is None:
+        return {"migrated": False, "count": 0}
+
+    schema_sql = row[0] or ""
+    if "source_path UNINDEXED" not in schema_sql.lower():
+        return {"migrated": False, "count": 0}
+
+    logger.info("FTS5 schema migration: rebuilding with source_path indexed")
+    conn.execute("DROP TABLE IF EXISTS chunks_fts")
+    conn.execute(
+        """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+            text,
+            id UNINDEXED,
+            source_path,
+            source_type UNINDEXED,
+            tokenize='porter unicode61'
+        )"""
+    )
+    conn.commit()
+
+    count = backfill_fts(conn, table)
+    logger.info("FTS5 schema migration complete: %d chunks re-indexed", count)
+    return {"migrated": True, "count": count}
 
 
 def backfill_fts_if_needed(store: ChunkStore) -> Dict:
@@ -133,7 +204,7 @@ def repair_index(store: ChunkStore, config: SmartSearchConfig, db_path: str) -> 
             """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
                 text,
                 id UNINDEXED,
-                source_path UNINDEXED,
+                source_path,
                 source_type UNINDEXED,
                 tokenize='porter unicode61'
             )"""

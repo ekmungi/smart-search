@@ -119,10 +119,18 @@ def create_app(
                 from smart_search.startup import (
                     backfill_fts_if_needed,
                     check_index_compatibility,
+                    migrate_fts_schema_if_needed,
                     reconcile_orphans,
                 )
-                check_index_compatibility(config, config.sqlite_path)
+                compat = check_index_compatibility(config, config.sqlite_path)
+                if compat.get("chunk_config_changed"):
+                    cleared = get_store().clear_all_file_hashes()
+                    _logger.info(
+                        "Chunk config changed -- cleared %d file hashes for re-index",
+                        cleared,
+                    )
                 reconcile_orphans(get_store())
+                migrate_fts_schema_if_needed(get_store())
                 backfill_fts_if_needed(get_store())
             except Exception as e:
                 _logger.warning("Startup checks failed (non-fatal): %s", e)

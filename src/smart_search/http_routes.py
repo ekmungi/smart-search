@@ -373,6 +373,31 @@ def create_router(
             config=merged, requires_reindex=requires_reindex,
         )
 
+    @router.post("/rebuild")
+    def rebuild():
+        """Clear all file hashes and re-index every watched folder.
+
+        Forces a full re-index by clearing stored content hashes, then
+        submits each watched folder as a background indexing task.
+        Returns the number of folders queued and hashes cleared.
+        """
+        store = get_store()
+        hashes_cleared = store.clear_all_file_hashes()
+
+        folders = get_config_mgr().list_watch_dirs()
+        indexer = get_indexer()
+        for folder in folders:
+            get_task_mgr().submit(folder, indexer)
+
+        _logger.info("rebuild: cleared %d file hashes, queued %d folders", hashes_cleared, len(folders))
+        return JSONResponse(
+            content={
+                "status": "accepted",
+                "folders_queued": len(folders),
+                "hashes_cleared": hashes_cleared,
+            },
+        )
+
     @router.post("/repair", response_model=RepairResponse)
     def repair():
         """Run all index maintenance operations.

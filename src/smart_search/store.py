@@ -106,11 +106,12 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
             pass  # Column already exists
 
         # FTS5 virtual table for keyword search (hybrid search v0.8)
+        # source_path is indexed (not UNINDEXED) so filenames are searchable
         self._sqlite_conn.execute(
             """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
                 text,
                 id UNINDEXED,
-                source_path UNINDEXED,
+                source_path,
                 source_type UNINDEXED,
                 tokenize='porter unicode61'
             )"""
@@ -318,7 +319,7 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
             """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
                 text,
                 id UNINDEXED,
-                source_path UNINDEXED,
+                source_path,
                 source_type UNINDEXED,
                 tokenize='porter unicode61'
             )"""

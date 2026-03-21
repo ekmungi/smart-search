@@ -25,8 +25,10 @@ class SmartSearchConfig(BaseSettings):
     embedding_backend: str = "onnx"
     embedder_idle_timeout: float = 60.0
 
-    # Chunking settings
-    chunk_max_tokens: int = 512
+    # Chunking settings -- word-based limits for size-enforced splitting
+    chunk_max_words: int = 200   # Max words per chunk (Chroma Research: 200 optimal)
+    chunk_min_words: int = 50    # Merge undersized chunks below this threshold
+    chunk_overlap_words: int = 40  # Overlap between split sub-chunks for context
 
     # Storage paths -- sentinel defaults replaced by data_dir in validator
     lancedb_path: str = ""
@@ -55,6 +57,7 @@ class SmartSearchConfig(BaseSettings):
     search_default_limit: int = 10
     search_default_mode: str = "hybrid"
     relevance_threshold: float = 0.30
+    rrf_k: int = 60  # RRF constant; lower values (20-30) boost top-ranked results
 
     # Global shortcut for Quick Search overlay
     shortcut_key: str = "Ctrl+Space"

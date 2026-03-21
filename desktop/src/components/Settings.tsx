@@ -9,6 +9,7 @@ import {
   updateConfig,
   fetchModels,
   repairIndex,
+  rebuildIndex,
 } from "../lib/api";
 import type { ModelInfo, RepairResponse, SmartSearchConfig } from "../lib/api";
 import {
@@ -46,6 +47,11 @@ export default function Settings() {
   const [reindexing, setReindexing] = useState(false);
   const [repairing, setRepairing] = useState(false);
   const [repairResult, setRepairResult] = useState<RepairResponse | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildResult, setRebuildResult] = useState<{
+    folders_queued: number;
+    hashes_cleared: number;
+  } | null>(null);
   const [closeToTray, setCloseToTray] = useState(() => {
     return localStorage.getItem(STORAGE_KEY_CLOSE_TO_TRAY) !== "false";
   });
@@ -188,6 +194,21 @@ export default function Settings() {
     }
   };
 
+  /** Clear all file hashes and re-index every watched folder. */
+  const handleRebuildIndex = async () => {
+    setRebuilding(true);
+    setRebuildResult(null);
+    setError(null);
+    try {
+      const result = await rebuildIndex();
+      setRebuildResult(result);
+    } catch {
+      setError("Index rebuild failed");
+    } finally {
+      setRebuilding(false);
+    }
+  };
+
   /** Run all index maintenance operations. */
   const handleRepairIndex = async () => {
     setRepairing(true);
@@ -253,6 +274,9 @@ export default function Settings() {
         repairing={repairing}
         repairResult={repairResult}
         onRepairIndex={handleRepairIndex}
+        rebuilding={rebuilding}
+        rebuildResult={rebuildResult}
+        onRebuildIndex={handleRebuildIndex}
       />
 
       <EmbeddingSettings

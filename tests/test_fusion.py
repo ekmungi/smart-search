@@ -87,3 +87,41 @@ class TestReciprocalRankFusion:
         fused = reciprocal_rank_fusion(vector, keyword, k=60, limit=10)
         ranks = [r.rank for r in fused]
         assert ranks == list(range(1, len(fused) + 1))
+
+    def test_rrf_scores_normalized_to_zero_one(self):
+        """Fused scores are normalized so top result is 1.0."""
+        vector = [_make_result("a", 1), _make_result("b", 2)]
+        keyword = [_make_result("c", 1), _make_result("d", 2)]
+
+        fused = reciprocal_rank_fusion(vector, keyword, k=60, limit=10)
+        # Top result should be exactly 1.0 (normalized max)
+        assert fused[0].score == 1.0
+        # All scores should be in 0-1 range
+        assert all(0.0 <= r.score <= 1.0 for r in fused)
+
+    def test_rrf_overlapping_normalized_score(self):
+        """Item in both lists gets normalized score of 1.0 when it's the top hit."""
+        vector = [_make_result("shared", 1), _make_result("vec_only", 2)]
+        keyword = [_make_result("shared", 1), _make_result("kw_only", 2)]
+
+        fused = reciprocal_rank_fusion(vector, keyword, k=60, limit=10)
+        assert fused[0].chunk.id == "shared"
+        assert fused[0].score == 1.0
+        # Others should be strictly less than 1.0
+        assert all(r.score < 1.0 for r in fused[1:])
+
+    def test_rrf_configurable_k(self):
+        """Different k values produce different relative score distributions."""
+        # Use overlapping items so scores differ meaningfully between k values
+        vector = [_make_result("shared", 1), _make_result("a", 2), _make_result("b", 3)]
+        keyword = [_make_result("shared", 1), _make_result("c", 2), _make_result("d", 3)]
+
+        fused_k60 = reciprocal_rank_fusion(vector, keyword, k=60, limit=10)
+        fused_k30 = reciprocal_rank_fusion(vector, keyword, k=30, limit=10)
+
+        # "shared" tops both, but the relative gap to non-shared items differs
+        # Lower k amplifies rank differences, so non-shared items score lower relative to shared
+        non_shared_k60 = [r.score for r in fused_k60 if r.chunk.id != "shared"]
+        non_shared_k30 = [r.score for r in fused_k30 if r.chunk.id != "shared"]
+        # With k=30 (lower), rank-2 items are further from rank-1 proportionally
+        assert max(non_shared_k30) < max(non_shared_k60)

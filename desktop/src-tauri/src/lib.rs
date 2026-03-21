@@ -343,17 +343,16 @@ fn start_dev_backend() -> Option<std::process::Child> {
 
 /// Kill the backend child process if it is running.
 ///
-/// First tries managed child handles (sidecar or dev). If neither exists
-/// (e.g. backend was already running when we started), falls back to
-/// killing whatever process holds port 9742 via taskkill on Windows.
+/// Tries managed child handles (sidecar or dev) first, then ALWAYS
+/// falls through to kill-by-port as a safety net. On Windows,
+/// child.kill() only terminates the top-level process; any sub-processes
+/// (e.g. uvicorn workers) can survive as orphans. The port-based
+/// cleanup catches these.
 fn stop_backend(state: &BackendState) {
-    let mut killed_managed = false;
-
     // Stop sidecar child
     if let Ok(mut guard) = state.child.lock() {
         if let Some(child) = guard.take() {
             let _ = child.kill();
-            killed_managed = true;
         }
     }
     // Stop dev child
@@ -361,15 +360,13 @@ fn stop_backend(state: &BackendState) {
         if let Some(ref mut child) = *guard {
             let _ = child.kill();
             let _ = child.wait();
-            killed_managed = true;
         }
         *guard = None;
     }
 
-    // Fallback: kill by port if we didn't manage the process
-    if !killed_managed {
-        kill_process_on_port(BACKEND_PORT);
-    }
+    // Always kill by port as safety net -- catches orphan sub-processes
+    // that survived child.kill() (Windows doesn't kill process trees)
+    kill_process_on_port(BACKEND_PORT);
 }
 
 /// Find and kill whatever process is listening on the given port.

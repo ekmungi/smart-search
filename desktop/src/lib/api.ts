@@ -184,3 +184,9 @@ export async function repairIndex(): Promise<RepairResponse> {
   const res = await fetch(`${BASE_URL}/repair`, { method: "POST" });
   return handleResponse<RepairResponse>(res);
 }
+
+/** Clear all file hashes and re-index every watched folder. */
+export async function rebuildIndex(): Promise<{ folders_queued: number; hashes_cleared: number }> {
+  const res = await fetch(`${BASE_URL}/rebuild`, { method: "POST" });
+  return handleResponse(res);
+}

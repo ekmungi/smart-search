@@ -51,10 +51,14 @@ def reciprocal_rank_fusion(
     sorted_ids = sorted(scores.keys(), key=lambda cid: scores[cid], reverse=True)
     sorted_ids = sorted_ids[:limit]
 
+    # Normalize scores to 0-1 range so display shows 0-100%
+    # Top result always shows 1.0 (100%), others relative to it
+    max_score = scores[sorted_ids[0]] if sorted_ids else 1.0
+
     return [
         SearchResult(
             rank=rank,
-            score=round(scores[cid], 6),
+            score=round(scores[cid] / max_score, 6) if max_score > 0 else 0.0,
             chunk=chunks[cid],
         )
         for rank, cid in enumerate(sorted_ids, start=1)

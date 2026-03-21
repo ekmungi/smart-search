@@ -29,6 +29,12 @@ function ToggleSwitch({
   );
 }
 
+/** Result from the rebuild endpoint. */
+interface RebuildResult {
+  folders_queued: number;
+  hashes_cleared: number;
+}
+
 /** Props for the system settings section. */
 interface SystemSettingsProps {
   autostart: boolean;
@@ -44,6 +50,9 @@ interface SystemSettingsProps {
   repairing: boolean;
   repairResult: RepairResponse | null;
   onRepairIndex: () => void;
+  rebuilding: boolean;
+  rebuildResult: RebuildResult | null;
+  onRebuildIndex: () => void;
 }
 
 /** System settings: autostart, tray, MCP, shortcut, repair. */
@@ -61,6 +70,9 @@ export function SystemSettings({
   repairing,
   repairResult,
   onRepairIndex,
+  rebuilding,
+  rebuildResult,
+  onRebuildIndex,
 }: SystemSettingsProps) {
   return (
     <Section title="System">
@@ -126,6 +138,27 @@ export function SystemSettings({
           >
             {repairing && <Loader2 size={14} className="animate-spin" />}
             {repairing ? "Repairing..." : "Repair"}
+          </button>
+        </div>
+      </SettingRow>
+      <SettingRow
+        label="Rebuild Index"
+        description="Re-index all folders (required after upgrade)"
+      >
+        <div className="flex items-center gap-3">
+          {rebuildResult && (
+            <span className="text-xs text-text-muted">
+              Queued {rebuildResult.folders_queued} folders, cleared{" "}
+              {rebuildResult.hashes_cleared} hashes
+            </span>
+          )}
+          <button
+            onClick={onRebuildIndex}
+            disabled={rebuilding}
+            className="px-3 py-1 text-sm bg-bg-elevated text-text-primary rounded hover:bg-border disabled:opacity-50 flex items-center gap-1"
+          >
+            {rebuilding && <Loader2 size={14} className="animate-spin" />}
+            {rebuilding ? "Rebuilding..." : "Rebuild"}
           </button>
         </div>
       </SettingRow>
