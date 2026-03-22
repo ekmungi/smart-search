@@ -13,6 +13,7 @@ import lancedb
 import pyarrow as pa
 
 from smart_search.config import SmartSearchConfig
+from smart_search.constants import UPSERT_BATCH_SIZE
 from smart_search.models import Chunk, SearchResult
 from smart_search.store_sqlite import SqliteMetadataStore
 from smart_search.store_stats import StatsStoreMixin
@@ -106,6 +107,37 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+        # Migration: add mtime + size columns for fast change detection.
+        # Avoids full SHA256 hash computation when file hasn't changed.
+        try:
+            self._sqlite_conn.execute(
+                "ALTER TABLE indexed_files ADD COLUMN file_size INTEGER DEFAULT NULL"
+            )
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            self._sqlite_conn.execute(
+                "ALTER TABLE indexed_files ADD COLUMN file_mtime REAL DEFAULT NULL"
+            )
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Migration: add status column to distinguish indexed vs failed files.
+        # Failed files (e.g. scanned PDFs, timeout) are not retried on restart
+        # unless the file changes. Default "indexed" for existing rows.
+        try:
+            self._sqlite_conn.execute(
+                "ALTER TABLE indexed_files ADD COLUMN status TEXT DEFAULT 'indexed'"
+            )
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            self._sqlite_conn.execute(
+                "ALTER TABLE indexed_files ADD COLUMN error TEXT DEFAULT NULL"
+            )
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
         # FTS5 virtual table for keyword search (hybrid search v0.8)
         # source_path is indexed (not UNINDEXED) so filenames are searchable
         self._sqlite_conn.execute(
@@ -162,9 +194,12 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
                 "DELETE FROM chunks_fts WHERE id = ?", (cid,)
             )
 
-        # Insert new chunks into LanceDB
-        records = [self._chunk_to_record(c) for c in chunks]
-        self._table.add(records)
+        # Insert into LanceDB in batches to cap PyArrow memory
+        for i in range(0, len(chunks), UPSERT_BATCH_SIZE):
+            batch = chunks[i:i + UPSERT_BATCH_SIZE]
+            records = [self._chunk_to_record(c) for c in batch]
+            self._table.add(records)
+            del records  # Free PyArrow buffers immediately
 
         # Insert into FTS5 for keyword search
         for c in chunks:

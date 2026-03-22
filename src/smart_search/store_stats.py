@@ -23,13 +23,16 @@ class StatsStoreMixin:
     """
 
     def _init_size_cache(self) -> None:
-        """Set cache timestamp so first stats call returns instantly with size=0.
+        """Trigger an immediate index size calculation on startup.
 
-        Without this, _cached_index_size_at=0.0 vs time.monotonic() (seconds
-        since boot) means the cache check always misses on first call, forcing
-        an expensive rglob that can exceed the 30s API timeout.
+        The 5s deadline in _calculate_index_size() prevents blocking, so we
+        can safely compute the real size instead of returning 0 MB for the
+        first 120 seconds. Falls back to 0 on any error.
         """
-        self._cached_index_size = 0
+        try:
+            self._cached_index_size = self._calculate_index_size()
+        except OSError:
+            self._cached_index_size = 0
         self._cached_index_size_at = time.monotonic()
 
     def get_stats(self, watch_directories: list[str] | None = None) -> IndexStats:

@@ -111,13 +111,15 @@ def create_app(
             """Run blocking startup checks and auto-resume in a background thread.
 
             Runs: check_index_compatibility -> reconcile_orphans ->
-            backfill_fts_if_needed -> submit auto-resume for each watched folder.
+            backfill_mtime_if_needed -> backfill_fts_if_needed ->
+            submit auto-resume for each watched folder.
             All errors are caught and logged so the server stays up regardless.
             """
             # Run startup checks (non-blocking, log-only)
             try:
                 from smart_search.startup import (
                     backfill_fts_if_needed,
+                    backfill_mtime_if_needed,
                     check_index_compatibility,
                     migrate_fts_schema_if_needed,
                     reconcile_orphans,
@@ -130,6 +132,7 @@ def create_app(
                         cleared,
                     )
                 reconcile_orphans(get_store())
+                backfill_mtime_if_needed(get_store())
                 migrate_fts_schema_if_needed(get_store())
                 backfill_fts_if_needed(get_store())
             except Exception as e:

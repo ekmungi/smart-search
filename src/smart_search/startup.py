@@ -69,6 +69,53 @@ def check_index_compatibility(config: SmartSearchConfig, db_path: str) -> Dict:
     }
 
 
+def backfill_mtime_if_needed(store: ChunkStore) -> Dict:
+    """Backfill NULL file_mtime/file_size from disk for pre-migration rows.
+
+    Files indexed before the mtime+size feature have NULL values, causing
+    the pre-scan to treat them as needing work on every restart. This
+    one-time migration reads stat info from disk and fills in the gaps.
+
+    Args:
+        store: Initialized ChunkStore instance.
+
+    Returns:
+        Dict with 'backfilled' (int) count of rows updated.
+    """
+    conn = store._sqlite_conn
+    if conn is None:
+        return {"backfilled": 0}
+
+    rows = conn.execute(
+        "SELECT source_path FROM indexed_files "
+        "WHERE file_mtime IS NULL OR file_size IS NULL"
+    ).fetchall()
+
+    if not rows:
+        return {"backfilled": 0}
+
+    from pathlib import Path
+
+    updated = 0
+    for (source_path,) in rows:
+        try:
+            stat_info = Path(source_path).stat()
+            conn.execute(
+                "UPDATE indexed_files SET file_mtime = ?, file_size = ? "
+                "WHERE source_path = ?",
+                (stat_info.st_mtime, stat_info.st_size, source_path),
+            )
+            updated += 1
+        except OSError:
+            pass  # File deleted — reconcile_orphans will clean it up
+
+    if updated:
+        conn.commit()
+        logger.info("Backfilled mtime+size for %d pre-migration files", updated)
+
+    return {"backfilled": updated}
+
+
 def reconcile_orphans(store: ChunkStore) -> Dict:
     """Remove orphan chunks for files that no longer exist.
 

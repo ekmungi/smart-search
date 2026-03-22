@@ -8,7 +8,7 @@
 
 use std::process::Command as StdCommand;
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -31,6 +31,9 @@ struct ShortcutState {
 }
 
 /// Holds the managed backend child process handle.
+///
+/// Wrapped in Arc when managed by Tauri so the health monitor task
+/// can share ownership without lifetime issues.
 struct BackendState {
     child: Mutex<Option<CommandChild>>,
     /// Fallback: std::process::Child for dev mode (Python invocation).
@@ -54,7 +57,7 @@ fn hide_search_window(app: AppHandle) {
 /// Quit the app: stop backend and exit. Called when close-to-tray is off.
 #[tauri::command]
 fn quit_app(app: AppHandle) {
-    let state = app.state::<BackendState>();
+    let state = app.state::<Arc<BackendState>>();
     stop_backend(&state);
     app.exit(0);
 }
@@ -279,6 +282,28 @@ fn toggle_search_window(app: &AppHandle) {
             let _ = window.show();
             let _ = window.set_focus();
         }
+    }
+}
+
+/// Check if the backend HTTP server is healthy by hitting /api/health.
+///
+/// Returns true if the server responds with 200 within 3 seconds.
+async fn check_backend_health(port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{}/api/health", port);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        tauri::async_runtime::spawn_blocking(move || {
+            match ureq::get(&url).call() {
+                Ok(resp) => resp.status() == 200,
+                Err(_) => false,
+            }
+        }),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(healthy)) => healthy,
+        _ => false,
     }
 }
 
@@ -523,7 +548,7 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .tooltip("Smart Search")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "quit" => {
-                let state = app.state::<BackendState>();
+                let state = app.state::<Arc<BackendState>>();
                 stop_backend(&state);
                 app.exit(0);
             }
@@ -646,15 +671,15 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(BackendState {
+        .manage(Arc::new(BackendState {
             child: Mutex::new(None),
             dev_child: Mutex::new(None),
-        })
+        }))
         .manage(ShortcutState {
             current: Mutex::new(DEFAULT_SHORTCUT.to_string()),
         })
         .setup(|app| {
-            let state = app.state::<BackendState>();
+            let state = app.state::<Arc<BackendState>>();
 
             // Start the backend: check if already running, then try appropriate method
             let backend_alive = std::net::TcpStream::connect(
@@ -691,6 +716,40 @@ pub fn run() {
                         "Could not start backend -- start manually with: smart-search serve"
                     );
                 }
+            }
+
+            // Spawn a background health monitor that restarts the sidecar
+            // on crash (e.g. OOM during indexing). Checks every 5s; restarts
+            // after 3 consecutive failures (15s confirmed downtime).
+            if !cfg!(debug_assertions) {
+                let app_handle = app.handle().clone();
+                let monitor_state = app.state::<Arc<BackendState>>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut consecutive_failures: u32 = 0;
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+                        let healthy = check_backend_health(BACKEND_PORT).await;
+                        if healthy {
+                            consecutive_failures = 0;
+                            continue;
+                        }
+
+                        consecutive_failures += 1;
+                        if consecutive_failures >= 3 {
+                            log::warn!("Backend unresponsive for 15s, restarting sidecar...");
+                            kill_process_on_port(BACKEND_PORT);
+                            kill_sidecar_by_name();
+                            if let Some(child) = start_sidecar(&app_handle) {
+                                *monitor_state.child.lock().unwrap() = Some(child);
+                                log::info!("Sidecar restarted successfully");
+                            }
+                            consecutive_failures = 0;
+                            // Wait 10s for startup before resuming health checks
+                            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                        }
+                    }
+                });
             }
 
             // Auto-register MCP on first production launch
@@ -743,7 +802,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 // Kill the backend sidecar/dev process when the app exits
-                let state = app.state::<BackendState>();
+                let state = app.state::<Arc<BackendState>>();
                 stop_backend(&state);
             }
         });

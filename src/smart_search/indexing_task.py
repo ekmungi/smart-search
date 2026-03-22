@@ -5,6 +5,7 @@ Supports cancellation via threading.Event and progress tracking.
 Each folder gets at most one active task — resubmitting cancels the old one."""
 
 import ctypes
+import gc
 import logging
 import os
 import threading
@@ -264,7 +265,9 @@ class IndexingTaskManager:
 
         def _on_progress(_file_path: str, file_result: "IndexFileResult") -> None:
             """Update status counters and per-file log in real-time."""
-            file_name = _file_path.replace("\\", "/").split("/")[-1]
+            normalized = _file_path.replace("\\", "/")
+
+            file_name = normalized.split("/")[-1]
             if file_result.status == "indexed":
                 status.indexed += 1
                 status.processed_files.append({
@@ -298,33 +301,108 @@ class IndexingTaskManager:
                 )
 
         try:
-            # Discover total file count before waiting for semaphore (lightweight).
-            # Uses shared discover_files() for consistent, deduplicated counts (B48).
-            from smart_search.indexer import discover_files
+            # Phase 1: Lightweight pre-scan WITHOUT semaphore.
+            # Check mtime+size for each file. Files that haven't changed
+            # are reported as skipped immediately so progress bars update
+            # across all folders concurrently, even while one folder holds
+            # the semaphore for heavy embedding work.
+            from smart_search.indexer import IndexFileResult, discover_files
 
             folder_p = Path(folder)
             config = indexer._config
             discovered = discover_files(folder_p, config.supported_extensions)
-            file_count = len(discovered)
-            del discovered  # Free the list; only the count is needed here
-            status.total = file_count
+            status.total = len(discovered)
 
-            # Wait for resource slot before starting heavy work
-            _logger.info("Task %s: waiting for resource slot (%d max concurrent)",
-                         task_id, self._max_concurrent)
-            self._semaphore.acquire()
-            _logger.info("Task %s: acquired slot, indexing %s (%d files)",
-                         task_id, folder, file_count)
+            # Each pre-scan thread gets its own SQLite connection.
+            # Python's sqlite3 module is not safe for concurrent use of a
+            # single connection object, even with check_same_thread=False.
+            import sqlite3
+            prescan_conn = sqlite3.connect(
+                indexer._store._config.sqlite_path, check_same_thread=False,
+            )
+            prescan_conn.execute("PRAGMA journal_mode=WAL")
+
+            files_needing_work: list[Path] = []
             try:
-                if cancel_event.is_set():
-                    status.state = "cancelled"
-                    return
+                for f in discovered:
+                    if cancel_event.is_set():
+                        status.state = "cancelled"
+                        return
+                    try:
+                        stat_info = f.stat()
+                        source_path = f.resolve().as_posix()
+                        row = prescan_conn.execute(
+                            "SELECT file_mtime, file_size, "
+                            "COALESCE(status, 'indexed'), error, needs_ocr "
+                            "FROM indexed_files WHERE source_path = ?",
+                            (source_path,),
+                        ).fetchone()
+                        if (
+                            row is not None
+                            and row[0] is not None
+                            and row[1] is not None
+                            and row[0] == stat_info.st_mtime
+                            and row[1] == stat_info.st_size
+                        ):
+                            # File unchanged -- report true stored state.
+                            stored_status = row[2]
+                            stored_error = row[3]
+                            stored_needs_ocr = row[4]
+                            if stored_status == "failed":
+                                _on_progress(
+                                    str(f),
+                                    IndexFileResult(
+                                        file_path=str(f), status="failed",
+                                        error=stored_error or "previous failure",
+                                    ),
+                                )
+                            elif stored_needs_ocr:
+                                _on_progress(
+                                    str(f),
+                                    IndexFileResult(
+                                        file_path=str(f), status="skipped",
+                                        error="needs OCR",
+                                    ),
+                                )
+                            else:
+                                _on_progress(
+                                    str(f),
+                                    IndexFileResult(
+                                        file_path=str(f), status="skipped",
+                                    ),
+                                )
+                            continue
+                    except OSError:
+                        pass  # File may have been deleted; let index_file handle it
+                    files_needing_work.append(f)
+            finally:
+                prescan_conn.close()
 
-                indexer.index_folder(
-                    folder,
-                    cancel_event=cancel_event,
-                    on_progress=_on_progress,
-                )
+            # Phase 2: If all files were pre-skipped, no heavy work needed.
+            if not files_needing_work:
+                status.state = "completed"
+                _logger.info("Task %s: all %d files unchanged, skipping",
+                             task_id, status.total)
+                return
+
+            # Phase 3: Acquire semaphore for heavy work (embedding/conversion).
+            # Only files identified by pre-scan are processed — no re-discovery.
+            _logger.info("Task %s: %d/%d files need processing, waiting for slot",
+                         task_id, len(files_needing_work), status.total)
+            self._semaphore.acquire()
+            _logger.info("Task %s: acquired slot, indexing %s (%d files to process)",
+                         task_id, folder, len(files_needing_work))
+            try:
+                for f in files_needing_work:
+                    if cancel_event.is_set():
+                        status.state = "cancelled"
+                        return
+                    result = indexer.index_file(str(f))
+                    _on_progress(str(f), result)
+                    # Per-file GC to prevent memory accumulation during
+                    # heavy embedding/conversion work.
+                    if result.status in ("indexed", "failed"):
+                        gc.collect()
                 if cancel_event.is_set():
                     status.state = "cancelled"
                 else:

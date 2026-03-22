@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Callable, List, Optional
 _logger = logging.getLogger(__name__)
 
 from smart_search.config import SmartSearchConfig
+from smart_search.constants import MAX_CHUNKS_PER_FILE
 from smart_search.markdown_chunker import MarkdownChunker
 from smart_search.models import Chunk
 from smart_search.store import ChunkStore
@@ -220,8 +221,9 @@ class DocumentIndexer:
         """
         path = Path(file_path).resolve()
 
-        # Capture file size for debug logging before any processing.
-        file_size_kb = path.stat().st_size // 1024
+        # Capture stat info for mtime pre-check and debug logging.
+        stat_info = path.stat()
+        file_size_kb = stat_info.st_size // 1024
 
         # Validate extension
         if path.suffix.lower() not in self._config.supported_extensions:
@@ -230,15 +232,25 @@ class DocumentIndexer:
                 error=f"Unsupported extension: {path.suffix}",
             )
 
-        # Compute file hash
-        file_hash = self._compute_file_hash(path)
         source_path = path.as_posix()
 
-        # Check if already indexed at this hash
+        # Fast pre-check: skip if mtime + size unchanged (avoids full file read).
+        if not force and self._store.is_file_unchanged(
+            source_path, stat_info.st_mtime, stat_info.st_size,
+        ):
+            return IndexFileResult(file_path=str(path), status="skipped")
+
+        # Mtime or size changed (or new file) -- compute full hash.
+        file_hash = self._compute_file_hash(path)
+
+        # Check if content actually changed despite mtime change.
         if not force and self._store.is_file_indexed(source_path, file_hash):
-            return IndexFileResult(
-                file_path=str(path), status="skipped",
+            # Content unchanged but mtime changed (e.g. touch, copy, sync).
+            # Update stored mtime/size to avoid re-hashing next time.
+            self._store.update_file_metadata(
+                source_path, stat_info.st_mtime, stat_info.st_size,
             )
+            return IndexFileResult(file_path=str(path), status="skipped")
 
         try:
             # Route by extension: .md files are chunked directly;
@@ -259,12 +271,22 @@ class DocumentIndexer:
                     source_type=source_type,
                 )
                 del markdown_text
+            # Safety cap: truncate pathologically large files (e.g. 500-page
+            # dense PDFs) to prevent memory blowout during embedding.
+            if len(chunks) > MAX_CHUNKS_PER_FILE:
+                _logger.warning(
+                    "File %s produced %d chunks (cap: %d), truncating",
+                    file_path, len(chunks), MAX_CHUNKS_PER_FILE,
+                )
+                chunks = chunks[:MAX_CHUNKS_PER_FILE]
+
             if not chunks:
                 # Record in SQLite even with 0 chunks so the file is not
                 # retried on every restart. Binary files (PDF, DOCX, etc.)
                 # with no text are tagged needs_ocr for future retry.
                 self._store.record_file_indexed(
                     source_path, file_hash, 0, needs_ocr=is_binary,
+                    file_mtime=stat_info.st_mtime, file_size=stat_info.st_size,
                 )
                 return IndexFileResult(
                     file_path=str(path), status="indexed", chunk_count=0,
@@ -290,10 +312,12 @@ class DocumentIndexer:
             # Save count before releasing the list
             chunk_count = len(embedded_chunks)
             del embedded_chunks
+            gc.collect()  # Force immediate cleanup of chunk + embedding buffers
 
-            # Record in SQLite
+            # Record in SQLite with mtime + size for fast change detection.
             self._store.record_file_indexed(
-                source_path, file_hash, chunk_count
+                source_path, file_hash, chunk_count,
+                file_mtime=stat_info.st_mtime, file_size=stat_info.st_size,
             )
 
             _logger.debug(
@@ -310,6 +334,18 @@ class DocumentIndexer:
             )
 
         except Exception as e:
+            # Record failure in DB so file is not retried on restart
+            # unless it changes (mtime/size shift).
+            try:
+                self._store.record_file_failed(
+                    source_path,
+                    file_hash if "file_hash" in dir() else "",
+                    str(e),
+                    file_mtime=stat_info.st_mtime,
+                    file_size=stat_info.st_size,
+                )
+            except Exception:
+                pass  # Don't mask the original error
             return IndexFileResult(
                 file_path=str(path), status="failed", error=str(e),
             )
@@ -353,10 +389,9 @@ class DocumentIndexer:
             results.append(result)
             if result.status == "indexed":
                 indexed += 1
-                # Reclaim MarkItDown/ONNX buffers every 2 files to keep
-                # peak RSS below ~2 GB during large batch indexing (B53).
-                if indexed % 2 == 0:
-                    gc.collect()
+                # Reclaim MarkItDown/ONNX buffers after every file to prevent
+                # memory accumulation across sequential large files.
+                gc.collect()
             elif result.status == "skipped":
                 skipped += 1
             else:

@@ -6,6 +6,7 @@ from unittest.mock import patch, PropertyMock
 import numpy as np
 import pytest
 
+from smart_search.constants import UPSERT_BATCH_SIZE
 from smart_search.models import Chunk, generate_chunk_id
 from smart_search.store import ChunkStore
 
@@ -88,6 +89,33 @@ class TestStoreOperations:
         assert count == 3
         retrieved = initialized_store.get_chunks_for_file("/docs/test.pdf")
         assert len(retrieved) == 0
+
+
+class TestBatchedUpsert:
+    """Tests for batched LanceDB upsert (memory management)."""
+
+    def test_upsert_chunks_batched(self, initialized_store):
+        """500 chunks are inserted correctly via batching."""
+        chunks = [_make_chunk(idx=i) for i in range(500)]
+        initialized_store.upsert_chunks(chunks)
+        retrieved = initialized_store.get_chunks_for_file("/docs/test.pdf")
+        assert len(retrieved) == 500
+
+    def test_upsert_chunks_small_batch_no_issue(self, initialized_store):
+        """Fewer than UPSERT_BATCH_SIZE chunks works normally (single batch)."""
+        count = UPSERT_BATCH_SIZE - 50
+        chunks = [_make_chunk(idx=i) for i in range(count)]
+        initialized_store.upsert_chunks(chunks)
+        retrieved = initialized_store.get_chunks_for_file("/docs/test.pdf")
+        assert len(retrieved) == count
+
+    def test_upsert_chunks_batched_calls_add_multiple_times(self, initialized_store):
+        """Batching calls table.add() multiple times for large chunk lists."""
+        chunks = [_make_chunk(idx=i) for i in range(UPSERT_BATCH_SIZE + 50)]
+        with patch.object(initialized_store._table, "add", wraps=initialized_store._table.add) as mock_add:
+            initialized_store.upsert_chunks(chunks)
+        # Should call add() at least twice: one full batch + one partial
+        assert mock_add.call_count == 2
 
 
 class TestVectorSearch:
@@ -209,13 +237,14 @@ class TestCachedIndexSize:
         sqlite_size = Path(initialized_store._config.sqlite_path).stat().st_size
         assert stats.index_size_bytes >= sqlite_size
 
-    def test_init_size_cache_prevents_first_call_calculation(self, initialized_store):
-        """After initialize(), first get_stats() returns cached 0 without computing."""
+    def test_init_size_cache_calculates_on_startup(self, initialized_store):
+        """After initialize(), first get_stats() returns pre-calculated size without recalculating."""
+        # _init_size_cache() already called _calculate_index_size() during initialize(),
+        # so subsequent get_stats() within 120s should use the cached value.
         with patch.object(initialized_store, "_calculate_index_size") as mock_calc:
             stats = initialized_store.get_stats()
-        # _init_size_cache() was called by initialize(), so cache is warm
+        # Cache is warm from initialize() -- no recalculation needed
         mock_calc.assert_not_called()
-        assert stats.index_size_bytes == 0
 
     def test_cache_returns_same_value_within_ttl(self, initialized_store):
         """Two calls within 120s only compute index size once."""
@@ -245,6 +274,138 @@ class TestCachedIndexSize:
         with patch.object(initialized_store, "_calculate_index_size", side_effect=OSError("locked")):
             size = initialized_store._get_cached_index_size()
         assert size == 5000
+
+
+class TestMtimeChangeDetection:
+    """Tests for mtime+size fast change detection (is_file_unchanged, update_file_metadata)."""
+
+    def test_is_file_unchanged_true_when_matching(self, initialized_store):
+        """Exact mtime+size match returns True (file skipped without hash)."""
+        initialized_store.record_file_indexed(
+            "/docs/a.pdf", "hash_a", 5,
+            file_mtime=1711100000.123, file_size=4096,
+        )
+        assert initialized_store.is_file_unchanged("/docs/a.pdf", 1711100000.123, 4096)
+
+    def test_is_file_unchanged_false_when_mtime_differs(self, initialized_store):
+        """Different mtime triggers hash check even if size is same."""
+        initialized_store.record_file_indexed(
+            "/docs/a.pdf", "hash_a", 5,
+            file_mtime=1711100000.0, file_size=4096,
+        )
+        assert not initialized_store.is_file_unchanged("/docs/a.pdf", 1711100001.0, 4096)
+
+    def test_is_file_unchanged_false_when_size_differs(self, initialized_store):
+        """Different size triggers hash check even if mtime is same."""
+        initialized_store.record_file_indexed(
+            "/docs/a.pdf", "hash_a", 5,
+            file_mtime=1711100000.0, file_size=4096,
+        )
+        assert not initialized_store.is_file_unchanged("/docs/a.pdf", 1711100000.0, 8192)
+
+    def test_is_file_unchanged_false_when_null(self, initialized_store):
+        """Pre-migration rows (NULL mtime/size) trigger hash check."""
+        initialized_store.record_file_indexed("/docs/a.pdf", "hash_a", 5)
+        assert not initialized_store.is_file_unchanged("/docs/a.pdf", 1711100000.0, 4096)
+
+    def test_is_file_unchanged_false_when_not_indexed(self, initialized_store):
+        """File not in index returns False."""
+        assert not initialized_store.is_file_unchanged("/docs/new.pdf", 1711100000.0, 4096)
+
+    def test_record_file_indexed_stores_mtime_and_size(self, initialized_store):
+        """New mtime+size columns are populated and retrievable."""
+        initialized_store.record_file_indexed(
+            "/docs/a.pdf", "hash_a", 5,
+            file_mtime=1711100000.5, file_size=2048,
+        )
+        assert initialized_store.is_file_unchanged("/docs/a.pdf", 1711100000.5, 2048)
+
+    def test_update_file_metadata(self, initialized_store):
+        """update_file_metadata changes mtime+size without affecting hash."""
+        initialized_store.record_file_indexed(
+            "/docs/a.pdf", "hash_a", 5,
+            file_mtime=1711100000.0, file_size=4096,
+        )
+        initialized_store.update_file_metadata("/docs/a.pdf", 1711100999.0, 4096)
+        # mtime updated -- old mtime no longer matches
+        assert not initialized_store.is_file_unchanged("/docs/a.pdf", 1711100000.0, 4096)
+        # New mtime matches
+        assert initialized_store.is_file_unchanged("/docs/a.pdf", 1711100999.0, 4096)
+        # Hash is unchanged
+        assert initialized_store.is_file_indexed("/docs/a.pdf", "hash_a")
+
+
+class TestRecordFileFailed:
+    """Tests for recording failed file indexing attempts."""
+
+    def test_record_file_failed_writes_row(self, initialized_store):
+        """Failed file is recorded with status='failed' and error message."""
+        initialized_store.record_file_failed(
+            "/docs/bad.pdf", "hash_bad", "Parse error: corrupt PDF",
+            file_mtime=1711100000.0, file_size=4096,
+        )
+        row = initialized_store._sqlite_conn.execute(
+            "SELECT status, error, file_mtime, file_size FROM indexed_files WHERE source_path = ?",
+            ("/docs/bad.pdf",),
+        ).fetchone()
+        assert row[0] == "failed"
+        assert row[1] == "Parse error: corrupt PDF"
+        assert row[2] == 1711100000.0
+        assert row[3] == 4096
+
+    def test_failed_file_is_skipped_by_mtime_check(self, initialized_store):
+        """is_file_unchanged returns True for failed files with matching mtime+size."""
+        initialized_store.record_file_failed(
+            "/docs/bad.pdf", "", "Timeout after 120s",
+            file_mtime=1711100000.0, file_size=8192,
+        )
+        assert initialized_store.is_file_unchanged("/docs/bad.pdf", 1711100000.0, 8192)
+
+    def test_failed_file_retried_when_mtime_changes(self, initialized_store):
+        """Changed mtime on a failed file triggers retry."""
+        initialized_store.record_file_failed(
+            "/docs/bad.pdf", "", "Timeout after 120s",
+            file_mtime=1711100000.0, file_size=8192,
+        )
+        assert not initialized_store.is_file_unchanged("/docs/bad.pdf", 1711100999.0, 8192)
+
+    def test_failed_file_retried_when_size_changes(self, initialized_store):
+        """Changed size on a failed file triggers retry."""
+        initialized_store.record_file_failed(
+            "/docs/bad.pdf", "", "Timeout after 120s",
+            file_mtime=1711100000.0, file_size=8192,
+        )
+        assert not initialized_store.is_file_unchanged("/docs/bad.pdf", 1711100000.0, 16384)
+
+    def test_record_file_failed_with_empty_hash(self, initialized_store):
+        """Failed file with empty hash (pre-hash failure) still records correctly."""
+        initialized_store.record_file_failed(
+            "/docs/bad.pdf", "", "Permission denied",
+            file_mtime=1711100000.0, file_size=4096,
+        )
+        row = initialized_store._sqlite_conn.execute(
+            "SELECT file_hash, status FROM indexed_files WHERE source_path = ?",
+            ("/docs/bad.pdf",),
+        ).fetchone()
+        assert row[0] == ""
+        assert row[1] == "failed"
+
+    def test_record_file_failed_overwrites_previous_success(self, initialized_store):
+        """Re-failing a previously indexed file updates status to 'failed'."""
+        initialized_store.record_file_indexed(
+            "/docs/a.pdf", "hash_a", 5,
+            file_mtime=1711100000.0, file_size=4096,
+        )
+        initialized_store.record_file_failed(
+            "/docs/a.pdf", "hash_a", "Now corrupt",
+            file_mtime=1711100999.0, file_size=4096,
+        )
+        row = initialized_store._sqlite_conn.execute(
+            "SELECT status, error FROM indexed_files WHERE source_path = ?",
+            ("/docs/a.pdf",),
+        ).fetchone()
+        assert row[0] == "failed"
+        assert row[1] == "Now corrupt"
 
 
 class TestReconcile:

@@ -8,7 +8,10 @@ import {
   RefreshCw,
   CheckCircle,
   AlertCircle,
+  AlertTriangle,
   Loader,
+  FileCheck,
+  FileWarning,
 } from "lucide-react";
 import {
   fetchFolders,
@@ -35,7 +38,8 @@ export default function FolderManager() {
       setFolders(fRes.folders);
       setError(null);
     } catch {
-      setError("Could not load folders");
+      // Keep previous folders visible -- don't clear on error
+      setError("Could not load folders -- showing last known state");
     } finally {
       setLoading(false);
     }
@@ -169,7 +173,7 @@ export default function FolderManager() {
         <p className="text-text-secondary text-sm">Loading folders...</p>
       )}
 
-      {!loading && folders.length === 0 && (
+      {!loading && folders.length === 0 && !error && (
         <div className="bg-bg-surface rounded-lg p-8 text-center">
           <p className="text-text-secondary mb-2">No folders configured</p>
           <p className="text-text-muted text-sm">
@@ -205,19 +209,46 @@ export default function FolderManager() {
                       ? (() => {
                           const t = taskForFolder(folder.path)!;
                           const done = t.indexed + t.skipped + t.failed;
-                          const detail = t.failed > 0 ? `, ${t.failed} failed` : "";
-                          return t.total > 0
-                            ? `Indexing... ${done} of ${t.total}${detail}`
-                            : `Indexing... ${done} files${detail}`;
+                          const pct = t.total > 0 ? (done / t.total) * 100 : 0;
+                          return (
+                            <>
+                              <div className="w-full bg-bg-elevated rounded-full h-1.5 mt-0.5">
+                                <div
+                                  className="bg-accent-blue h-1.5 rounded-full transition-all duration-300"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span className="flex items-center gap-2">
+                                <span>{done} of {t.total}</span>
+                                {t.failed > 0 && (
+                                  <span className="flex items-center gap-1">
+                                    <FileWarning size={11} className="text-accent-amber" />
+                                    {t.failed} failed
+                                  </span>
+                                )}
+                              </span>
+                            </>
+                          );
                         })()
                       : completedTaskForFolder(folder.path)?.state === "failed"
                         ? `Failed: ${completedTaskForFolder(folder.path)!.error ?? "unknown error"}`
                         : completedTaskForFolder(folder.path)?.state === "completed"
                           ? (() => {
                               const ct = completedTaskForFolder(folder.path)!;
-                              const parts = [`${ct.indexed + ct.skipped} indexed`];
-                              if (ct.failed > 0) parts.push(`${ct.failed} failed`);
-                              return parts.join(", ");
+                              return (
+                                <span className="flex items-center gap-2">
+                                  <span className="flex items-center gap-1">
+                                    <FileCheck size={11} className="text-accent-green" />
+                                    {ct.indexed + ct.skipped} indexed
+                                  </span>
+                                  {ct.failed > 0 && (
+                                    <span className="flex items-center gap-1">
+                                      <FileWarning size={11} className="text-accent-amber" />
+                                      {ct.failed} failed
+                                    </span>
+                                  )}
+                                </span>
+                              );
                             })()
                           : "Pending"}
                 </p>

@@ -15,6 +15,10 @@ type View = "dashboard" | "folders" | "log" | "settings";
 
 function App() {
   const [activeView, setActiveView] = useState<View>("dashboard");
+  // Lifted from Dashboard so it survives tab switches (component unmount/remount).
+  // Once the backend has responded successfully, we know it was running --
+  // so a subsequent disconnect should show "Reconnecting..." not "Offline".
+  const [everConnected, setEverConnected] = useState(false);
 
   const appWindow = getCurrentWindow();
 
@@ -61,7 +65,12 @@ function App() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar activeView={activeView} onNavigate={setActiveView} />
         <main className="flex-1 overflow-auto p-6">
-          {activeView === "dashboard" && <Dashboard />}
+          {activeView === "dashboard" && (
+            <Dashboard
+              everConnected={everConnected}
+              onConnected={() => setEverConnected(true)}
+            />
+          )}
           {activeView === "folders" && <FolderManager />}
           {activeView === "log" && <IndexingLog />}
           {activeView === "settings" && <Settings />}

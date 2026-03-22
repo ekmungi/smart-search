@@ -32,7 +32,14 @@ function formatUptime(seconds: number): string {
   return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`;
 }
 
-export default function Dashboard() {
+interface DashboardProps {
+  /** Whether the backend has ever responded successfully this session. Lifted to App to survive tab switches. */
+  everConnected: boolean;
+  /** Callback to notify App that the backend responded successfully. */
+  onConnected: () => void;
+}
+
+export default function Dashboard({ everConnected, onConnected }: DashboardProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +48,7 @@ export default function Dashboard() {
   const [activeTasks, setActiveTasks] = useState<IndexingTask[]>([]);
   // True on first load: assume backend is starting up, not offline.
   // Stays true until health succeeds OR 30s of continuous failure elapses.
-  const [startingUp, setStartingUp] = useState<boolean>(true);
+  const [startingUp, setStartingUp] = useState<boolean>(!everConnected);
   // Tracks the timestamp of the first consecutive health failure (null when healthy).
   const failingSince = useRef<number | null>(null);
 
@@ -54,6 +61,7 @@ export default function Dashboard() {
         setHealth(h);
         setError(null);
         setStartingUp(false);
+        onConnected();
         failingSince.current = null;
       } catch {
         setHealth(null);
@@ -155,7 +163,9 @@ export default function Dashboard() {
                 ? "bg-accent-green"
                 : startingUp
                   ? "bg-accent-amber"
-                  : "bg-accent-red"
+                  : everConnected
+                    ? "bg-accent-amber"
+                    : "bg-accent-red"
             }`}
           />
           <span className="text-sm text-text-secondary">
@@ -163,7 +173,9 @@ export default function Dashboard() {
               ? `v${health.version}`
               : startingUp
                 ? "Starting up..."
-                : "Offline"}
+                : everConnected
+                  ? "Reconnecting..."
+                  : "Offline"}
           </span>
         </div>
       </div>
@@ -175,9 +187,17 @@ export default function Dashboard() {
         </div>
       )}
       {error && !startingUp && (
-        <div className="bg-bg-surface border border-accent-red/30 rounded-lg p-4 mb-6 text-sm text-accent-red">
-          {error} &mdash; Start the backend with:{" "}
-          <code className="text-text-primary">smart-search serve</code>
+        <div className={`bg-bg-surface border ${everConnected ? "border-accent-amber/30" : "border-accent-red/30"} rounded-lg p-4 mb-6 text-sm`}>
+          {everConnected ? (
+            <span className="text-accent-amber">
+              Backend disconnected &mdash; reconnecting...
+            </span>
+          ) : (
+            <span className="text-accent-red">
+              {error} &mdash; Start the backend with:{" "}
+              <code className="text-text-primary">smart-search serve</code>
+            </span>
+          )}
         </div>
       )}
 
@@ -185,8 +205,8 @@ export default function Dashboard() {
       {activeTasks.some((t) => t.state === "running" || t.state === "pending") && (
         <div className="bg-bg-surface border border-accent-blue/30 rounded-lg p-4 mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-4 h-4 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
-            <div>
+            <div className="w-4 h-4 border-2 border-accent-blue border-t-transparent rounded-full animate-spin shrink-0" />
+            <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-text-primary">
                 Indexing{" "}
                 {activeTasks
@@ -195,16 +215,26 @@ export default function Dashboard() {
                   .join(", ")}
                 ...
               </p>
-              <p className="text-xs text-text-secondary mt-1">
-                {(() => {
-                  // Include all tasks (running + completed) for accurate totals
-                  const done = activeTasks.reduce((sum, t) => sum + t.indexed + t.skipped + t.failed, 0);
-                  const total = activeTasks.reduce((sum, t) => sum + t.total, 0);
-                  const failed = activeTasks.reduce((sum, t) => sum + t.failed, 0);
-                  const detail = failed > 0 ? `, ${failed} failed` : "";
-                  return total > 0 ? `${done} of ${total} files processed${detail}` : `${done} files processed${detail}`;
-                })()}
-              </p>
+              {(() => {
+                const done = activeTasks.reduce((sum, t) => sum + t.indexed + t.skipped + t.failed, 0);
+                const total = activeTasks.reduce((sum, t) => sum + t.total, 0);
+                const failed = activeTasks.reduce((sum, t) => sum + t.failed, 0);
+                const detail = failed > 0 ? `, ${failed} failed` : "";
+                const pct = total > 0 ? (done / total) * 100 : 0;
+                return (
+                  <>
+                    <div className="w-full bg-bg-elevated rounded-full h-2 mt-2">
+                      <div
+                        className="bg-accent-blue h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-text-secondary mt-1">
+                      {total > 0 ? `${done} of ${total} files processed${detail}` : `${done} files processed${detail}`}
+                    </p>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

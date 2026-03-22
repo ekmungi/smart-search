@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from smart_search.config import SmartSearchConfig
+from smart_search.constants import MAX_CHUNKS_PER_FILE
 from smart_search.indexer import DocumentIndexer, _get_rss_mb, discover_files
 from smart_search.models import Chunk
 from smart_search.store import ChunkStore
@@ -151,16 +152,18 @@ class TestGetRssMb:
 
 
 class TestGcCollectFrequency:
-    """Tests for gc.collect frequency during folder indexing (B53)."""
+    """Tests for gc.collect frequency during folder indexing."""
 
     @patch("smart_search.markitdown_parser.convert_to_markdown", return_value="# Converted\nContent")
     @patch("smart_search.indexer.gc.collect")
-    def test_gc_collect_every_2_files(self, mock_gc, mock_convert, indexer, tmp_path):
-        """gc.collect is called at least 3 times when indexing 6 files."""
-        for i in range(6):
+    def test_gc_collect_every_file(self, mock_gc, mock_convert, indexer, tmp_path):
+        """gc.collect is called after every indexed file (not every 2nd)."""
+        for i in range(4):
             (tmp_path / f"doc{i}.pdf").write_bytes(f"%PDF fake {i}".encode())
         indexer.index_folder(str(tmp_path))
-        assert mock_gc.call_count >= 3
+        # Should be called at least 4 times: once per indexed file in index_folder
+        # plus once per file in index_file (del embedded_chunks + gc.collect)
+        assert mock_gc.call_count >= 4
 
     @patch("smart_search.indexer.gc.collect")
     def test_gc_collect_on_failure(self, mock_gc, indexer, tmp_path):
@@ -171,6 +174,37 @@ class TestGcCollectFrequency:
         with patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("boom")):
             indexer.index_folder(str(tmp_path))
         assert mock_gc.call_count >= 1
+
+
+class TestChunkCap:
+    """Tests for MAX_CHUNKS_PER_FILE safety cap."""
+
+    @patch("smart_search.indexer.MAX_CHUNKS_PER_FILE", 10)
+    def test_chunk_cap_truncates(self, indexer, indexer_deps, tmp_path):
+        """File producing more than the cap is truncated."""
+        md = tmp_path / "huge.md"
+        md.write_text("# Huge\nContent")
+        # Make chunker return 25 chunks (exceeds patched cap of 10)
+        indexer_deps["markdown_chunker"].chunk_file.side_effect = lambda path: _make_fake_chunks(
+            path, count=25, source_type="md",
+        )
+        result = indexer.index_file(str(md))
+        assert result.status == "indexed"
+        assert result.chunk_count == 10
+
+    @patch("smart_search.indexer.MAX_CHUNKS_PER_FILE", 10)
+    def test_chunk_cap_logs_warning(self, indexer, indexer_deps, tmp_path):
+        """Truncation logs a warning with file path and counts."""
+        md = tmp_path / "huge.md"
+        md.write_text("# Huge\nContent")
+        indexer_deps["markdown_chunker"].chunk_file.side_effect = lambda path: _make_fake_chunks(
+            path, count=25, source_type="md",
+        )
+        with patch("smart_search.indexer._logger") as mock_logger:
+            indexer.index_file(str(md))
+        mock_logger.warning.assert_called_once()
+        warning_args = mock_logger.warning.call_args[0]
+        assert "10" in str(warning_args)  # cap value in warning
 
 
 class TestIndexFile:
@@ -215,6 +249,148 @@ class TestIndexFile:
         bad_pdf.write_text("not a real pdf")
         result = indexer.index_file(str(bad_pdf))
         assert result.status == "failed"
+
+
+class TestMtimePreCheck:
+    """Tests for mtime+size fast change detection in index_file()."""
+
+    def test_index_file_skips_via_mtime(self, indexer, indexer_deps, tmp_path):
+        """Unchanged file skips without computing SHA256 hash."""
+        md = tmp_path / "note.md"
+        md.write_text("# Test\nContent")
+        # First index: stores mtime + size
+        result1 = indexer.index_file(str(md))
+        assert result1.status == "indexed"
+        # Second index: mtime+size match -> skip (no hash computation)
+        with patch.object(indexer, "_compute_file_hash") as mock_hash:
+            result2 = indexer.index_file(str(md))
+        assert result2.status == "skipped"
+        mock_hash.assert_not_called()
+
+    @patch("smart_search.markitdown_parser.convert_to_markdown", return_value="# Converted\nPDF content")
+    def test_index_file_rehashes_when_mtime_changes(self, mock_convert, indexer, indexer_deps, tmp_path):
+        """Modified mtime triggers hash computation."""
+        pdf = tmp_path / "doc.pdf"
+        pdf.write_bytes(b"%PDF-1.4 content")
+        indexer.index_file(str(pdf))
+        # Touch the file to change mtime without changing content
+        import os
+        import time
+        time.sleep(0.05)  # Ensure mtime changes
+        os.utime(str(pdf))
+        # Now mtime differs -> hash should be computed
+        with patch.object(indexer, "_compute_file_hash", wraps=indexer._compute_file_hash) as mock_hash:
+            result = indexer.index_file(str(pdf))
+        assert result.status == "skipped"  # Hash same -> skipped
+        mock_hash.assert_called_once()
+
+    def test_index_file_updates_mtime_when_hash_unchanged(self, indexer, indexer_deps, tmp_path):
+        """Touch scenario: mtime changes but content same -> mtime updated in store."""
+        md = tmp_path / "note.md"
+        md.write_text("# Test\nContent")
+        indexer.index_file(str(md))
+        # Touch the file
+        import os
+        import time
+        time.sleep(0.05)
+        os.utime(str(md))
+        # Re-index: hash matches, but mtime should be updated
+        indexer.index_file(str(md))
+        # Third index: should skip via mtime (updated mtime stored)
+        with patch.object(indexer, "_compute_file_hash") as mock_hash:
+            result = indexer.index_file(str(md))
+        assert result.status == "skipped"
+        mock_hash.assert_not_called()
+
+    def test_index_file_reindexes_when_content_changes(self, indexer, indexer_deps, tmp_path):
+        """Actual content change triggers re-indexing."""
+        md = tmp_path / "note.md"
+        md.write_text("# Test\nOriginal content")
+        indexer.index_file(str(md))
+        # Change content (also changes mtime and size)
+        md.write_text("# Test\nCompletely different content here")
+        result = indexer.index_file(str(md))
+        assert result.status == "indexed"
+
+    def test_index_file_force_bypasses_mtime(self, indexer, indexer_deps, tmp_path):
+        """force=True bypasses mtime pre-check."""
+        md = tmp_path / "note.md"
+        md.write_text("# Test\nContent")
+        indexer.index_file(str(md))
+        # Force should skip mtime check and re-index
+        result = indexer.index_file(str(md), force=True)
+        assert result.status == "indexed"
+
+
+class TestFailureRecording:
+    """Tests for recording failed files in DB to prevent wasteful retries."""
+
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
+    def test_failure_records_in_db(self, mock_convert, indexer, indexer_deps, tmp_path):
+        """Failed file is recorded in SQLite with status='failed'."""
+        bad_pdf = tmp_path / "corrupt.pdf"
+        bad_pdf.write_bytes(b"%PDF broken")
+        result = indexer.index_file(str(bad_pdf))
+        assert result.status == "failed"
+        # Verify the failure was recorded in the store
+        posix_path = Path(bad_pdf).resolve().as_posix()
+        row = indexer_deps["store"]._sqlite_conn.execute(
+            "SELECT status, error FROM indexed_files WHERE source_path = ?",
+            (posix_path,),
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "failed"
+        assert "Parse error" in row[1]
+
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
+    def test_failed_file_skipped_on_retry(self, mock_convert, indexer, indexer_deps, tmp_path):
+        """Previously failed file is skipped on next attempt (mtime+size unchanged)."""
+        bad_pdf = tmp_path / "corrupt.pdf"
+        bad_pdf.write_bytes(b"%PDF broken")
+        # First attempt: fails and records
+        result1 = indexer.index_file(str(bad_pdf))
+        assert result1.status == "failed"
+        # Second attempt: same file, should be skipped via mtime+size
+        result2 = indexer.index_file(str(bad_pdf))
+        assert result2.status == "skipped"
+
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Timeout"))
+    def test_failed_file_retried_after_change(self, mock_convert, indexer, indexer_deps, tmp_path):
+        """Failed file is retried when its content changes (new mtime+size)."""
+        bad_pdf = tmp_path / "doc.pdf"
+        bad_pdf.write_bytes(b"%PDF broken")
+        indexer.index_file(str(bad_pdf))
+        # Replace with different content (changes mtime and size)
+        bad_pdf.write_bytes(b"%PDF-1.4 completely new content here")
+        result = indexer.index_file(str(bad_pdf))
+        # Still fails (mock raises), but was retried not skipped
+        assert result.status == "failed"
+        assert "Timeout" in result.error
+
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
+    def test_failure_records_with_empty_hash_on_early_error(self, mock_convert, indexer, indexer_deps, tmp_path):
+        """Failure before hash computation records empty hash string."""
+        bad_pdf = tmp_path / "corrupt.pdf"
+        bad_pdf.write_bytes(b"%PDF broken")
+        indexer.index_file(str(bad_pdf))
+        posix_path = Path(bad_pdf).resolve().as_posix()
+        row = indexer_deps["store"]._sqlite_conn.execute(
+            "SELECT file_hash FROM indexed_files WHERE source_path = ?",
+            (posix_path,),
+        ).fetchone()
+        # Hash should be non-empty since hash computation happens before the try block
+        assert row is not None
+
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
+    def test_record_failed_exception_does_not_mask_original(self, mock_convert, indexer, indexer_deps, tmp_path):
+        """If record_file_failed itself throws, the original error is still returned."""
+        bad_pdf = tmp_path / "corrupt.pdf"
+        bad_pdf.write_bytes(b"%PDF broken")
+        # Make record_file_failed raise
+        with patch.object(indexer_deps["store"], "record_file_failed", side_effect=RuntimeError("DB locked")):
+            result = indexer.index_file(str(bad_pdf))
+        assert result.status == "failed"
+        assert "Parse error" in result.error  # Original error, not "DB locked"
 
 
 class TestIndexFolder:

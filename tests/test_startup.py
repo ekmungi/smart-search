@@ -10,7 +10,11 @@ import pytest
 from smart_search.config import SmartSearchConfig
 from smart_search.index_metadata import IndexMetadata
 from smart_search.models import Chunk, generate_chunk_id
-from smart_search.startup import check_index_compatibility, reconcile_orphans
+from smart_search.startup import (
+    backfill_mtime_if_needed,
+    check_index_compatibility,
+    reconcile_orphans,
+)
 from smart_search.store import ChunkStore
 
 
@@ -144,6 +148,61 @@ class TestCheckIndexCompatibility:
         stored, current = result["mismatches"]["embedding_model"]
         assert stored == "old-model/v1"
         assert current == tmp_config.embedding_model
+
+
+class TestBackfillMtime:
+    """Tests for backfill_mtime_if_needed startup migration."""
+
+    def test_backfills_null_mtime_from_disk(self, initialized_store, tmp_path):
+        """Files with NULL mtime get backfilled from disk stat info."""
+        file_a = tmp_path / "a.md"
+        file_a.write_text("Content")
+        p = Path(file_a).as_posix()
+
+        # Record without mtime (simulates pre-migration row)
+        initialized_store.record_file_indexed(p, "hash_a", 3)
+        # Verify mtime is NULL
+        assert not initialized_store.is_file_unchanged(p, file_a.stat().st_mtime, file_a.stat().st_size)
+
+        result = backfill_mtime_if_needed(initialized_store)
+
+        assert result["backfilled"] == 1
+        # Now mtime check should work
+        assert initialized_store.is_file_unchanged(p, file_a.stat().st_mtime, file_a.stat().st_size)
+
+    def test_skips_files_with_existing_mtime(self, initialized_store, tmp_path):
+        """Files that already have mtime are not touched."""
+        file_a = tmp_path / "a.md"
+        file_a.write_text("Content")
+        p = Path(file_a).as_posix()
+
+        initialized_store.record_file_indexed(
+            p, "hash_a", 3,
+            file_mtime=file_a.stat().st_mtime, file_size=file_a.stat().st_size,
+        )
+
+        result = backfill_mtime_if_needed(initialized_store)
+
+        assert result["backfilled"] == 0
+
+    def test_handles_deleted_files_gracefully(self, initialized_store, tmp_path):
+        """Deleted files with NULL mtime are skipped (not crashed)."""
+        file_a = tmp_path / "a.md"
+        file_a.write_text("Content")
+        p = Path(file_a).as_posix()
+
+        initialized_store.record_file_indexed(p, "hash_a", 3)
+        file_a.unlink()  # Delete the file
+
+        result = backfill_mtime_if_needed(initialized_store)
+
+        assert result["backfilled"] == 0  # Can't stat deleted file
+
+    def test_no_rows_returns_zero(self, initialized_store):
+        """Empty index returns zero backfilled."""
+        result = backfill_mtime_if_needed(initialized_store)
+
+        assert result["backfilled"] == 0
 
 
 class TestReconcileOrphansWrapper:
