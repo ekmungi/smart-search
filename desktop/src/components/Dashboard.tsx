@@ -243,17 +243,17 @@ export default function Dashboard() {
         <StatsCard
           icon={FileText}
           label="Documents"
-          value={stats?.document_count ?? "--"}
+          value={health ? (stats?.document_count ?? 0) : "--"}
         />
         <StatsCard
           icon={Layers}
           label="Chunks"
-          value={stats?.chunk_count ?? "--"}
+          value={health ? (stats?.chunk_count ?? 0) : "--"}
         />
         <StatsCard
           icon={HardDrive}
           label="Index Size"
-          value={stats ? `${stats.index_size_mb} MB` : "--"}
+          value={health ? (stats ? `${stats.index_size_mb} MB` : "0 MB") : "--"}
         />
         <StatsCard
           icon={Clock}

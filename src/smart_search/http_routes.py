@@ -382,6 +382,7 @@ def create_router(
         Returns the number of folders queued and hashes cleared.
         """
         store = get_store()
+        store.rebuild_table()
         hashes_cleared = store.clear_all_file_hashes()
 
         folders = get_config_mgr().list_watch_dirs()

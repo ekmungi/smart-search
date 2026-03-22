@@ -15,4 +15,4 @@ DEFAULT_HOST = "127.0.0.1"
 OVERFETCH_MULTIPLIER = 5  # Fetch limit*N from each source before fusion
 
 # Application metadata
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.11.1"

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
@@ -21,6 +22,25 @@ logger = logging.getLogger(__name__)
 # Maximum characters to display per chunk in results
 _MAX_TEXT_LENGTH = 500
 
+# Pattern matching leading/trailing punctuation and whitespace.
+# Preserves internal punctuation (e.g. hyphens, apostrophes in words).
+_STRIP_PUNCT_RE = re.compile(r'^[\s\W]+|[\s\W]+$', re.UNICODE)
+
+
+def _normalize_query(query: str) -> str:
+    """Strip leading/trailing punctuation and whitespace from a search query.
+
+    Ensures "drug discovery", "drug discovery.", and " drug discovery! " all
+    produce the same search behavior. Internal punctuation is preserved.
+
+    Args:
+        query: Raw user query string.
+
+    Returns:
+        Cleaned query. Returns original if stripping would produce empty string.
+    """
+    cleaned = _STRIP_PUNCT_RE.sub('', query)
+    return cleaned if cleaned else query
 
 
 class SearchEngine:
@@ -70,12 +90,16 @@ class SearchEngine:
         Returns:
             List of SearchResult objects ranked by relevance.
         """
+        # Normalize query to remove trailing punctuation that can cause
+        # inconsistent results between "drug discovery" and "drug discovery."
+        normalized = _normalize_query(query)
+
         if mode == "keyword":
-            results = self._keyword_search(query, limit)
+            results = self._keyword_search(normalized, limit)
         elif mode == "semantic":
-            results = self._semantic_search(query, limit)
+            results = self._semantic_search(normalized, limit)
         else:
-            results = self._hybrid_search(query, limit)
+            results = self._hybrid_search(normalized, limit)
 
         # Apply doc_types filter if specified
         if doc_types:
@@ -147,11 +171,31 @@ class SearchEngine:
             results.append(SearchResult(rank=rank, score=round(score, 4), chunk=chunk))
         return results
 
+    def _unfiltered_semantic_search(self, query: str, limit: int) -> List[SearchResult]:
+        """Vector search WITHOUT relevance_threshold filtering.
+
+        Used by _hybrid_search so borderline semantic results can still
+        receive an RRF boost from keyword matches. The threshold is
+        applied to the final fused results instead.
+
+        Args:
+            query: Search query string.
+            limit: Maximum results.
+
+        Returns:
+            Unfiltered ranked SearchResult list from vector search.
+        """
+        query_vec = self._embedder.embed_query(query)
+        return self._store.vector_search(query_vec, limit=limit)
+
     def _hybrid_search(self, query: str, limit: int) -> List[SearchResult]:
         """Combine vector + keyword search via Reciprocal Rank Fusion.
 
         Over-fetches limit*OVERFETCH_MULTIPLIER from each source, fuses
-        with RRF, and truncates to the requested limit.
+        with RRF, and truncates to the requested limit. Uses unfiltered
+        semantic results so borderline items can still be boosted by
+        keyword matches (e.g. a chunk scoring 0.29 semantically that
+        ranks #1 in FTS5 should still appear in fused results).
 
         Args:
             query: Search query string.
@@ -161,13 +205,15 @@ class SearchEngine:
             Fused and ranked SearchResult list.
         """
         overfetch = limit * OVERFETCH_MULTIPLIER
-        semantic_results = self._semantic_search(query, overfetch)
+        semantic_results = self._unfiltered_semantic_search(query, overfetch)
         keyword_results = self._keyword_search(query, overfetch)
 
         if not semantic_results and not keyword_results:
             return []
         if not keyword_results:
-            return semantic_results[:limit]
+            # No keyword matches -- fall back to threshold-filtered semantic
+            return [r for r in semantic_results
+                    if r.score >= self._config.relevance_threshold][:limit]
         if not semantic_results:
             return keyword_results[:limit]
 

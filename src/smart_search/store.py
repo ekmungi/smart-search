@@ -1,6 +1,7 @@
 # LanceDB vector storage + SQLite metadata for chunk persistence and search.
 
 import logging
+import shutil
 import sqlite3
 
 _logger = logging.getLogger(__name__)
@@ -117,6 +118,10 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
             )"""
         )
         self._sqlite_conn.commit()
+
+        # Seed the index size cache so the first stats poll returns instantly
+        # with size=0 instead of triggering an expensive rglob scan.
+        self._init_size_cache()
 
     def close(self) -> None:
         """Close the SQLite connection.
@@ -281,12 +286,23 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
 
         Also clears all indexed_files records from SQLite since the
         embeddings are no longer valid after a model or dimension change.
+        Physically removes all .lance files from disk to reclaim space.
         """
         # Drop existing LanceDB table
         try:
             self._db.drop_table(self._config.lancedb_table_name)
         except (OSError, ValueError):
             _logger.debug("drop_table failed (table may not exist)", exc_info=True)
+
+        # Physically remove stale .lance files from disk (B58).
+        # drop_table() only removes the logical table; fragment files remain.
+        lance_path = Path(self._config.lancedb_path)
+        if lance_path.exists():
+            shutil.rmtree(lance_path)
+            lance_path.mkdir(parents=True, exist_ok=True)
+
+        # Reconnect to LanceDB since the directory was wiped
+        self._db = lancedb.connect(str(lance_path))
 
         # Recreate with current config dimensions
         schema = pa.schema([
@@ -325,6 +341,9 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
             )"""
         )
         self._sqlite_conn.commit()
+
+        # Invalidate cached index size so stats reflect the wiped directory
+        self.invalidate_size_cache()
 
     def reconcile(self) -> dict:
         """Remove chunks for files that no longer exist on disk.

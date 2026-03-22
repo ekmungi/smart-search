@@ -201,26 +201,39 @@ class TestCachedIndexSize:
         initialized_store.upsert_chunks(chunks)
         initialized_store.record_file_indexed("/docs/test.pdf", "hash", 3)
 
+        # Invalidate the startup cache so get_stats() recalculates
+        initialized_store.invalidate_size_cache()
         stats = initialized_store.get_stats()
         # The full index size (LanceDB + SQLite) should be larger
         # than just the SQLite file
         sqlite_size = Path(initialized_store._config.sqlite_path).stat().st_size
         assert stats.index_size_bytes >= sqlite_size
 
-    def test_cache_returns_same_value_within_60s(self, initialized_store):
-        """Two calls within 60s only compute index size once."""
+    def test_init_size_cache_prevents_first_call_calculation(self, initialized_store):
+        """After initialize(), first get_stats() returns cached 0 without computing."""
+        with patch.object(initialized_store, "_calculate_index_size") as mock_calc:
+            stats = initialized_store.get_stats()
+        # _init_size_cache() was called by initialize(), so cache is warm
+        mock_calc.assert_not_called()
+        assert stats.index_size_bytes == 0
+
+    def test_cache_returns_same_value_within_ttl(self, initialized_store):
+        """Two calls within 120s only compute index size once."""
+        # Invalidate startup cache, then verify caching behavior
+        initialized_store.invalidate_size_cache()
         with patch.object(initialized_store, "_calculate_index_size", return_value=1000) as mock_calc:
             size1 = initialized_store._get_cached_index_size()
             size2 = initialized_store._get_cached_index_size()
         assert size1 == size2 == 1000
         mock_calc.assert_called_once()
 
-    def test_cache_refreshes_after_60s(self, initialized_store):
-        """After 60s, the cache is refreshed with a new calculation."""
+    def test_cache_refreshes_after_ttl(self, initialized_store):
+        """After 120s, the cache is refreshed with a new calculation."""
+        initialized_store.invalidate_size_cache()
         with patch.object(initialized_store, "_calculate_index_size", return_value=1000) as mock_calc:
             initialized_store._get_cached_index_size()
-            # Simulate 61 seconds passing
-            initialized_store._cached_index_size_at -= 61.0
+            # Simulate 121 seconds passing
+            initialized_store._cached_index_size_at -= 121.0
             initialized_store._get_cached_index_size()
         assert mock_calc.call_count == 2
 

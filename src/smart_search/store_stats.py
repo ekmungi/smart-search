@@ -22,6 +22,16 @@ class StatsStoreMixin:
         - self._cached_index_size_at: float
     """
 
+    def _init_size_cache(self) -> None:
+        """Set cache timestamp so first stats call returns instantly with size=0.
+
+        Without this, _cached_index_size_at=0.0 vs time.monotonic() (seconds
+        since boot) means the cache check always misses on first call, forcing
+        an expensive rglob that can exceed the 30s API timeout.
+        """
+        self._cached_index_size = 0
+        self._cached_index_size_at = time.monotonic()
+
     def get_stats(self, watch_directories: list[str] | None = None) -> IndexStats:
         """Get statistics about the indexed knowledge base.
 
@@ -86,17 +96,26 @@ class StatsStoreMixin:
             formats_indexed=formats,
         )
 
+    def invalidate_size_cache(self) -> None:
+        """Reset the cached index size so the next stats call recalculates.
+
+        Called after rebuild_table() wipes the LanceDB directory (B58).
+        """
+        self._cached_index_size = 0
+        self._cached_index_size_at = 0.0
+
     def _get_cached_index_size(self) -> int:
-        """Return total index size with a 60-second time-based cache.
+        """Return total index size with a 120-second time-based cache.
 
         Avoids blocking the stats endpoint during active writes while
-        still reporting the full LanceDB + SQLite size (B54).
+        still reporting the full LanceDB + SQLite size (B54). Uses 120s TTL
+        since index size is informational and not worth blocking for.
 
         Returns:
-            Total size in bytes (may be up to 60s stale).
+            Total size in bytes (may be up to 120s stale).
         """
         now = time.monotonic()
-        if now - self._cached_index_size_at < 60.0:
+        if now - self._cached_index_size_at < 120.0:
             return self._cached_index_size
         try:
             size = self._calculate_index_size()
@@ -108,20 +127,30 @@ class StatsStoreMixin:
             _logger.debug("Index size calculation failed, using stale cache", exc_info=True)
             return self._cached_index_size
 
+    # Maximum time (seconds) to spend scanning LanceDB files before
+    # returning a partial count. Prevents rglob from blocking the stats
+    # endpoint when hundreds of fragment files exist during active indexing.
+    _INDEX_SIZE_SCAN_DEADLINE_S = 5.0
+
     def _calculate_index_size(self) -> int:
         """Calculate total size of LanceDB and SQLite files on disk.
 
-        Best-effort: returns 0 if files are locked during active indexing
-        rather than blocking the stats endpoint.
+        Best-effort: returns partial count if the scan exceeds 5s, and
+        returns 0 if files are locked during active indexing rather than
+        blocking the stats endpoint.
 
         Returns:
-            Total size in bytes.
+            Total size in bytes (may be partial if scan was time-capped).
         """
         total = 0
+        deadline = time.monotonic() + self._INDEX_SIZE_SCAN_DEADLINE_S
         try:
             lance_path = Path(self._config.lancedb_path)
             if lance_path.exists():
                 for f in lance_path.rglob("*"):
+                    if time.monotonic() > deadline:
+                        _logger.debug("Index size scan hit 5s deadline, returning partial count")
+                        break
                     try:
                         if f.is_file():
                             total += f.stat().st_size

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from smart_search.models import Chunk, SearchResult
-from smart_search.search import SearchEngine
+from smart_search.search import SearchEngine, _normalize_query
 
 
 def _make_search_result(rank=1, score=0.95, text="Sample result text.", source="/docs/test.pdf",
@@ -377,3 +377,132 @@ class TestSearchModeRouting:
 
         result = search_engine.search("test", mode="semantic")
         assert "Mode: semantic" in result
+
+
+class TestNormalizeQuery:
+    """Tests for _normalize_query: strips leading/trailing punctuation."""
+
+    def test_strips_trailing_period(self):
+        """Trailing period is removed."""
+        assert _normalize_query("drug discovery.") == "drug discovery"
+
+    def test_strips_trailing_exclamation(self):
+        """Trailing exclamation mark is removed."""
+        assert _normalize_query("drug discovery!") == "drug discovery"
+
+    def test_strips_trailing_question_mark(self):
+        """Trailing question mark is removed."""
+        assert _normalize_query("what is drug discovery?") == "what is drug discovery"
+
+    def test_strips_leading_whitespace(self):
+        """Leading whitespace is removed."""
+        assert _normalize_query("  drug discovery") == "drug discovery"
+
+    def test_strips_trailing_whitespace(self):
+        """Trailing whitespace is removed."""
+        assert _normalize_query("drug discovery  ") == "drug discovery"
+
+    def test_strips_mixed_leading_trailing(self):
+        """Both leading and trailing punctuation/whitespace removed."""
+        assert _normalize_query(" ...drug discovery!!! ") == "drug discovery"
+
+    def test_preserves_internal_punctuation(self):
+        """Hyphens, apostrophes, and other internal punctuation preserved."""
+        assert _normalize_query("it's a state-of-the-art model.") == "it's a state-of-the-art model"
+
+    def test_preserves_clean_query(self):
+        """Clean query is returned unchanged."""
+        assert _normalize_query("drug discovery") == "drug discovery"
+
+    def test_returns_original_if_all_punctuation(self):
+        """All-punctuation query returns original (no empty string)."""
+        assert _normalize_query("...") == "..."
+
+    def test_single_word(self):
+        """Single word with trailing period."""
+        assert _normalize_query("FHIR.") == "FHIR"
+
+
+class TestHybridSearchThreshold:
+    """Tests that hybrid search doesn't prematurely filter borderline results."""
+
+    def test_borderline_semantic_boosted_by_keyword(self, tmp_config, mock_embedder, tmp_path):
+        """A result below semantic threshold should still appear in hybrid
+        if it has a strong keyword match (RRF boost)."""
+        # Set threshold high enough that the result is "borderline"
+        config = tmp_config.model_copy(update={"relevance_threshold": 0.50})
+
+        # Create FTS5 table with a keyword match
+        db_path = str(tmp_path / "metadata.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                text, id UNINDEXED, source_path UNINDEXED,
+                source_type UNINDEXED, tokenize='porter unicode61'
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO chunks_fts (text, id, source_path, source_type) "
+            "VALUES (?, ?, ?, ?)",
+            ("drug discovery in cancer research", "borderline_chunk", "/docs/cancer.md", "md"),
+        )
+        conn.commit()
+
+        mock_store = MagicMock()
+        mock_store._sqlite_conn = conn
+        # Return the borderline chunk below threshold (0.35 < 0.50)
+        # plus a clearly-above-threshold result
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.85, source="/docs/pharma.pdf"),
+            _make_search_result(
+                rank=2, score=0.35, source="/docs/cancer.md",
+                text="drug discovery in cancer research",
+            ),
+        ]
+        # Override chunk id to match FTS entry
+        mock_store.vector_search.return_value[1].chunk.id = "borderline_chunk"
+
+        engine = SearchEngine(config, mock_embedder, mock_store)
+
+        # Hybrid should include the borderline result (boosted by keyword)
+        hybrid_results = engine.search_results("drug discovery", mode="hybrid")
+        hybrid_paths = [r.chunk.source_path for r in hybrid_results]
+        assert "/docs/cancer.md" in hybrid_paths, (
+            "Borderline semantic result with keyword match should appear in hybrid"
+        )
+
+        # Semantic-only should NOT include it (below threshold)
+        semantic_results = engine.search_results("drug discovery", mode="semantic")
+        semantic_paths = [r.chunk.source_path for r in semantic_results]
+        assert "/docs/cancer.md" not in semantic_paths, (
+            "Below-threshold result should be filtered in semantic-only mode"
+        )
+        conn.close()
+
+    def test_hybrid_no_keyword_falls_back_to_filtered(self, search_engine, mock_store):
+        """When keyword returns nothing, hybrid falls back to threshold-filtered semantic."""
+        mock_store._sqlite_conn = None  # No FTS5 available
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.95, source="/docs/a.pdf"),
+            _make_search_result(rank=2, score=0.10, source="/docs/b.pdf"),
+        ]
+        results = search_engine.search_results("test", mode="hybrid")
+        # Low-score result (0.10) should be filtered by threshold fallback
+        paths = [r.chunk.source_path for r in results]
+        assert "/docs/a.pdf" in paths
+        assert "/docs/b.pdf" not in paths
+
+
+class TestQueryNormalizationIntegration:
+    """Tests that query normalization is applied in the search pipeline."""
+
+    def test_trailing_period_normalized_before_embedding(self, search_engine, mock_embedder):
+        """'drug discovery.' is normalized to 'drug discovery' before embedding."""
+        search_engine.search_results("drug discovery.")
+        # The embedder should receive the cleaned query (no trailing period)
+        mock_embedder.embed_query.assert_called_with("drug discovery")
+
+    def test_clean_query_unchanged(self, search_engine, mock_embedder):
+        """A clean query passes through normalization unchanged."""
+        search_engine.search_results("drug discovery")
+        mock_embedder.embed_query.assert_called_with("drug discovery")

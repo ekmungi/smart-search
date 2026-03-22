@@ -343,36 +343,56 @@ fn start_dev_backend() -> Option<std::process::Child> {
 
 /// Kill the backend child process if it is running.
 ///
-/// Tries managed child handles (sidecar or dev) first, then ALWAYS
-/// falls through to kill-by-port as a safety net. On Windows,
-/// child.kill() only terminates the top-level process; any sub-processes
-/// (e.g. uvicorn workers) can survive as orphans. The port-based
-/// cleanup catches these.
+/// Uses a three-layer approach because Windows doesn't propagate kills
+/// to child processes, and PyInstaller --onefile creates a 2-process tree
+/// (bootloader -> Python interpreter):
+///   1. Tree-kill the managed child PID (kills bootloader + all children)
+///   2. Kill by port (catches processes still LISTENING on the backend port)
+///   3. Kill by exe name from install dir (catches orphans that released
+///      the port but haven't exited)
 fn stop_backend(state: &BackendState) {
-    // Stop sidecar child
+    // Layer 1a: Tree-kill sidecar child (bootloader + Python subprocess)
     if let Ok(mut guard) = state.child.lock() {
         if let Some(child) = guard.take() {
-            let _ = child.kill();
+            let pid = child.pid();
+            // Use taskkill /T to kill entire process tree -- child.kill()
+            // only sends TerminateProcess to the top-level PID
+            let _ = StdCommand::new("taskkill")
+                .args(["/T", "/F", "/PID", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            log::info!("Tree-killed sidecar process tree from PID {}", pid);
         }
     }
-    // Stop dev child
+    // Layer 1b: Tree-kill dev child
     if let Ok(mut guard) = state.dev_child.lock() {
         if let Some(ref mut child) = *guard {
-            let _ = child.kill();
-            let _ = child.wait();
+            let pid = child.id();
+            let _ = StdCommand::new("taskkill")
+                .args(["/T", "/F", "/PID", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            log::info!("Tree-killed dev backend process tree from PID {}", pid);
         }
         *guard = None;
     }
 
-    // Always kill by port as safety net -- catches orphan sub-processes
-    // that survived child.kill() (Windows doesn't kill process trees)
+    // Layer 2: Kill by port -- catches processes spawned outside our control
     kill_process_on_port(BACKEND_PORT);
+
+    // Layer 3: Kill by exe name from install dir -- catches orphans that
+    // released the port but haven't exited (e.g. PyInstaller child process
+    // in a dying state)
+    kill_sidecar_by_name();
 }
 
 /// Find and kill whatever process is listening on the given port.
 ///
-/// Uses `netstat` to find the PID and `taskkill` to terminate it.
-/// Silently does nothing on failure (port already free, permissions, etc.).
+/// Uses `netstat` to find the PID and `taskkill /T` to terminate its
+/// entire process tree.  Silently does nothing on failure (port already
+/// free, permissions, etc.).
 fn kill_process_on_port(port: u16) {
     // netstat -ano | findstr :9742 → "  TCP  127.0.0.1:9742  ...  LISTENING  12345"
     let output = StdCommand::new("cmd")
@@ -396,14 +416,95 @@ fn kill_process_on_port(port: u16) {
             if let Ok(pid) = pid_str.parse::<u32>() {
                 if pid > 0 {
                     let _ = StdCommand::new("taskkill")
-                        .args(["/F", "/PID", &pid.to_string()])
+                        .args(["/T", "/F", "/PID", &pid.to_string()])
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
                         .status();
-                    log::info!("Killed orphan backend process PID {} on port {}", pid, port);
+                    log::info!("Killed process tree on port {} (PID {})", port, pid);
                     return;
                 }
             }
+        }
+    }
+}
+
+/// Kill any smart-search.exe processes running from the installed location.
+///
+/// Final safety net: finds smart-search.exe processes whose path matches
+/// the install directory (%LOCALAPPDATA%\Smart Search\) and kills them.
+/// Skips the current process (the Tauri app itself) and any MCP server
+/// instances (which run from the same exe but via stdio, not HTTP).
+/// Only targets processes from the install dir to avoid killing dev instances.
+fn kill_sidecar_by_name() {
+    let install_dir = dirs_next::data_local_dir()
+        .map(|d| d.join("Smart Search"))
+        .unwrap_or_default();
+    let install_prefix = install_dir.to_string_lossy().to_lowercase();
+
+    if install_prefix.is_empty() {
+        return;
+    }
+
+    // Use tasklist /V to get full image paths -- but tasklist doesn't show
+    // paths reliably.  Instead, query via cmd /C to get PIDs of all
+    // smart-search.exe, then filter by checking each one's path.
+    let output = StdCommand::new("cmd")
+        .args(["/C", "tasklist /FI \"IMAGENAME eq smart-search.exe\" /FO CSV /NH"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+
+    let output = match output {
+        Ok(o) => o,
+        Err(_) => return,
+    };
+
+    let current_pid = std::process::id();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    for line in stdout.lines() {
+        // CSV format: "smart-search.exe","12345","Console","1","8,612 K"
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let pid_str = parts[1].trim_matches('"');
+        let pid: u32 = match pid_str.parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        // Never kill ourselves
+        if pid == current_pid || pid == 0 {
+            continue;
+        }
+
+        // Check if this process is from the install directory by reading
+        // its executable path via PowerShell (most reliable on modern Windows)
+        let path_output = StdCommand::new("cmd")
+            .args([
+                "/C",
+                &format!(
+                    "powershell -NoProfile -Command \"(Get-Process -Id {} -ErrorAction SilentlyContinue).Path\"",
+                    pid
+                ),
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output();
+
+        let exe_path = match path_output {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_lowercase(),
+            Err(_) => continue,
+        };
+
+        if exe_path.starts_with(&install_prefix) {
+            let _ = StdCommand::new("taskkill")
+                .args(["/T", "/F", "/PID", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            log::info!("Killed orphan sidecar PID {} (path: {})", pid, exe_path);
         }
     }
 }
@@ -574,9 +675,10 @@ pub fn run() {
                     log::warn!("Could not start Python backend");
                 }
             } else {
-                // Kill any orphan from a previous crash before spawning a new one
-                log::info!("Killing any orphan backend on port {}", BACKEND_PORT);
+                // Kill orphans from a previous crash: port-based + name-based
+                log::info!("Killing any orphan backend processes");
                 kill_process_on_port(BACKEND_PORT);
+                kill_sidecar_by_name();
                 // Production: use sidecar, fall back to Python
                 if let Some(child) = start_sidecar(app.handle()) {
                     *state.child.lock().unwrap() = Some(child);
