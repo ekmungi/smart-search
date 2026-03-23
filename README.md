@@ -29,7 +29,7 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 - **Keyword mode**: BM25 ranking via SQLite FTS5 with porter stemming and stopword removal
 - **Folder filtering**: restrict results to specific directories
 - **Find related**: discover similar documents by averaging chunk embeddings
-- **[Search pipeline architecture](docs/search-pipeline.html)**: interactive visual diagram of the full retrieval pipeline
+- **[Search pipeline architecture](https://ekmungi.github.io/smart-search/search-pipeline.html)**: interactive visual diagram of the full retrieval pipeline
 
 ### Supported Files
 
@@ -418,7 +418,7 @@ Query -> Preprocess (stopwords / normalization)
                                                   -> Final Results
 ```
 
-For the full pipeline architecture with resource budgets and configuration reference, see [docs/search-architecture.md](docs/search-architecture.md) or the [interactive visual diagram](docs/search-pipeline.html).
+For the full pipeline architecture with resource budgets and configuration reference, see [docs/search-architecture.md](docs/search-architecture.md) or the [interactive visual diagram](https://ekmungi.github.io/smart-search/search-pipeline.html).
 
 ---
 
