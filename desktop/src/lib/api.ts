@@ -37,6 +37,7 @@ export type {
   SearchResponse,
   RepairResponse,
   SmartSearchConfig,
+  GpuInfo,
 } from "./api-types";
 
 /** In dev mode, Vite proxies /api to the backend so all requests are

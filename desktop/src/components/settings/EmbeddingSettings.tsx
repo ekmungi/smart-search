@@ -3,28 +3,54 @@
 import { Loader2, AlertTriangle, Cpu } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Section, SettingRow } from "./SettingsLayout";
-import type { ModelInfo } from "../../lib/api";
+import type { ModelInfo, GpuInfo } from "../../lib/api";
 
 /** Props for the embedding settings section. */
 interface EmbeddingSettingsProps {
   models: ModelInfo[];
   currentModel: string;
   currentDims: string;
+  currentBackend: string;
+  gpuInfo: GpuInfo | null;
   reindexing: boolean;
   onModelChangeRequest: (modelId: string) => void;
   onDimsChange: (key: string, value: number) => void;
+  onBackendChange: (backend: string) => void;
 }
 
-/** Model selector and dimension picker. */
+/** Inline chip showing the active compute device. */
+function DeviceChip({ gpuInfo }: { gpuInfo: GpuInfo | null }) {
+  if (!gpuInfo) return null;
+  const isGpu = gpuInfo.type !== "cpu";
+  const chipClass = isGpu
+    ? "bg-accent-green/10 text-accent-green border-accent-green/25"
+    : "bg-accent-blue/10 text-accent-blue border-accent-blue/25";
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[0.7rem] font-mono font-medium border ${chipClass}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${isGpu ? "bg-accent-green" : "bg-accent-blue"}`} />
+      {gpuInfo.name}
+    </span>
+  );
+}
+
+/** Model selector, dimension picker, and backend selector. */
 export function EmbeddingSettings({
   models,
   currentModel,
   currentDims,
+  currentBackend,
+  gpuInfo,
   reindexing,
   onModelChangeRequest,
   onDimsChange,
+  onBackendChange,
 }: EmbeddingSettingsProps) {
-  const selectedModel = models.find((m) => m.model_id === currentModel);
+  const isGpuAvailable = gpuInfo != null && gpuInfo.type !== "cpu";
+  // Filter models: hide GPU-required models when no GPU is available
+  const availableModels = models.filter(
+    (m) => !m.gpu_required || isGpuAvailable,
+  );
+  const selectedModel = availableModels.find((m) => m.model_id === currentModel);
   const hasMrl = selectedModel && selectedModel.mrl_dims.length > 0;
 
   return (
@@ -33,16 +59,17 @@ export function EmbeddingSettings({
         label="Model"
         description="Changing model requires full re-index"
       >
-        {models.length > 0 ? (
+        {availableModels.length > 0 ? (
           <select
             value={currentModel}
             onChange={(e) => onModelChangeRequest(e.target.value)}
             disabled={reindexing}
             className="bg-bg-elevated border border-border rounded px-2 py-1 text-sm text-text-primary max-w-[220px]"
           >
-            {models.map((m) => (
+            {availableModels.map((m) => (
               <option key={m.model_id} value={m.model_id}>
                 {m.display_name} ({m.size_mb} MB, {(m.mteb_retrieval * 100).toFixed(1)}%)
+                {m.gpu_required ? " [GPU]" : ""}
               </option>
             ))}
           </select>
@@ -78,6 +105,22 @@ export function EmbeddingSettings({
         ) : (
           <span className="text-sm text-text-primary">{currentDims}</span>
         )}
+      </SettingRow>
+      <SettingRow
+        label="Backend"
+        description="Where embeddings are computed"
+      >
+        <div className="flex items-center gap-2">
+          <select
+            value={currentBackend === "cloud" ? "cloud" : "local"}
+            onChange={(e) => onBackendChange(e.target.value === "cloud" ? "cloud" : "auto")}
+            className="bg-bg-elevated border border-border rounded px-2 py-1 text-sm text-text-primary"
+          >
+            <option value="local">Local</option>
+            <option value="cloud" disabled>Cloud (coming soon)</option>
+          </select>
+          <DeviceChip gpuInfo={gpuInfo} />
+        </div>
       </SettingRow>
     </Section>
   );

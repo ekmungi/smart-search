@@ -75,6 +75,9 @@ export interface SmartSearchConfig {
   search_default_limit?: number;
   exclude_patterns?: string[];
   watch_directories?: string[];
+  embedding_backend?: string;     // "auto" | "local" | "cloud"
+  reranking_enabled?: boolean;
+  mmr_enabled?: boolean;
   [key: string]: unknown;
 }
 
@@ -89,10 +92,17 @@ export interface ConfigUpdateResponse {
   requires_reindex: boolean;
 }
 
+/** GPU device detection status. */
+export interface GpuInfo {
+  type: string;   // "cpu" | "cuda" | "directml"
+  name: string;   // "CPU" | "CUDA (RTX 4070)" | "DirectML"
+}
+
 /** Embedding model cache status from GET /api/model/status. */
 export interface ModelStatusResponse {
   cached: boolean;
   model_name: string;
+  gpu_info: GpuInfo;
 }
 
 /** Whether the embedding model is loaded in memory, from GET /api/model/loaded. */
@@ -111,6 +121,7 @@ export interface ModelInfo {
   default_dims: number;
   modalities: string[];
   description: string;
+  gpu_required: boolean;
 }
 
 /** Response from GET /api/models. */

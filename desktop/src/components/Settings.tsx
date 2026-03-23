@@ -9,10 +9,11 @@ import {
   fetchConfig,
   updateConfig,
   fetchModels,
+  fetchModelStatus,
   repairIndex,
   rebuildIndex,
 } from "../lib/api";
-import type { ModelInfo, RepairResponse, SmartSearchConfig } from "../lib/api";
+import type { ModelInfo, RepairResponse, SmartSearchConfig, GpuInfo } from "../lib/api";
 import {
   FONT_MIN,
   FONT_MAX,
@@ -41,6 +42,7 @@ export default function Settings() {
   });
   const [mcpRegistering, setMcpRegistering] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [gpuInfo, setGpuInfo] = useState<GpuInfo | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     model: string;
     dims: number;
@@ -80,6 +82,9 @@ export default function Settings() {
     isEnabled().then(setAutostart).catch(() => {});
     fetchModels()
       .then((res) => setModels(res.models))
+      .catch(() => {});
+    fetchModelStatus()
+      .then((res) => setGpuInfo(res.gpu_info))
       .catch(() => {});
     const cached = localStorage.getItem(STORAGE_KEY_MCP_REGISTERED);
     if (cached === null) {
@@ -292,9 +297,12 @@ export default function Settings() {
         models={models}
         currentModel={model}
         currentDims={dims}
+        currentBackend={String(config.embedding_backend || "auto")}
+        gpuInfo={gpuInfo}
         reindexing={reindexing}
         onModelChangeRequest={handleModelChangeRequest}
         onDimsChange={handleSave}
+        onBackendChange={(backend) => handleSave("embedding_backend", backend)}
       />
 
       {confirmDialog && (
