@@ -35,8 +35,17 @@ class SmartSearchConfig(BaseSettings):
     sqlite_path: str = ""
     lancedb_table_name: str = "chunks"
 
-    # Document settings -- expanded in v0.3.0 with MarkItDown support
-    supported_extensions: List[str] = [".pdf", ".docx", ".md", ".pptx", ".xlsx", ".html"]
+    # Document settings -- expanded in v0.3.0 with MarkItDown, v0.11.5 with full format list
+    supported_extensions: List[str] = [
+        ".md", ".txt",                          # Text
+        ".pdf", ".docx", ".epub",               # Documents
+        ".xlsx", ".xls", ".csv",                # Spreadsheets
+        ".pptx",                                # Presentations
+        ".html", ".htm",                        # Web
+        ".json", ".jsonl",                      # Data
+        ".msg",                                 # Email
+        ".ipynb",                               # Notebooks
+    ]
 
     # Watch directories for file watcher (resolved to absolute in validator)
     watch_directories: List[str] = []

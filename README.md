@@ -1,8 +1,8 @@
 # Smart Search
 
-A personal, local-first knowledge management system. Index your Markdown notes, PDFs, DOCX, PPTX, XLSX, and HTML files into a searchable knowledge base that connects with everything running locally -- Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on your machine: no cloud, no GPU, no subscriptions.
+A personal, local-first knowledge management system. Index your documents, notes, spreadsheets, and more into a searchable knowledge base that connects with everything running locally -- Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on your machine: no cloud, no GPU, no subscriptions.
 
-**Version:** 0.8.4 | **License:** MIT
+**Version:** 0.11.5 | **License:** MIT
 
 ---
 
@@ -10,7 +10,7 @@ A personal, local-first knowledge management system. Index your Markdown notes, 
 
 Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. Smart Search brings it together:
 
-- **Search everything locally.** Six document formats indexed into one knowledge base with hybrid search (semantic + keyword + reranking). Find what you need whether you remember the exact phrase or just the concept.
+- **Search everything locally.** 14 document formats indexed into one knowledge base with hybrid search (semantic + keyword + reranking). Find what you need whether you remember the exact phrase or just the concept.
 - **Connect with your tools.** MCP server for Claude Code, REST API for scripts and automation, CLI for power users, desktop app for visual management. One index, many interfaces.
 - **Stay responsive.** All heavy lifting runs in an out-of-process Python server. Your editor, your Obsidian vault, your desktop -- nothing freezes during indexing.
 - **Own your data.** Everything stays on disk -- LanceDB vectors and SQLite metadata in a local directory. No cloud sync, no telemetry, no accounts. MIT licensed.
@@ -28,10 +28,22 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 - **Folder filtering**: restrict results to specific directories
 - **Find related**: discover similar documents by averaging chunk embeddings
 
+### Supported Files
+
+| Category | Formats |
+|----------|---------|
+| Documents | `.pdf`, `.docx`, `.epub` |
+| Spreadsheets | `.xlsx`, `.xls`, `.csv` |
+| Presentations | `.pptx` |
+| Email | `.msg` |
+| Text | `.md`, `.txt` |
+| Web | `.html`, `.htm` |
+| Data | `.json`, `.jsonl` |
+| Notebooks | `.ipynb` |
+
 ### Indexing
 
-- **Six formats**: `.md`, `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html`
-- **Single pipeline**: all non-Markdown files converted via MarkItDown, then chunked by headings
+- **14 formats**: all non-Markdown files converted via MarkItDown, then chunked by headings
 - **Background indexing**: non-blocking with per-folder progress, cancellation, and auto-resume on restart
 - **Hash-based dedup**: unchanged files are skipped automatically
 - **Ephemeral indexes**: create temporary `.smart-search/` indexes inside any folder
@@ -61,6 +73,16 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 - **REST API**: 20 endpoints on `localhost:9742`
 - **CLI**: `smart-search` command with subcommands for all operations
 - **File-based storage**: LanceDB (vectors) + SQLite (metadata + FTS5), no database server
+
+### System Requirements
+
+| | Requirement |
+|--|-------------|
+| OS | Windows 10/11 (x64) |
+| RAM | 2 GB minimum (~200 MB idle) |
+| Storage | ~300 MB (with AI model) |
+| Runtime | Python 3.11+ (bundled in desktop installer) |
+| Network | Not required |
 
 ---
 
@@ -254,7 +276,7 @@ smart-search temp cleanup /path              # Remove an ephemeral index
 
 ## REST API
 
-The HTTP server runs on `localhost:9742` with 20 endpoints:
+The HTTP server runs on `localhost:9742` with 21 endpoints:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -308,7 +330,7 @@ All settings can be overridden with `SMART_SEARCH_` prefixed variables:
 | `SMART_SEARCH_SEARCH_DEFAULT_MODE` | `hybrid` | Default search mode |
 | `SMART_SEARCH_RELEVANCE_THRESHOLD` | `0.30` | Minimum similarity score (semantic mode) |
 | `SMART_SEARCH_CHUNK_MAX_TOKENS` | `512` | Maximum tokens per chunk |
-| `SMART_SEARCH_SUPPORTED_EXTENSIONS` | `[".pdf", ".docx", ".md", ".pptx", ".xlsx", ".html"]` | File types to index |
+| `SMART_SEARCH_SUPPORTED_EXTENSIONS` | `[".md", ".txt", ".pdf", ".docx", ".epub", ".xlsx", ".xls", ".csv", ".pptx", ".html", ".htm", ".json", ".jsonl", ".msg", ".ipynb"]` | File types to index |
 | `SMART_SEARCH_EXCLUDE_PATTERNS` | `[".git", ".obsidian", "node_modules", ...]` | Excluded directories |
 | `SMART_SEARCH_WATCHER_DEBOUNCE_SECONDS` | `2.0` | File watcher debounce |
 | `SMART_SEARCH_SEARCH_DEFAULT_LIMIT` | `10` | Default result count |
@@ -401,7 +423,7 @@ pytest -m ""
 pytest --cov=smart_search --cov-report=term-missing
 ```
 
-370+ tests covering all modules. Slow tests (marked `@pytest.mark.slow`) require ML models to be downloaded.
+395+ tests covering all modules. Slow tests (marked `@pytest.mark.slow`) require ML models to be downloaded.
 
 ---
 
@@ -411,14 +433,14 @@ pytest --cov=smart_search --cov-report=term-missing
 |-----------|-----------|
 | MCP server | FastMCP |
 | HTTP server | FastAPI + Uvicorn |
-| Document parsing | MarkItDown (PDF, DOCX, PPTX, XLSX, HTML) |
+| Document parsing | MarkItDown (14 formats: PDF, DOCX, XLSX, PPTX, EPUB, CSV, MSG, HTML, TXT, JSON, IPYNB) |
 | Markdown parsing | Custom heading-based splitter |
 | Embeddings | snowflake-arctic-embed-m-v2.0 via ONNX Runtime |
 | Vector store | LanceDB (file-based, columnar) |
 | Metadata + FTS | SQLite (FTS5 with porter stemming) |
 | Search fusion | Reciprocal Rank Fusion (RRF, k=60) |
 | File watching | Watchdog |
-| Desktop | Tauri v2 + React + Tailwind CSS v4 |
+| Desktop | Tauri v2 + React + Tailwind CSS v4 + Motion |
 | Build | Hatchling (Python), PyInstaller (sidecar), NSIS (installer) |
 
 ---
