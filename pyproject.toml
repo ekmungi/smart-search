@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smart-search"
-version = "0.12.0"
+version = "0.13.0"
 description = "Local MCP server for semantic search over Markdown, PDF, DOCX, PPTX, XLSX, and HTML documents"
 requires-python = ">=3.11"
 dependencies = [
@@ -46,6 +46,12 @@ bundle = [
 # At runtime, the lightweight standalone tokenizers (Rust) handles tokenization.
 download = [
     "transformers",
+]
+gpu-cuda = [
+    "onnxruntime-gpu>=1.19",
+]
+gpu-directml = [
+    "onnxruntime-directml>=1.19",
 ]
 
 [tool.pytest.ini_options]

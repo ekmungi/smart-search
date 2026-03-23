@@ -2,7 +2,7 @@
 
 A personal, local-first knowledge management system. Index your documents, notes, spreadsheets, and more into a searchable knowledge base that connects with everything running locally -- Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on your machine: no cloud, no GPU, no subscriptions.
 
-**Version:** 0.12.0 | **License:** MIT
+**Version:** 0.13.0 | **License:** MIT
 
 ---
 
@@ -14,7 +14,7 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 - **Connect with your tools.** MCP server for Claude Code, REST API for scripts and automation, CLI for power users, desktop app for visual management. One index, many interfaces.
 - **Stay responsive.** All heavy lifting runs in an out-of-process Python server. Your editor, your Obsidian vault, your desktop -- nothing freezes during indexing.
 - **Own your data.** Everything stays on disk -- LanceDB vectors and SQLite metadata in a local directory. No cloud sync, no telemetry, no accounts. MIT licensed.
-- **Keep it lightweight.** CPU-only ONNX embeddings with lazy loading. The model loads when you search, unloads after 60 seconds idle. Steady-state RAM under 200MB.
+- **Keep it lightweight.** ONNX embeddings with lazy loading and automatic GPU acceleration. The model loads when you search, unloads after 60 seconds idle on CPU (stays resident on GPU). Steady-state RAM under 200MB.
 
 ---
 
@@ -67,7 +67,7 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 - **Matryoshka truncation**: 256-dim default, configurable per model
 - **Lazy loading**: model loads on demand, unloads after 60s idle to free RAM
 - **Curated registry**: switchable models with quality/size metadata
-- **CPU-only**: ONNX Runtime, no GPU required
+- **GPU auto-detection**: CUDA and DirectML acceleration used automatically when available, CPU fallback otherwise
 
 ### Architecture
 

@@ -22,4 +22,4 @@ MAX_CHUNKS_PER_FILE = 5000  # Safety cap: truncate files producing more chunks
 DEFAULT_RERANK_TOP_N = 20  # Number of fusion results to pass through cross-encoder
 
 # Application metadata
-APP_VERSION = "0.12.0"
+APP_VERSION = "0.13.0"
