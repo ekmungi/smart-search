@@ -17,6 +17,7 @@ from typing import List, Optional
 import numpy as np
 
 from smart_search.config import SmartSearchConfig
+from smart_search.gpu_provider import build_provider_chain, detect_gpu
 from smart_search.models import SearchResult
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,13 @@ class Reranker:
         self._model_name = config.reranker_model
         self._idle_timeout = config.reranker_idle_timeout
         self._top_n = config.rerank_top_n
+
+        # GPU state -- disable idle-unload on GPU (VRAM leak bug in ONNX Runtime)
+        self._gpu_active = (
+            detect_gpu() is not None and config.embedding_backend != "cloud"
+        )
+        if self._gpu_active:
+            self._idle_timeout = 0
 
         # Tokenizer state -- loaded once, stays resident (cheap: ~5MB)
         self._tokenizer = None
@@ -313,8 +321,17 @@ class Reranker:
         sess_options.inter_op_num_threads = 1
         sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
+        # Build provider chain: CUDA -> DirectML -> CPU (auto-detected)
+        providers = build_provider_chain(
+            backend=self._config.embedding_backend,
+            device_id=self._config.gpu_device_id,
+            gpu_mem_limit_mb=self._config.gpu_mem_limit_mb,
+        )
+        if not providers:
+            providers = ["CPUExecutionProvider"]
+
         return ort.InferenceSession(
             str(onnx_path),
             sess_options=sess_options,
-            providers=["CPUExecutionProvider"],
+            providers=providers,
         )

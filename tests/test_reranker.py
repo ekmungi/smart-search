@@ -182,3 +182,31 @@ class TestRerankerIdleUnload:
         reranker.unload()
         assert not reranker.is_loaded
         assert reranker._session is None
+
+
+class TestRerankerGpuProviders:
+    """Tests for GPU provider integration in Reranker."""
+
+    @patch("smart_search.reranker.detect_gpu")
+    def test_gpu_active_when_gpu_detected(self, mock_detect):
+        """Reranker sets _gpu_active=True when GPU is detected."""
+        mock_detect.return_value = "cuda"
+        config = SmartSearchConfig(reranking_enabled=True)
+        reranker = Reranker(config)
+        assert reranker._gpu_active is True
+
+    @patch("smart_search.reranker.detect_gpu")
+    def test_gpu_inactive_when_no_gpu(self, mock_detect):
+        """Reranker sets _gpu_active=False when no GPU available."""
+        mock_detect.return_value = None
+        config = SmartSearchConfig(reranking_enabled=True)
+        reranker = Reranker(config)
+        assert reranker._gpu_active is False
+
+    @patch("smart_search.reranker.detect_gpu")
+    def test_disables_idle_unload_on_gpu(self, mock_detect):
+        """When GPU is detected, idle timeout is 0 (no auto-unload)."""
+        mock_detect.return_value = "directml"
+        config = SmartSearchConfig(reranking_enabled=True)
+        reranker = Reranker(config)
+        assert reranker._idle_timeout == 0
