@@ -113,3 +113,31 @@ class TestConfigV02Fields:
         )
         for d in config.watch_directories:
             assert Path(d).is_absolute()
+
+
+class TestGpuConfig:
+    """Tests for GPU-related configuration fields."""
+
+    def test_default_backend_is_auto(self):
+        """Default embedding_backend is 'auto'."""
+        config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+        assert config.embedding_backend == "auto"
+
+    def test_gpu_device_id_default(self):
+        """Default gpu_device_id is 0."""
+        config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+        assert config.gpu_device_id == 0
+
+    def test_gpu_mem_limit_default(self):
+        """Default gpu_mem_limit_mb is 2048."""
+        config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+        assert config.gpu_mem_limit_mb == 2048
+
+    def test_backend_env_override(self):
+        """embedding_backend can be set via env var."""
+        os.environ["SMART_SEARCH_EMBEDDING_BACKEND"] = "cloud"
+        try:
+            config = SmartSearchConfig(lancedb_path="./x", sqlite_path="./y")
+            assert config.embedding_backend == "cloud"
+        finally:
+            del os.environ["SMART_SEARCH_EMBEDDING_BACKEND"]

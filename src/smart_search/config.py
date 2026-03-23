@@ -22,7 +22,7 @@ class SmartSearchConfig(BaseSettings):
     # Embedding settings
     embedding_model: str = "Snowflake/snowflake-arctic-embed-m-v2.0"
     embedding_dimensions: int = 256
-    embedding_backend: str = "onnx"
+    embedding_backend: str = "auto"
     embedder_idle_timeout: float = 60.0
 
     # Chunking settings -- word-based limits for size-enforced splitting
@@ -77,6 +77,10 @@ class SmartSearchConfig(BaseSettings):
     # MMR diversity settings (Phase 3: eliminate redundant chunks)
     mmr_enabled: bool = True
     mmr_lambda: float = 0.8  # 0-1: higher = more relevance, lower = more diversity
+
+    # GPU acceleration settings
+    gpu_device_id: int = 0               # CUDA/DirectML device index
+    gpu_mem_limit_mb: int = 2048         # Max VRAM allocation in MB (CUDA only)
 
     # Global shortcut for Quick Search overlay
     shortcut_key: str = "Ctrl+Space"
