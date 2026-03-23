@@ -88,3 +88,47 @@ class TestModelInfoFields:
             assert False, "Should not allow mutation"
         except AttributeError:
             pass
+
+
+class TestModelInfoGpuRequired:
+    """Tests for gpu_required field on ModelInfo."""
+
+    def test_gpu_required_defaults_false(self):
+        """ModelInfo gpu_required defaults to False."""
+        info = ModelInfo(
+            model_id="test/model", display_name="Test", size_mb=100,
+            mteb_retrieval=0.5, native_dims=768,
+        )
+        assert info.gpu_required is False
+
+    def test_snowflake_not_gpu_required(self):
+        """Snowflake model does not require GPU."""
+        info = get_model_info("Snowflake/snowflake-arctic-embed-m-v2.0")
+        assert info.gpu_required is False
+
+    def test_nomic_not_gpu_required(self):
+        """Nomic model does not require GPU."""
+        info = get_model_info("nomic-ai/nomic-embed-text-v1.5")
+        assert info.gpu_required is False
+
+    def test_jina_clip_gpu_required(self):
+        """Jina CLIP v2 requires GPU."""
+        info = get_model_info("jinaai/jina-clip-v2")
+        assert info is not None
+        assert info.gpu_required is True
+
+    def test_jina_clip_is_multimodal(self):
+        """Jina CLIP v2 supports text and image modalities."""
+        info = get_model_info("jinaai/jina-clip-v2")
+        assert "text" in info.modalities
+        assert "image" in info.modalities
+
+    def test_cpu_models_subset_of_all(self):
+        """CPU-compatible models are a subset of all models."""
+        cpu_models = [m for m in list_models() if not m.gpu_required]
+        assert len(cpu_models) >= 2  # At least snowflake and nomic
+
+    def test_gpu_models_exist(self):
+        """At least one GPU-required model exists in the registry."""
+        gpu_models = [m for m in list_models() if m.gpu_required]
+        assert len(gpu_models) >= 1

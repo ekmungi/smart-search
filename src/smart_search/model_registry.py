@@ -37,6 +37,7 @@ class ModelInfo:
     query_prefix: Optional[str] = None
     modalities: List[str] = field(default_factory=lambda: ["text"])
     description: str = ""
+    gpu_required: bool = False
 
 
 # Curated list of supported models, ordered by quality (best first)
@@ -64,6 +65,20 @@ CURATED_MODELS: List[ModelInfo] = [
         doc_prefix="search_document: ",
         query_prefix="search_query: ",
         description="Smaller download. Good quality. Dual prefix model.",
+    ),
+    ModelInfo(
+        model_id="jinaai/jina-clip-v2",
+        display_name="Jina CLIP v2",
+        size_mb=865,
+        mteb_retrieval=0.60,
+        native_dims=1024,
+        mrl_dims=[256, 512, 768, 1024],
+        default_dims=512,
+        doc_prefix=None,
+        query_prefix=None,
+        modalities=["text", "image"],
+        description="High-quality multimodal. Requires GPU (865MB).",
+        gpu_required=True,
     ),
 ]
 
