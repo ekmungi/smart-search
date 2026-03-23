@@ -1,11 +1,13 @@
 // System settings: autostart, close-to-tray, MCP registration, shortcut, repair index.
 
-import { Check, X, Loader2 } from "lucide-react";
+import { Check, X, Loader2, Settings2 } from "lucide-react";
+import { motion } from "motion/react";
 import { Section, SettingRow } from "./SettingsLayout";
 import { ShortcutRecorder } from "../ShortcutRecorder";
+import { springTransition } from "../../lib/animations";
 import type { RepairResponse } from "../../lib/api";
 
-/** Toggle switch component for boolean settings. */
+/** Toggle switch with spring physics animation. */
 function ToggleSwitch({
   enabled,
   onToggle,
@@ -20,10 +22,10 @@ function ToggleSwitch({
         enabled ? "bg-accent-blue" : "bg-bg-elevated"
       }`}
     >
-      <span
-        className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-text-primary transition-transform ${
-          enabled ? "translate-x-5" : ""
-        }`}
+      <motion.span
+        className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-text-primary"
+        animate={{ x: enabled ? 20 : 0 }}
+        transition={springTransition}
       />
     </button>
   );
@@ -75,7 +77,7 @@ export function SystemSettings({
   onRebuildIndex,
 }: SystemSettingsProps) {
   return (
-    <Section title="System">
+    <Section title="System" icon={Settings2}>
       <SettingRow
         label="Start on Login"
         description="Launch Smart Search when you sign in"

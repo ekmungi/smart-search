@@ -1,5 +1,6 @@
 // Search settings: relevance threshold, default limit, and exclusion patterns.
 
+import { Search, Filter } from "lucide-react";
 import { Section, SettingRow } from "./SettingsLayout";
 
 /** Props for the search settings section. */
@@ -19,7 +20,7 @@ export function SearchSettings({
 }: SearchSettingsProps) {
   return (
     <>
-      <Section title="Search">
+      <Section title="Search" icon={Search}>
         <SettingRow label="Default Limit" description="Max results per query">
           <select
             value={searchLimit}
@@ -53,14 +54,14 @@ export function SearchSettings({
               }
               className="w-32 accent-accent-blue"
             />
-            <span className="text-sm text-text-secondary w-10 text-right">
+            <span className="text-sm text-text-secondary w-10 text-right font-mono">
               {Math.round(relevanceThreshold * 100)}%
             </span>
           </div>
         </SettingRow>
       </Section>
 
-      <Section title="Exclusions">
+      <Section title="Exclusions" icon={Filter}>
         <SettingRow
           label="Excluded Patterns"
           description="Directories skipped during indexing"

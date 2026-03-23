@@ -19,4 +19,4 @@ UPSERT_BATCH_SIZE = 200     # Max chunks per LanceDB insert batch
 MAX_CHUNKS_PER_FILE = 5000  # Safety cap: truncate files producing more chunks
 
 # Application metadata
-APP_VERSION = "0.11.3"
+APP_VERSION = "0.11.4"

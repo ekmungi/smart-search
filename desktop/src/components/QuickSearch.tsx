@@ -4,10 +4,13 @@
 // Enter to open, ESC to dismiss). Uses Tauri IPC for reliable window hiding.
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { Search, FileText, X } from "lucide-react";
 import { searchDocuments, fetchModelLoaded, type SearchHit } from "../lib/api";
+import { truncatePath } from "../lib/format";
+import Skeleton from "./Skeleton";
 
 /** Debounce delay in milliseconds for search-as-you-type. */
 const DEBOUNCE_MS = 250;
@@ -31,7 +34,6 @@ export default function QuickSearch() {
     try {
       await invoke("hide_search_window");
     } catch {
-      // Fallback to direct window API
       try {
         await getCurrentWindow().hide();
       } catch {
@@ -59,7 +61,6 @@ export default function QuickSearch() {
     const currentWindow = getCurrentWindow();
     const unlisten = currentWindow.onFocusChanged(({ payload: focused }) => {
       if (focused) {
-        // Clean slate on every open (Spotlight behavior)
         setQuery("");
         setResults([]);
         setSelectedIndex(0);
@@ -68,7 +69,6 @@ export default function QuickSearch() {
         warmupCheckedRef.current = false;
         inputRef.current?.focus();
       } else {
-        // Auto-hide on blur (Spotlight behavior)
         hideWindow();
       }
     });
@@ -101,10 +101,7 @@ export default function QuickSearch() {
     setLoading(true);
     setError(null);
     try {
-      // Fetch more results than needed so dedup still yields enough unique files
-      // Over-fetch 4x to allow dedup to still yield enough unique files
       const res = await searchDocuments(q, MAX_RESULTS * 4);
-      // Deduplicate by file: keep highest-scoring chunk per source_path
       const seen = new Set<string>();
       const deduped = res.results.filter((hit) => {
         if (seen.has(hit.source_path)) return false;
@@ -113,7 +110,6 @@ export default function QuickSearch() {
       }).slice(0, MAX_RESULTS);
       setResults(deduped);
       setSelectedIndex(0);
-      // Model is now loaded after a successful search
       setWarmingUp(false);
     } catch {
       setError("Search failed -- is the backend running?");
@@ -126,7 +122,6 @@ export default function QuickSearch() {
   /** Update query and schedule debounced search. */
   const handleInputChange = (value: string) => {
     setQuery(value);
-    // Check model warmup status on first keystroke
     if (value.trim().length === 1) checkModelWarmup();
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => doSearch(value), DEBOUNCE_MS);
@@ -171,13 +166,6 @@ export default function QuickSearch() {
     return sourceType.replace(".", "").toUpperCase();
   };
 
-  /** Truncate long paths, showing only the last 3 segments. */
-  const formatPath = (path: string) => {
-    const parts = path.replace(/\\/g, "/").split("/");
-    if (parts.length <= 3) return parts.join("/");
-    return `.../${parts.slice(-3).join("/")}`;
-  };
-
   /** Truncate snippet text to a maximum length. */
   const formatSnippet = (text: string, maxLen = 120) => {
     if (text.length <= maxLen) return text;
@@ -191,7 +179,12 @@ export default function QuickSearch() {
     >
       {/* Search input */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
-        <Search size={18} className="text-text-muted shrink-0" />
+        <Search
+          size={18}
+          className={`shrink-0 transition-colors ${
+            loading ? "text-accent-blue" : "text-text-muted"
+          }`}
+        />
         <input
           ref={inputRef}
           type="text"
@@ -201,10 +194,9 @@ export default function QuickSearch() {
           className="flex-1 bg-transparent text-text-primary text-base outline-none placeholder:text-text-muted"
           autoFocus
         />
-        {/* Close button -- always visible */}
         <button
           onClick={hideWindow}
-          className="text-text-muted hover:text-text-secondary"
+          className="text-text-muted hover:text-text-secondary transition-colors"
           title="Close (Esc)"
         >
           <X size={16} />
@@ -218,51 +210,77 @@ export default function QuickSearch() {
         )}
 
         {warmingUp && loading && results.length === 0 && (
-          <div className="px-4 py-3 text-sm text-text-muted">
+          <div className="px-4 py-3 text-sm text-text-muted animate-pulse">
             Warming up... first search may take a moment
           </div>
         )}
 
+        {/* Skeleton loading rows */}
         {!warmingUp && loading && results.length === 0 && (
-          <div className="px-4 py-3 text-sm text-text-muted">Searching...</div>
-        )}
-
-        {!loading && query.trim().length >= 3 && results.length === 0 && !error && (
-          <div className="px-4 py-3 text-sm text-text-muted">
-            No results found
+          <div className="px-4 py-2">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex items-start gap-3 py-2.5">
+                <Skeleton width="w-4" height="h-4" className="rounded mt-0.5 shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton width={i % 2 === 0 ? "w-3/4" : "w-1/2"} height="h-4" />
+                  <Skeleton width="w-full" height="h-3" />
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
-        {results.map((hit, index) => (
-          <button
-            key={`${hit.source_path}-${hit.rank}`}
-            onClick={() => openResult(hit)}
-            onMouseEnter={() => setSelectedIndex(index)}
-            className={`w-full text-left px-4 py-2.5 flex items-start gap-3 transition-colors ${
-              index === selectedIndex
-                ? "bg-bg-elevated"
-                : "hover:bg-bg-surface"
-            }`}
-          >
-            <FileText size={16} className="text-text-muted mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-text-primary truncate">
-                  {formatPath(hit.source_path)}
-                </span>
-                <span className="text-xs text-text-muted shrink-0">
-                  {formatType(hit.source_type)}
-                </span>
-                <span className="text-xs text-accent-blue shrink-0">
-                  {(hit.score * 100).toFixed(0)}%
-                </span>
-              </div>
-              <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">
-                {formatSnippet(hit.text)}
-              </p>
-            </div>
-          </button>
-        ))}
+        {!loading && query.trim().length >= 3 && results.length === 0 && !error && (
+          <div className="px-4 py-8 text-center">
+            <Search size={24} className="text-text-muted opacity-40 mx-auto mb-2" />
+            <p className="text-sm text-text-muted">No results found</p>
+          </div>
+        )}
+
+        <AnimatePresence mode="wait">
+          {results.length > 0 && (
+            <motion.div
+              key={query}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.12 }}
+            >
+              {results.map((hit, index) => (
+                <motion.button
+                  key={`${hit.source_path}-${hit.rank}`}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.12, delay: index * 0.03 }}
+                  onClick={() => openResult(hit)}
+                  onMouseEnter={() => setSelectedIndex(index)}
+                  className={`w-full text-left px-4 py-2.5 flex items-start gap-3 transition-colors ${
+                    index === selectedIndex
+                      ? "bg-bg-elevated"
+                      : "hover:bg-bg-surface"
+                  }`}
+                >
+                  <FileText size={16} className="text-text-muted mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-text-primary truncate">
+                        {truncatePath(hit.source_path)}
+                      </span>
+                      <span className="text-xs text-text-muted shrink-0">
+                        {formatType(hit.source_type)}
+                      </span>
+                      <span className="text-xs text-accent-blue font-mono shrink-0">
+                        {(hit.score * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <p className="text-xs text-text-secondary mt-0.5 line-clamp-2">
+                      {formatSnippet(hit.text)}
+                    </p>
+                  </div>
+                </motion.button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Footer with keyboard hints */}

@@ -1,7 +1,8 @@
-// Index dashboard with stats cards, server status, and format badges.
+// Index dashboard with animated stats cards, server status, and format badges.
 
 import { useState, useEffect, useRef } from "react";
-import { FileText, Layers, HardDrive, Clock } from "lucide-react";
+import { motion } from "motion/react";
+import { FileText, Layers, HardDrive, Clock, FolderSearch } from "lucide-react";
 import {
   fetchHealth,
   fetchStats,
@@ -17,7 +18,10 @@ import {
   POLL_INDEXING_IDLE_MS,
   POLL_MODEL_MS,
 } from "../lib/constants";
-import StatsCard from "./StatsCard";
+import { staggerContainer } from "../lib/animations";
+import StatsCard, { StatsCardSkeleton } from "./StatsCard";
+import IndexingBanner from "./IndexingBanner";
+import EmptyState from "./EmptyState";
 
 /** Format seconds into human-readable duration (e.g. "2h 15m", "3d 4h"). */
 function formatUptime(seconds: number): string {
@@ -33,7 +37,7 @@ function formatUptime(seconds: number): string {
 }
 
 interface DashboardProps {
-  /** Whether the backend has ever responded successfully this session. Lifted to App to survive tab switches. */
+  /** Whether the backend has ever responded successfully this session. */
   everConnected: boolean;
   /** Callback to notify App that the backend responded successfully. */
   onConnected: () => void;
@@ -46,16 +50,12 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
   const [modelCached, setModelCached] = useState<boolean | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
   const [activeTasks, setActiveTasks] = useState<IndexingTask[]>([]);
-  // True on first load: assume backend is starting up, not offline.
-  // Stays true until health succeeds OR 30s of continuous failure elapses.
   const [startingUp, setStartingUp] = useState<boolean>(!everConnected);
-  // Tracks the timestamp of the first consecutive health failure (null when healthy).
   const failingSince = useRef<number | null>(null);
 
+  // Poll health + stats
   useEffect(() => {
     const poll = async () => {
-      // Health and stats are independent: stats may fail during indexing
-      // (DB contention) but health should still update the status dot.
       try {
         const h = await fetchHealth();
         setHealth(h);
@@ -69,29 +69,25 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
         if (failingSince.current === null) {
           failingSince.current = Date.now();
         }
-        const elapsed = Date.now() - failingSince.current;
-        if (elapsed >= 30_000) {
+        if (Date.now() - failingSince.current >= 30_000) {
           setStartingUp(false);
         }
       }
-      // Stats fetch is best-effort; failure does not affect health status.
       try {
         const s = await fetchStats();
         setStats(s);
       } catch {
-        // Stats may time out during heavy indexing -- keep previous values
+        // Stats may time out during heavy indexing
       }
     };
-
     poll();
     const interval = setInterval(poll, POLL_STATS_MS);
     return () => clearInterval(interval);
   }, []);
 
-  // Poll indexing status every 2s while tasks are active, slow down when idle
+  // Poll indexing status
   useEffect(() => {
     if (!health) return;
-
     let cancelled = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -100,56 +96,37 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
         const status = await fetchIndexingStatus();
         if (!cancelled) {
           setActiveTasks(status.tasks);
-          // When no active tasks, switch to slow polling (10s) to reduce load
           const nextDelay = status.active > 0 ? POLL_INDEXING_ACTIVE_MS : POLL_INDEXING_IDLE_MS;
           if (intervalId !== null) clearInterval(intervalId);
-          if (!cancelled) {
-            intervalId = setInterval(checkIndexing, nextDelay);
-          }
+          if (!cancelled) intervalId = setInterval(checkIndexing, nextDelay);
         }
-      } catch {
-        // Backend not ready or endpoint missing -- ignore
-      }
+      } catch { /* ignore */ }
     };
-
     checkIndexing();
     intervalId = setInterval(checkIndexing, POLL_INDEXING_ACTIVE_MS);
-
-    return () => {
-      cancelled = true;
-      if (intervalId !== null) clearInterval(intervalId);
-    };
+    return () => { cancelled = true; if (intervalId !== null) clearInterval(intervalId); };
   }, [health]);
 
-  // Poll model status until cached (first-launch download UX)
+  // Poll model status
   useEffect(() => {
     if (!health) return;
-
     let cancelled = false;
     const checkModel = async () => {
       try {
         const status = await fetchModelStatus();
-        if (!cancelled) {
-          setModelCached(status.cached);
-          setModelName(status.model_name);
-        }
-      } catch {
-        // Backend not ready yet -- will retry
-      }
+        if (!cancelled) { setModelCached(status.cached); setModelName(status.model_name); }
+      } catch { /* retry */ }
     };
-
     checkModel();
-
-    // Poll every 3s while model is downloading, stop once cached
     if (modelCached !== true) {
       const interval = setInterval(checkModel, POLL_MODEL_MS);
-      return () => {
-        cancelled = true;
-        clearInterval(interval);
-      };
+      return () => { cancelled = true; clearInterval(interval); };
     }
     return () => { cancelled = true; };
   }, [health, modelCached]);
+
+  const showSkeleton = !health && !error;
+  const hasNoFolders = health && stats && stats.document_count === 0 && activeTasks.length === 0;
 
   return (
     <div>
@@ -162,9 +139,9 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
               health
                 ? "bg-accent-green"
                 : startingUp
-                  ? "bg-accent-amber"
+                  ? "bg-accent-amber animate-pulse"
                   : everConnected
-                    ? "bg-accent-amber"
+                    ? "bg-accent-amber animate-pulse"
                     : "bg-accent-red"
             }`}
           />
@@ -180,7 +157,7 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
         </div>
       </div>
 
-      {/* Error / startup banner */}
+      {/* Error / startup banners */}
       {error && startingUp && (
         <div className="bg-bg-surface border border-accent-amber/30 rounded-lg p-4 mb-6 text-sm text-text-secondary">
           Server is starting up, please wait...
@@ -189,9 +166,7 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
       {error && !startingUp && (
         <div className={`bg-bg-surface border ${everConnected ? "border-accent-amber/30" : "border-accent-red/30"} rounded-lg p-4 mb-6 text-sm`}>
           {everConnected ? (
-            <span className="text-accent-amber">
-              Backend disconnected &mdash; reconnecting...
-            </span>
+            <span className="text-accent-amber">Backend disconnected &mdash; reconnecting...</span>
           ) : (
             <span className="text-accent-red">
               {error} &mdash; Start the backend with:{" "}
@@ -201,57 +176,7 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
         </div>
       )}
 
-      {/* Indexing in progress banner */}
-      {activeTasks.some((t) => t.state === "running" || t.state === "pending") && (
-        <div className="bg-bg-surface border border-accent-blue/30 rounded-lg p-4 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-4 h-4 border-2 border-accent-blue border-t-transparent rounded-full animate-spin shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-text-primary">
-                Indexing{" "}
-                {activeTasks
-                  .filter((t) => t.state === "running" || t.state === "pending")
-                  .map((t) => t.folder.split(/[\\/]/).pop())
-                  .join(", ")}
-                ...
-              </p>
-              {(() => {
-                const done = activeTasks.reduce((sum, t) => sum + t.indexed + t.skipped + t.failed, 0);
-                const total = activeTasks.reduce((sum, t) => sum + t.total, 0);
-                const failed = activeTasks.reduce((sum, t) => sum + t.failed, 0);
-                const detail = failed > 0 ? `, ${failed} failed` : "";
-                const pct = total > 0 ? (done / total) * 100 : 0;
-                return (
-                  <>
-                    <div className="w-full bg-bg-elevated rounded-full h-2 mt-2">
-                      <div
-                        className="bg-accent-blue h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-text-secondary mt-1">
-                      {total > 0 ? `${done} of ${total} files processed${detail}` : `${done} files processed${detail}`}
-                    </p>
-                  </>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Completed/failed task results (shown briefly via state) */}
-      {activeTasks.some((t) => t.state === "failed") && (
-        <div className="bg-bg-surface border border-accent-red/30 rounded-lg p-4 mb-6 text-sm text-accent-red">
-          Indexing failed for:{" "}
-          {activeTasks
-            .filter((t) => t.state === "failed")
-            .map((t) => t.folder.split(/[\\/]/).pop())
-            .join(", ")}
-        </div>
-      )}
-
-      {/* Model download banner (first-launch UX) */}
+      {/* Model download banner */}
       {health && modelCached === false && (
         <div className="bg-bg-surface border border-accent-amber/30 rounded-lg p-4 mb-6">
           <div className="flex items-center gap-3">
@@ -268,71 +193,104 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
         </div>
       )}
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatsCard
-          icon={FileText}
-          label="Documents"
-          value={health ? (stats?.document_count ?? 0) : "--"}
+      {/* Empty state: no folders configured */}
+      {hasNoFolders && (
+        <EmptyState
+          icon={FolderSearch}
+          heading="No folders configured"
+          description="Add a folder to start indexing your documents for semantic search."
         />
-        <StatsCard
-          icon={Layers}
-          label="Chunks"
-          value={health ? (stats?.chunk_count ?? 0) : "--"}
-        />
-        <StatsCard
-          icon={HardDrive}
-          label="Index Size"
-          value={health ? (stats ? `${stats.index_size_mb} MB` : "0 MB") : "--"}
-        />
-        <StatsCard
-          icon={Clock}
-          label="Last Indexed"
-          value={
-            stats?.last_indexed_at
-              ? new Date(stats.last_indexed_at).toLocaleDateString()
-              : "Never"
-          }
-        />
-      </div>
-
-      {/* Format badges */}
-      {stats && stats.formats_indexed.length > 0 && (
-        <div className="mt-6 bg-bg-surface rounded-lg p-4">
-          <h2 className="text-sm font-medium text-text-secondary mb-2">
-            Indexed Formats
-          </h2>
-          <div className="flex gap-2">
-            {stats.formats_indexed.map((fmt) => (
-              <span
-                key={fmt}
-                className="px-2 py-1 bg-bg-elevated rounded text-xs text-text-primary"
-              >
-                {fmt}
-              </span>
-            ))}
-          </div>
-        </div>
       )}
 
-      {/* Server info */}
-      {health && (
-        <div className="mt-4 bg-bg-surface rounded-lg p-4">
-          <h2 className="text-sm font-medium text-text-secondary mb-2">
-            Server
-          </h2>
-          <div className="flex gap-6 text-sm">
-            <span className="text-text-secondary">
-              Uptime:{" "}
-              <span className="text-text-primary">
-                {formatUptime(health.uptime_seconds)}
-              </span>
-            </span>
-            <span className="text-text-secondary">
-              Status: <span className="text-accent-green">Running</span>
-            </span>
-          </div>
-        </div>
+      {/* Stats grid -- skeleton while loading, animated cards when ready */}
+      {!hasNoFolders && (
+        <>
+          {showSkeleton ? (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              {[0, 1, 2, 3].map((i) => (
+                <StatsCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : (
+            <motion.div
+              className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
+              variants={staggerContainer}
+              initial="hidden"
+              animate="visible"
+            >
+              <StatsCard
+                icon={FileText}
+                label="Documents"
+                value={stats?.document_count ?? 0}
+                iconColor="text-accent-blue"
+              />
+              <StatsCard
+                icon={Layers}
+                label="Chunks"
+                value={stats?.chunk_count ?? 0}
+                iconColor="text-accent-green"
+              />
+              <StatsCard
+                icon={HardDrive}
+                label="Index Size"
+                value={stats ? `${stats.index_size_mb} MB` : "0 MB"}
+                iconColor="text-accent-amber"
+              />
+              <StatsCard
+                icon={Clock}
+                label="Last Indexed"
+                value={
+                  stats?.last_indexed_at
+                    ? new Date(stats.last_indexed_at).toLocaleDateString()
+                    : "Never"
+                }
+                iconColor="text-text-secondary"
+              />
+            </motion.div>
+          )}
+
+          {/* Indexing banners (per-folder breakdown) -- below stats */}
+          <IndexingBanner tasks={activeTasks} />
+
+          {/* Format badges */}
+          {stats && stats.formats_indexed.length > 0 && (
+            <div className="mt-6 bg-bg-surface rounded-lg p-4">
+              <h2 className="text-sm font-medium text-text-secondary mb-2">
+                Indexed Formats
+              </h2>
+              <div className="flex gap-2">
+                {stats.formats_indexed.map((fmt) => (
+                  <span
+                    key={fmt}
+                    className="px-2 py-1 bg-bg-elevated rounded text-xs text-text-primary"
+                  >
+                    {fmt}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Server info */}
+          {health && (
+            <div className="mt-4 bg-bg-surface rounded-lg p-4">
+              <h2 className="text-sm font-medium text-text-secondary mb-2">
+                Server
+              </h2>
+              <div className="flex gap-6 text-sm">
+                <span className="text-text-secondary">
+                  Uptime:{" "}
+                  <span className="text-text-primary font-mono">
+                    {formatUptime(health.uptime_seconds)}
+                  </span>
+                </span>
+                <span className="text-text-secondary">
+                  Status: <span className="text-accent-green">Running</span>
+                </span>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -55,8 +55,8 @@ export function ShortcutRecorder({ value, onChange, disabled }: ShortcutRecorder
         type="button"
         className={`px-3 py-1.5 rounded text-sm font-mono transition-colors ${
           recording
-            ? "bg-amber-600/30 border border-amber-500 text-amber-200"
-            : "bg-zinc-700 border border-zinc-600 text-zinc-200 hover:bg-zinc-600"
+            ? "bg-accent-amber/20 border border-accent-amber text-accent-amber"
+            : "bg-bg-elevated border border-border text-text-primary hover:bg-border"
         } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
         onClick={() => !disabled && setRecording(!recording)}
         onKeyDown={handleKeyDown}

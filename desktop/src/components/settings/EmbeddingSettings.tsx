@@ -1,6 +1,7 @@
 // Embedding settings: model selector dropdown and Matryoshka dimension picker.
 
-import { Loader2, AlertTriangle } from "lucide-react";
+import { Loader2, AlertTriangle, Cpu } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { Section, SettingRow } from "./SettingsLayout";
 import type { ModelInfo } from "../../lib/api";
 
@@ -27,7 +28,7 @@ export function EmbeddingSettings({
   const hasMrl = selectedModel && selectedModel.mrl_dims.length > 0;
 
   return (
-    <Section title="Embedding">
+    <Section title="Embedding" icon={Cpu}>
       <SettingRow
         label="Model"
         description="Changing model requires full re-index"
@@ -89,40 +90,54 @@ interface ModelChangeDialogProps {
   onCancel: () => void;
 }
 
-/** Modal confirmation dialog for embedding model changes. */
+/** Modal confirmation dialog for embedding model changes with enter/exit animation. */
 export function ModelChangeDialog({
   reindexing,
   onConfirm,
   onCancel,
 }: ModelChangeDialogProps) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-bg-surface border border-border rounded-lg p-6 max-w-md mx-4">
-        <div className="flex items-center gap-2 mb-3 text-amber-400">
-          <AlertTriangle size={20} />
-          <h3 className="font-semibold">Change Embedding Model?</h3>
-        </div>
-        <p className="text-sm text-text-secondary mb-4">
-          Changing the embedding model requires rebuilding the entire index.
-          All documents will be re-indexed. This may take several minutes.
-        </p>
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="px-3 py-1.5 text-sm rounded bg-bg-elevated text-text-secondary hover:bg-border"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={reindexing}
-            className="px-3 py-1.5 text-sm rounded bg-accent-blue text-text-primary hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
-          >
-            {reindexing && <Loader2 size={14} className="animate-spin" />}
-            {reindexing ? "Re-indexing..." : "Continue"}
-          </button>
-        </div>
-      </div>
-    </div>
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.15 }}
+      >
+        <motion.div
+          className="bg-bg-surface border border-border rounded-lg p-6 max-w-md mx-4"
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.95 }}
+          transition={{ duration: 0.15 }}
+        >
+          <div className="flex items-center gap-2 mb-3 text-accent-amber">
+            <AlertTriangle size={20} />
+            <h3 className="font-semibold">Change Embedding Model?</h3>
+          </div>
+          <p className="text-sm text-text-secondary mb-4">
+            Changing the embedding model requires rebuilding the entire index.
+            All documents will be re-indexed. This may take several minutes.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={onCancel}
+              className="px-3 py-1.5 text-sm rounded bg-bg-elevated text-text-secondary hover:bg-border"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={reindexing}
+              className="px-3 py-1.5 text-sm rounded bg-accent-blue text-text-primary hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
+            >
+              {reindexing && <Loader2 size={14} className="animate-spin" />}
+              {reindexing ? "Re-indexing..." : "Continue"}
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }

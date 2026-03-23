@@ -1,5 +1,6 @@
-// Icon sidebar for navigation between views.
+// Icon sidebar for navigation between views with animated active indicator.
 
+import { motion } from "motion/react";
 import { LayoutDashboard, FolderOpen, ScrollText, Settings } from "lucide-react";
 
 type View = "dashboard" | "folders" | "log" | "settings";
@@ -24,13 +25,22 @@ export default function Sidebar({ activeView, onNavigate }: Props) {
           key={id}
           onClick={() => onNavigate(id)}
           title={label}
-          className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
-            activeView === id
-              ? "bg-bg-elevated text-accent-blue"
-              : "text-text-secondary hover:text-text-primary hover:bg-bg-elevated"
-          }`}
+          className="relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors text-text-secondary hover:text-text-primary"
         >
-          <Icon size={20} />
+          {/* Animated active background pill */}
+          {activeView === id && (
+            <motion.div
+              layoutId="sidebar-active"
+              className="absolute inset-0 bg-bg-elevated rounded-lg"
+              transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            />
+          )}
+          <Icon
+            size={20}
+            className={`relative z-10 ${
+              activeView === id ? "text-accent-blue" : ""
+            }`}
+          />
         </button>
       ))}
     </nav>

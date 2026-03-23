@@ -1,6 +1,7 @@
 // Settings panel: view/edit configuration, delegates rendering to sub-components.
 
 import { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { invoke } from "@tauri-apps/api/core";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { Save } from "lucide-react";
@@ -240,11 +241,19 @@ export default function Settings() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">Settings</h1>
-        {saved && (
-          <span className="text-sm text-accent-green flex items-center gap-1">
-            <Save size={14} /> Saved
-          </span>
-        )}
+        <AnimatePresence>
+          {saved && (
+            <motion.span
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+              className="text-sm text-accent-green flex items-center gap-1"
+            >
+              <Save size={14} /> Saved
+            </motion.span>
+          )}
+        </AnimatePresence>
       </div>
 
       {error && (

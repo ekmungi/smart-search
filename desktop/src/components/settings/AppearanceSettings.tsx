@@ -1,5 +1,6 @@
 // Appearance settings: font size slider for proportional UI scaling.
 
+import { Palette } from "lucide-react";
 import { Section, SettingRow } from "./SettingsLayout";
 
 /** Props for the appearance settings section. */
@@ -18,7 +19,7 @@ export function AppearanceSettings({
   fontMax,
 }: AppearanceSettingsProps) {
   return (
-    <Section title="Appearance">
+    <Section title="Appearance" icon={Palette}>
       <SettingRow label="Font Size" description="Proportional UI scaling">
         <div className="flex items-center gap-3">
           <input
@@ -29,7 +30,7 @@ export function AppearanceSettings({
             onChange={(e) => onFontSizeChange(parseInt(e.target.value, 10))}
             className="w-32 accent-accent-blue"
           />
-          <span className="text-sm text-text-secondary w-10 text-right">
+          <span className="text-sm text-text-secondary w-10 text-right font-mono">
             {fontSize}px
           </span>
         </div>

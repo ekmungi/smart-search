@@ -141,7 +141,9 @@ class IndexingTaskManager:
         self._max_concurrent = _compute_max_concurrent()
         self._semaphore = threading.Semaphore(self._max_concurrent)
 
-    def submit(self, folder: str, indexer: "DocumentIndexer") -> str:
+    def submit(
+        self, folder: str, indexer: "DocumentIndexer", force: bool = False,
+    ) -> str:
         """Submit a folder for background indexing.
 
         Cancels any existing task for the same folder before starting.
@@ -149,6 +151,7 @@ class IndexingTaskManager:
         Args:
             folder: Absolute path to the folder to index.
             indexer: DocumentIndexer instance to use.
+            force: Skip mtime pre-scan and re-index all files.
 
         Returns:
             Task ID string for status tracking.
@@ -175,7 +178,7 @@ class IndexingTaskManager:
 
         thread = threading.Thread(
             target=self._run_indexing,
-            args=(task_id, folder, indexer, cancel_event),
+            args=(task_id, folder, indexer, cancel_event, force),
             daemon=True,
         )
         thread.start()
@@ -252,6 +255,7 @@ class IndexingTaskManager:
         folder: str,
         indexer: "DocumentIndexer",
         cancel_event: threading.Event,
+        force: bool = False,
     ) -> None:
         """Worker function that runs indexing in a background thread.
 
@@ -260,6 +264,7 @@ class IndexingTaskManager:
             folder: Folder path to index.
             indexer: DocumentIndexer instance.
             cancel_event: Event to signal cancellation.
+            force: Skip mtime pre-scan and re-index all files.
         """
         status = self._tasks[task_id]
 
@@ -338,7 +343,8 @@ class IndexingTaskManager:
                             (source_path,),
                         ).fetchone()
                         if (
-                            row is not None
+                            not force
+                            and row is not None
                             and row[0] is not None
                             and row[1] is not None
                             and row[0] == stat_info.st_mtime

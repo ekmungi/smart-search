@@ -281,8 +281,8 @@ def create_router(
                 error=result.error,
             )
         elif target.is_dir():
-            _logger.info("ingest: submitting background index for %s", target.as_posix())
-            task_id = get_task_mgr().submit(str(target), indexer)
+            _logger.info("ingest: submitting background index for %s (force=%s)", target.as_posix(), req.force)
+            task_id = get_task_mgr().submit(str(target), indexer, force=req.force)
             return JSONResponse(
                 status_code=202,
                 content={

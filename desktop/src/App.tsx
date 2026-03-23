@@ -1,6 +1,7 @@
-// Main app layout with custom title bar, icon sidebar, and routed content area.
+// Main app layout with custom title bar, icon sidebar, and animated routed content.
 
 import { useState, useCallback } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { Minus, X } from "lucide-react";
@@ -15,9 +16,6 @@ type View = "dashboard" | "folders" | "log" | "settings";
 
 function App() {
   const [activeView, setActiveView] = useState<View>("dashboard");
-  // Lifted from Dashboard so it survives tab switches (component unmount/remount).
-  // Once the backend has responded successfully, we know it was running --
-  // so a subsequent disconnect should show "Reconnecting..." not "Offline".
   const [everConnected, setEverConnected] = useState(false);
 
   const appWindow = getCurrentWindow();
@@ -65,15 +63,25 @@ function App() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar activeView={activeView} onNavigate={setActiveView} />
         <main className="flex-1 overflow-auto p-6">
-          {activeView === "dashboard" && (
-            <Dashboard
-              everConnected={everConnected}
-              onConnected={() => setEverConnected(true)}
-            />
-          )}
-          {activeView === "folders" && <FolderManager />}
-          {activeView === "log" && <IndexingLog />}
-          {activeView === "settings" && <Settings />}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeView}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.15 }}
+            >
+              {activeView === "dashboard" && (
+                <Dashboard
+                  everConnected={everConnected}
+                  onConnected={() => setEverConnected(true)}
+                />
+              )}
+              {activeView === "folders" && <FolderManager />}
+              {activeView === "log" && <IndexingLog />}
+              {activeView === "settings" && <Settings />}
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
     </div>
