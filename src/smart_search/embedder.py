@@ -19,6 +19,7 @@ from typing import List, Optional
 import numpy as np
 
 from smart_search.config import SmartSearchConfig
+from smart_search.gpu_provider import build_provider_chain, detect_gpu
 from smart_search.embedder_utils import _l2_normalize, _mean_pool, _truncate
 
 
@@ -82,6 +83,13 @@ class Embedder:
         self._session = None
         self._loaded = False
         self._lock = threading.Lock()
+
+        # GPU state -- disable idle-unload on GPU (VRAM leak bug in ONNX Runtime)
+        self._gpu_active = (
+            detect_gpu() is not None and config.embedding_backend != "cloud"
+        )
+        if self._gpu_active:
+            self._idle_timeout = 0
 
         # Idle timer state
         self._last_used: float = 0.0
@@ -273,10 +281,19 @@ class Embedder:
         sess_options.inter_op_num_threads = 1
         sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
+        # Build provider chain: CUDA -> DirectML -> CPU (auto-detected)
+        providers = build_provider_chain(
+            backend=config.embedding_backend,
+            device_id=config.gpu_device_id,
+            gpu_mem_limit_mb=config.gpu_mem_limit_mb,
+        )
+        if not providers:
+            providers = ["CPUExecutionProvider"]
+
         return ort.InferenceSession(
             str(onnx_path),
             sess_options=sess_options,
-            providers=["CPUExecutionProvider"],
+            providers=providers,
         )
 
     def _encode(self, texts: List[str]) -> np.ndarray:

@@ -359,6 +359,46 @@ class TestIsModelCached:
             assert Embedder.is_model_cached("fake/model") is False
 
 
+class TestEmbedderGpuProviders:
+    """Tests for GPU provider integration in Embedder."""
+
+    @patch("smart_search.embedder.detect_gpu")
+    def test_gpu_active_when_gpu_detected(self, mock_detect, tmp_config):
+        """Embedder sets _gpu_active=True when GPU is detected."""
+        mock_detect.return_value = "cuda"
+        embedder = Embedder(tmp_config)
+        assert embedder._gpu_active is True
+
+    @patch("smart_search.embedder.detect_gpu")
+    def test_gpu_inactive_when_no_gpu(self, mock_detect, tmp_config):
+        """Embedder sets _gpu_active=False when no GPU available."""
+        mock_detect.return_value = None
+        embedder = Embedder(tmp_config)
+        assert embedder._gpu_active is False
+
+    @patch("smart_search.embedder.detect_gpu")
+    def test_disables_idle_unload_on_gpu(self, mock_detect, tmp_config):
+        """When GPU is detected, idle timeout is set to 0 (no auto-unload)."""
+        mock_detect.return_value = "directml"
+        embedder = Embedder(tmp_config)
+        assert embedder._idle_timeout == 0
+
+    @patch("smart_search.embedder.detect_gpu")
+    def test_preserves_idle_unload_on_cpu(self, mock_detect, tmp_config):
+        """When no GPU, idle timeout remains as configured."""
+        mock_detect.return_value = None
+        embedder = Embedder(tmp_config)
+        assert embedder._idle_timeout == tmp_config.embedder_idle_timeout
+
+    @patch("smart_search.embedder.detect_gpu")
+    def test_gpu_inactive_when_backend_cloud(self, mock_detect, tmp_config):
+        """GPU is not used when backend is set to 'cloud'."""
+        mock_detect.return_value = "cuda"
+        config = tmp_config.model_copy(update={"embedding_backend": "cloud"})
+        embedder = Embedder(config)
+        assert embedder._gpu_active is False
+
+
 @pytest.mark.slow
 class TestEmbedderSlow:
     """Slow tests that load the real embedding model."""
