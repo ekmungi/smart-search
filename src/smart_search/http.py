@@ -197,12 +197,14 @@ def create_app(
             # Build heavy deps outside lock so model loading doesn't block
             # other getters (get_store, get_config_mgr) on other threads.
             from smart_search.embedder import Embedder
+            from smart_search.reranker import Reranker
             from smart_search.search import SearchEngine as _SE
             store = get_store()
             embedder = Embedder(config)
+            reranker = Reranker(config) if config.reranking_enabled else None
             with _singleton_lock:
                 if _engine is None:
-                    _engine = _SE(config, embedder, store)
+                    _engine = _SE(config, embedder, store, reranker=reranker)
         return _engine
 
     def get_indexer():

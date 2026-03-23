@@ -2,7 +2,7 @@
 
 A personal, local-first knowledge management system. Index your documents, notes, spreadsheets, and more into a searchable knowledge base that connects with everything running locally -- Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on your machine: no cloud, no GPU, no subscriptions.
 
-**Version:** 0.11.5 | **License:** MIT
+**Version:** 0.12.0 | **License:** MIT
 
 ---
 
@@ -22,11 +22,14 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 
 ### Search
 
-- **Hybrid search** (default): combines vector similarity with FTS5 keyword matching via Reciprocal Rank Fusion
+- **Hybrid search** (default): combines vector similarity with FTS5 keyword matching via Reciprocal Rank Fusion, cross-encoder reranking, and MMR diversity selection
+- **Cross-encoder reranking**: jointly scores (query, document) pairs with TinyBERT-L-2 for higher precision than bi-encoder similarity alone (+5-15 nDCG@10 in benchmarks)
+- **MMR diversity**: eliminates redundant chunks from the same document, ensuring results cover distinct information
 - **Semantic mode**: pure vector search with configurable relevance threshold
-- **Keyword mode**: BM25 ranking via SQLite FTS5 with porter stemming
+- **Keyword mode**: BM25 ranking via SQLite FTS5 with porter stemming and stopword removal
 - **Folder filtering**: restrict results to specific directories
 - **Find related**: discover similar documents by averaging chunk embeddings
+- **[Search pipeline architecture](docs/search-pipeline.html)**: interactive visual diagram of the full retrieval pipeline
 
 ### Supported Files
 
@@ -372,9 +375,12 @@ All clients connect to the **same HTTP server** on port 9742. The server is the 
 Backend (Python, all share the HTTP server)
   http.py / http_routes.py       FastAPI app, 20 endpoints
   server.py / mcp_client.py      MCP server, proxies to HTTP
-  search.py                      Hybrid search: vector + FTS5 + RRF fusion
+  search.py                      Hybrid search: vector + FTS5 + RRF + rerank + MMR
   fts.py                         FTS5 keyword search, BM25 ranking
   fusion.py                      Reciprocal Rank Fusion (k=60)
+  reranker.py                    Cross-encoder reranking (TinyBERT, lazy-load)
+  mmr.py                         Maximum Marginal Relevance diversity selection
+  query_preprocessor.py          Stopword removal (FTS5), query normalization
   indexer.py                     Document ingestion pipeline
   markitdown_parser.py           File -> Markdown conversion
   markdown_chunker.py            Heading-based section splitting
@@ -404,9 +410,15 @@ File -> MarkItDown (non-.md) -> Markdown -> MarkdownChunker -> Chunks
 ### Search Flow (hybrid mode)
 
 ```
-Query -> Vector search (LanceDB)  ─┐
-      -> Keyword search (FTS5 BM25) ─┼─> RRF Fusion -> Ranked results
+Query -> Preprocess (stopwords / normalization)
+      -> Vector search (LanceDB)    ─┐
+      -> Keyword search (FTS5 BM25) ─┼─> RRF Fusion
+                                          -> Cross-Encoder Rerank (TinyBERT, 30-60ms)
+                                              -> MMR Diversity (lambda=0.8, <1ms)
+                                                  -> Final Results
 ```
+
+For the full pipeline architecture with resource budgets and configuration reference, see [docs/search-architecture.md](docs/search-architecture.md) or the [interactive visual diagram](docs/search-pipeline.html).
 
 ---
 
@@ -423,7 +435,7 @@ pytest -m ""
 pytest --cov=smart_search --cov-report=term-missing
 ```
 
-395+ tests covering all modules. Slow tests (marked `@pytest.mark.slow`) require ML models to be downloaded.
+425+ tests covering all modules. Slow tests (marked `@pytest.mark.slow`) require ML models to be downloaded.
 
 ---
 
@@ -439,6 +451,8 @@ pytest --cov=smart_search --cov-report=term-missing
 | Vector store | LanceDB (file-based, columnar) |
 | Metadata + FTS | SQLite (FTS5 with porter stemming) |
 | Search fusion | Reciprocal Rank Fusion (RRF, k=60) |
+| Reranking | cross-encoder/ms-marco-TinyBERT-L-2-v2 via ONNX Runtime |
+| Diversity | Maximum Marginal Relevance (MMR, lambda=0.8) |
 | File watching | Watchdog |
 | Desktop | Tauri v2 + React + Tailwind CSS v4 + Motion |
 | Build | Hatchling (Python), PyInstaller (sidecar), NSIS (installer) |

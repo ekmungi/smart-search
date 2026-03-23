@@ -13,6 +13,43 @@ from smart_search.models import Chunk
 logger = logging.getLogger(__name__)
 
 
+def _build_fts_query(query: str) -> str:
+    """Build an FTS5 MATCH expression from a user query.
+
+    - User-supplied quoted phrases (e.g., '"exact match"') are kept as phrase searches.
+    - Single terms are passed directly.
+    - Multi-term unquoted queries are OR-joined so any matching term surfaces results.
+
+    Args:
+        query: Raw user search query.
+
+    Returns:
+        FTS5-compatible MATCH string, or empty string if query is blank.
+    """
+    stripped = query.strip()
+    if not stripped:
+        return ""
+
+    # User explicitly quoted the query -> phrase search
+    if stripped.startswith('"') and stripped.endswith('"') and len(stripped) > 2:
+        inner = stripped[1:-1].replace('"', '""')
+        return f'"{inner}"'
+
+    # Split into terms and sanitize each
+    terms = stripped.split()
+    if not terms:
+        return ""
+
+    # Single term: pass directly (quoted to protect special chars)
+    if len(terms) == 1:
+        safe = terms[0].replace('"', '')
+        return f'"{safe}"'
+
+    # Multi-term: OR-join individual terms for broader recall
+    sanitized = [f'"{t.replace(chr(34), "")}"' for t in terms]
+    return " OR ".join(sanitized)
+
+
 def keyword_search(
     conn: sqlite3.Connection,
     query: str,
@@ -31,8 +68,9 @@ def keyword_search(
     Returns:
         List of dicts with id, source_path, source_type, text, bm25_score.
     """
-    # Escape double quotes in query to prevent FTS5 syntax errors
-    safe_query = query.replace('"', '""')
+    fts_query = _build_fts_query(query)
+    if not fts_query:
+        return []
 
     try:
         cursor = conn.execute(
@@ -42,27 +80,11 @@ def keyword_search(
                WHERE chunks_fts MATCH ?
                ORDER BY bm25_score ASC
                LIMIT ?""",
-            (f'"{safe_query}"', limit),
+            (fts_query, limit),
         )
     except sqlite3.OperationalError:
-        # Fallback: try individual terms joined with OR
-        terms = query.split()
-        if not terms:
-            return []
-        or_query = " OR ".join(f'"{t.replace(chr(34), "")}"' for t in terms)
-        try:
-            cursor = conn.execute(
-                """SELECT id, source_path, source_type, text,
-                          bm25(chunks_fts) AS bm25_score
-                   FROM chunks_fts
-                   WHERE chunks_fts MATCH ?
-                   ORDER BY bm25_score ASC
-                   LIMIT ?""",
-                (or_query, limit),
-            )
-        except sqlite3.OperationalError:
-            logger.debug("FTS5 keyword search failed for query: %s", query, exc_info=True)
-            return []
+        logger.debug("FTS5 keyword search failed for query: %s", query, exc_info=True)
+        return []
 
     return [
         {

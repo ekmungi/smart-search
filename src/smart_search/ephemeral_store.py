@@ -59,7 +59,9 @@ def create_ephemeral_components(folder_path: str) -> Dict[str, Any]:
         store=store,
         markdown_chunker=markdown_chunker,
     )
-    engine = SearchEngine(config=config, embedder=embedder, store=store)
+    from smart_search.reranker import Reranker
+    reranker = Reranker(config) if config.reranking_enabled else None
+    engine = SearchEngine(config=config, embedder=embedder, store=store, reranker=reranker)
 
     return {
         "store": store,

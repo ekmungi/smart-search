@@ -92,6 +92,66 @@ class TestKeywordSearch:
         assert results[0]["id"] == "c1"
         conn.close()
 
+    def test_multi_term_query_uses_or_join(self, tmp_path):
+        """Multi-term queries match documents containing any term, not exact phrase."""
+        conn = _create_fts_db(tmp_path)
+        _insert_fts_row(conn, "c1", "Machine learning is powerful for classification")
+        _insert_fts_row(conn, "c2", "Deep learning algorithms are complex")
+        _insert_fts_row(conn, "c3", "Cooking recipes for beginners")
+
+        # "machine algorithms" should match c1 (has "machine") and c2 (has "algorithms")
+        # but NOT require the exact phrase "machine algorithms"
+        results = keyword_search(conn, "machine algorithms", limit=10)
+        matched_ids = {r["id"] for r in results}
+        assert "c1" in matched_ids, "Should match doc with 'machine'"
+        assert "c2" in matched_ids, "Should match doc with 'algorithms'"
+        assert "c3" not in matched_ids
+        conn.close()
+
+    def test_quoted_query_uses_phrase_search(self, tmp_path):
+        """User-supplied quoted queries do exact phrase matching."""
+        conn = _create_fts_db(tmp_path)
+        _insert_fts_row(conn, "c1", "Machine learning is powerful")
+        _insert_fts_row(conn, "c2", "Learning about machine operation")
+
+        # Quoted phrase: only match exact "machine learning" adjacent
+        results = keyword_search(conn, '"machine learning"', limit=10)
+        matched_ids = {r["id"] for r in results}
+        assert "c1" in matched_ids, "Exact phrase 'machine learning' should match"
+        assert "c2" not in matched_ids, "Non-adjacent terms should not match phrase"
+        conn.close()
+
+    def test_single_term_query_works(self, tmp_path):
+        """Single-term queries work without OR-join logic."""
+        conn = _create_fts_db(tmp_path)
+        _insert_fts_row(conn, "c1", "Python programming language")
+        _insert_fts_row(conn, "c2", "Java programming language")
+
+        results = keyword_search(conn, "Python", limit=10)
+        assert len(results) == 1
+        assert results[0]["id"] == "c1"
+        conn.close()
+
+    def test_special_characters_do_not_break_fts(self, tmp_path):
+        """Queries with special characters don't cause FTS5 syntax errors."""
+        conn = _create_fts_db(tmp_path)
+        _insert_fts_row(conn, "c1", "Error handling with try/catch blocks")
+
+        # These should not raise, even if they return no results
+        for query in ["C++", "node.js", "hello@world", "what's up?", "a & b"]:
+            results = keyword_search(conn, query, limit=10)
+            assert isinstance(results, list)
+        conn.close()
+
+    def test_empty_query_returns_empty(self, tmp_path):
+        """Empty or whitespace-only query returns no results."""
+        conn = _create_fts_db(tmp_path)
+        _insert_fts_row(conn, "c1", "Some document content")
+
+        assert keyword_search(conn, "", limit=10) == []
+        assert keyword_search(conn, "   ", limit=10) == []
+        conn.close()
+
 
 class TestFtsCount:
     """Tests for fts_count function."""

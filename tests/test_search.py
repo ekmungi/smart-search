@@ -506,3 +506,75 @@ class TestQueryNormalizationIntegration:
         """A clean query passes through normalization unchanged."""
         search_engine.search_results("drug discovery")
         mock_embedder.embed_query.assert_called_with("drug discovery")
+
+
+class TestRerankerIntegration:
+    """Tests that cross-encoder reranking integrates correctly with search pipeline."""
+
+    def test_hybrid_with_reranker_calls_rerank(self, tmp_config, mock_embedder, tmp_path):
+        """Hybrid search passes fused results through reranker when provided."""
+        from unittest.mock import MagicMock
+        from smart_search.reranker import Reranker
+
+        # Set up FTS5
+        db_path = str(tmp_path / "metadata.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                text, id UNINDEXED, source_path UNINDEXED,
+                source_type UNINDEXED, tokenize='porter unicode61'
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO chunks_fts (text, id, source_path, source_type) "
+            "VALUES (?, ?, ?, ?)",
+            ("FHIR interoperability", "chunk_1", "/docs/fhir.md", "md"),
+        )
+        conn.commit()
+
+        mock_store = MagicMock()
+        mock_store._sqlite_conn = conn
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.9, source="/docs/other.pdf"),
+        ]
+
+        # Create a mock reranker that reverses result order
+        mock_reranker = MagicMock(spec=Reranker)
+        mock_reranker.rerank.side_effect = lambda q, results: list(reversed(results))
+
+        engine = SearchEngine(tmp_config, mock_embedder, mock_store, reranker=mock_reranker)
+        results = engine.search_results("FHIR", mode="hybrid")
+
+        # Verify reranker was called
+        mock_reranker.rerank.assert_called_once()
+        conn.close()
+
+    def test_hybrid_without_reranker_skips_reranking(self, tmp_config, mock_embedder, tmp_path):
+        """Hybrid search works normally when no reranker is provided."""
+        db_path = str(tmp_path / "metadata.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                text, id UNINDEXED, source_path UNINDEXED,
+                source_type UNINDEXED, tokenize='porter unicode61'
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO chunks_fts (text, id, source_path, source_type) "
+            "VALUES (?, ?, ?, ?)",
+            ("FHIR interoperability", "chunk_1", "/docs/fhir.md", "md"),
+        )
+        conn.commit()
+
+        mock_store = MagicMock()
+        mock_store._sqlite_conn = conn
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.9, source="/docs/other.pdf"),
+        ]
+
+        # No reranker (default)
+        engine = SearchEngine(tmp_config, mock_embedder, mock_store)
+        results = engine.search_results("FHIR", mode="hybrid")
+
+        assert len(results) >= 1
+        conn.close()

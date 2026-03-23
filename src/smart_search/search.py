@@ -11,11 +11,14 @@ from smart_search.config import SmartSearchConfig
 from smart_search.constants import OVERFETCH_MULTIPLIER
 from smart_search.fts import keyword_search
 from smart_search.fusion import reciprocal_rank_fusion
+from smart_search.mmr import mmr_rerank
 from smart_search.models import Chunk, SearchResult
+from smart_search.query_preprocessor import preprocess_for_embedding, preprocess_for_fts
 from smart_search.store import ChunkStore
 
 if TYPE_CHECKING:
     from smart_search.embedder import Embedder
+    from smart_search.reranker import Reranker
 
 logger = logging.getLogger(__name__)
 
@@ -55,17 +58,20 @@ class SearchEngine:
         config: SmartSearchConfig,
         embedder: "Embedder",
         store: ChunkStore,
+        reranker: Optional["Reranker"] = None,
     ) -> None:
-        """Initialize with config, embedder, and store.
+        """Initialize with config, embedder, store, and optional reranker.
 
         Args:
             config: SmartSearchConfig with search defaults.
             embedder: Embedder for generating query vectors.
             store: ChunkStore for vector similarity search.
+            reranker: Optional cross-encoder reranker for result quality.
         """
         self._config = config
         self._embedder = embedder
         self._store = store
+        self._reranker = reranker
 
     def search_results(
         self,
@@ -130,7 +136,8 @@ class SearchEngine:
         Returns:
             Filtered and ranked SearchResult list.
         """
-        query_vec = self._embedder.embed_query(query)
+        clean_query = preprocess_for_embedding(query)
+        query_vec = self._embedder.embed_query(clean_query or query)
         results = self._store.vector_search(query_vec, limit=limit)
         return [r for r in results if r.score >= self._config.relevance_threshold]
 
@@ -150,7 +157,11 @@ class SearchEngine:
         if conn is None:
             return []
 
-        fts_hits = keyword_search(conn, query, limit=limit)
+        fts_query = preprocess_for_fts(query)
+        if not fts_query:
+            return []
+
+        fts_hits = keyword_search(conn, fts_query, limit=limit)
         results = []
         for rank, hit in enumerate(fts_hits, start=1):
             chunk = Chunk(
@@ -185,7 +196,8 @@ class SearchEngine:
         Returns:
             Unfiltered ranked SearchResult list from vector search.
         """
-        query_vec = self._embedder.embed_query(query)
+        clean_query = preprocess_for_embedding(query)
+        query_vec = self._embedder.embed_query(clean_query or query)
         return self._store.vector_search(query_vec, limit=limit)
 
     def _hybrid_search(self, query: str, limit: int) -> List[SearchResult]:
@@ -194,15 +206,15 @@ class SearchEngine:
         Over-fetches limit*OVERFETCH_MULTIPLIER from each source, fuses
         with RRF, and truncates to the requested limit. Uses unfiltered
         semantic results so borderline items can still be boosted by
-        keyword matches (e.g. a chunk scoring 0.29 semantically that
-        ranks #1 in FTS5 should still appear in fused results).
+        keyword matches. Optionally reranks the fused results with a
+        cross-encoder for higher quality.
 
         Args:
             query: Search query string.
             limit: Maximum results.
 
         Returns:
-            Fused and ranked SearchResult list.
+            Fused (and optionally reranked) SearchResult list.
         """
         overfetch = limit * OVERFETCH_MULTIPLIER
         semantic_results = self._unfiltered_semantic_search(query, overfetch)
@@ -212,15 +224,43 @@ class SearchEngine:
             return []
         if not keyword_results:
             # No keyword matches -- fall back to threshold-filtered semantic
-            return [r for r in semantic_results
-                    if r.score >= self._config.relevance_threshold][:limit]
+            results = [r for r in semantic_results
+                       if r.score >= self._config.relevance_threshold][:limit]
+            return self._apply_reranking(query, results)
         if not semantic_results:
-            return keyword_results[:limit]
+            return self._apply_reranking(query, keyword_results[:limit])
 
-        return reciprocal_rank_fusion(
+        fused = reciprocal_rank_fusion(
             semantic_results, keyword_results,
             k=self._config.rrf_k, limit=limit,
         )
+        return self._apply_reranking(query, fused)
+
+    def _apply_reranking(
+        self, query: str, results: List[SearchResult]
+    ) -> List[SearchResult]:
+        """Apply cross-encoder reranking and MMR diversity if configured.
+
+        Pipeline order: Rerank (quality) -> MMR (diversity).
+
+        Args:
+            query: Search query string.
+            results: Pre-ranked search results.
+
+        Returns:
+            Results after optional reranking and diversity selection.
+        """
+        if self._reranker is not None:
+            results = self._reranker.rerank(query, results)
+
+        if self._config.mmr_enabled and len(results) > 1:
+            results = mmr_rerank(
+                results,
+                lambda_param=self._config.mmr_lambda,
+                limit=len(results),
+            )
+
+        return results
 
     def search(
         self,

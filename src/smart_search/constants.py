@@ -18,5 +18,8 @@ OVERFETCH_MULTIPLIER = 5  # Fetch limit*N from each source before fusion
 UPSERT_BATCH_SIZE = 200     # Max chunks per LanceDB insert batch
 MAX_CHUNKS_PER_FILE = 5000  # Safety cap: truncate files producing more chunks
 
+# Reranking settings
+DEFAULT_RERANK_TOP_N = 20  # Number of fusion results to pass through cross-encoder
+
 # Application metadata
-APP_VERSION = "0.11.5"
+APP_VERSION = "0.12.0"

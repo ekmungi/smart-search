@@ -39,7 +39,9 @@ def _cmd_search(args, data_dir):
     store = ChunkStore(cfg)
     store.initialize()
     embedder = Embedder(cfg)
-    engine = SearchEngine(cfg, embedder, store)
+    from smart_search.reranker import Reranker
+    reranker = Reranker(cfg) if cfg.reranking_enabled else None
+    engine = SearchEngine(cfg, embedder, store, reranker=reranker)
     result = engine.search(
         query=args.query, limit=args.limit, folder=args.folder,
     )

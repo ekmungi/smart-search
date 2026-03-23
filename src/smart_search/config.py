@@ -68,6 +68,16 @@ class SmartSearchConfig(BaseSettings):
     relevance_threshold: float = 0.30
     rrf_k: int = 60  # RRF constant; lower values (20-30) boost top-ranked results
 
+    # Cross-encoder reranking settings (Phase 2: search quality improvements)
+    reranking_enabled: bool = True
+    reranker_model: str = "cross-encoder/ms-marco-TinyBERT-L-2-v2"
+    reranker_idle_timeout: float = 60.0
+    rerank_top_n: int = 20  # How many fusion results to rerank
+
+    # MMR diversity settings (Phase 3: eliminate redundant chunks)
+    mmr_enabled: bool = True
+    mmr_lambda: float = 0.8  # 0-1: higher = more relevance, lower = more diversity
+
     # Global shortcut for Quick Search overlay
     shortcut_key: str = "Ctrl+Space"
 

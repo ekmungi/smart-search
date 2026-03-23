@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Search - Search Pipeline Architecture</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent-blue: #58a6ff;
+    --accent-green: #3fb950;
+    --accent-orange: #d29922;
+    --accent-purple: #bc8cff;
+    --accent-red: #f85149;
+    --accent-cyan: #39d2c0;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+  }
+
+  .subtitle {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .pipeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+
+  .stage {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    position: relative;
+  }
+
+  .connector {
+    display: flex;
+    justify-content: center;
+    padding: 0.25rem 0;
+  }
+
+  .connector svg {
+    width: 24px;
+    height: 28px;
+  }
+
+  .connector-split {
+    display: flex;
+    justify-content: center;
+    padding: 0.25rem 0;
+  }
+
+  .connector-split svg {
+    width: 200px;
+    height: 36px;
+  }
+
+  .connector-merge svg {
+    width: 200px;
+    height: 36px;
+  }
+
+  .parallel-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .stage-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .stage-number {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--bg);
+    background: var(--accent-blue);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .stage-number.green { background: var(--accent-green); }
+  .stage-number.orange { background: var(--accent-orange); }
+  .stage-number.purple { background: var(--accent-purple); }
+  .stage-number.cyan { background: var(--accent-cyan); }
+
+  .stage-title {
+    font-weight: 600;
+    font-size: 1rem;
+  }
+
+  .stage-desc {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .metrics {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .metric {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .metric-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+  }
+
+  .metric-value {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--accent-blue);
+  }
+
+  .metric-value.green { color: var(--accent-green); }
+  .metric-value.orange { color: var(--accent-orange); }
+  .metric-value.purple { color: var(--accent-purple); }
+  .metric-value.cyan { color: var(--accent-cyan); }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    background: rgba(88, 166, 255, 0.1);
+    color: var(--accent-blue);
+    border: 1px solid rgba(88, 166, 255, 0.2);
+  }
+
+  .tag.green {
+    background: rgba(63, 185, 80, 0.1);
+    color: var(--accent-green);
+    border-color: rgba(63, 185, 80, 0.2);
+  }
+
+  .tag.orange {
+    background: rgba(210, 153, 34, 0.1);
+    color: var(--accent-orange);
+    border-color: rgba(210, 153, 34, 0.2);
+  }
+
+  .tag.purple {
+    background: rgba(188, 140, 255, 0.1);
+    color: var(--accent-purple);
+    border-color: rgba(188, 140, 255, 0.2);
+  }
+
+  .tag.cyan {
+    background: rgba(57, 210, 192, 0.1);
+    color: var(--accent-cyan);
+    border-color: rgba(57, 210, 192, 0.2);
+  }
+
+  .formula {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    border-left: 3px solid var(--border);
+    margin-top: 0.5rem;
+    color: var(--text-muted);
+    overflow-x: auto;
+  }
+
+  .references {
+    margin-top: 2.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .references h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+  }
+
+  .references ol {
+    padding-left: 1.5rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.8;
+  }
+
+  .references a {
+    color: var(--accent-blue);
+    text-decoration: none;
+  }
+
+  .references a:hover {
+    text-decoration: underline;
+  }
+
+  .resource-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 2rem;
+    font-size: 0.85rem;
+  }
+
+  .resource-table th {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 2px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .resource-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .resource-table td:first-child {
+    font-weight: 500;
+  }
+
+  .resource-table .mono {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+  }
+
+  @media (max-width: 700px) {
+    .parallel-container {
+      grid-template-columns: 1fr;
+    }
+    .metrics {
+      gap: 1rem;
+    }
+  }
+</style>
+</head>
+<body>
+
+<h1>Search Pipeline Architecture</h1>
+<p class="subtitle">Smart Search v0.12.0 -- multi-stage hybrid retrieval with cross-encoder reranking and MMR diversity</p>
+
+<div class="pipeline">
+
+  <!-- Stage 0: Query Input -->
+  <div class="stage">
+    <div class="stage-header">
+      <div class="stage-number">0</div>
+      <span class="stage-title">Query Input</span>
+      <span class="tag">always active</span>
+    </div>
+    <p class="stage-desc">Raw query from MCP tool, REST API, CLI, or desktop Quick Search. Normalized: leading/trailing punctuation stripped, internal punctuation preserved.</p>
+  </div>
+
+  <div class="connector">
+    <svg viewBox="0 0 24 28"><path d="M12 0 L12 28" stroke="#30363d" stroke-width="2" fill="none"/><path d="M7 22 L12 28 L17 22" stroke="#30363d" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <!-- Stage 1: Preprocessing -->
+  <div class="stage">
+    <div class="stage-header">
+      <div class="stage-number">1</div>
+      <span class="stage-title">Query Preprocessor</span>
+      <span class="tag">query_preprocessor.py</span>
+    </div>
+    <p class="stage-desc">Splits into two paths. FTS5 path: removes stopwords, OR-joins multi-term queries, preserves quoted phrases. Embedding path: whitespace normalization only -- the embedding model handles semantic context.</p>
+    <div class="metrics">
+      <div class="metric">
+        <span class="metric-label">Stopwords</span>
+        <span class="metric-value">~60 English</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Latency</span>
+        <span class="metric-value">&lt;0.1ms</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Memory</span>
+        <span class="metric-value">0 MB</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Split connector -->
+  <div class="connector-split">
+    <svg viewBox="0 0 200 36">
+      <path d="M100 0 L100 10 L40 26 L40 36" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M100 0 L100 10 L160 26 L160 36" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M35 30 L40 36 L45 30" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M155 30 L160 36 L165 30" stroke="#30363d" stroke-width="2" fill="none"/>
+    </svg>
+  </div>
+
+  <!-- Stage 2: Parallel Retrieval -->
+  <div class="parallel-container">
+    <div class="stage">
+      <div class="stage-header">
+        <div class="stage-number green">2a</div>
+        <span class="stage-title">FTS5 BM25</span>
+        <span class="tag green">fts.py</span>
+      </div>
+      <p class="stage-desc">Lexical retrieval via SQLite FTS5. Porter stemming handles inflections. BM25 ranks by term frequency, inverse document frequency, and length normalization.</p>
+      <div class="formula">score = BM25(tf, idf, dl, avgdl, k1=1.2, b=0.75)</div>
+      <div class="metrics" style="margin-top: 0.75rem">
+        <div class="metric">
+          <span class="metric-label">Latency</span>
+          <span class="metric-value green">&lt;5ms</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Over-fetch</span>
+          <span class="metric-value green">5x limit</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-header">
+        <div class="stage-number green">2b</div>
+        <span class="stage-title">Vector Search</span>
+        <span class="tag green">store.py + embedder.py</span>
+      </div>
+      <p class="stage-desc">Dense retrieval via LanceDB. Query embedded by snowflake-arctic-embed-m-v2.0 (256-dim, int8 ONNX), compared to indexed chunk embeddings via cosine similarity.</p>
+      <div class="formula">similarity = 1 - cosine_distance(query_vec, chunk_vec)</div>
+      <div class="metrics" style="margin-top: 0.75rem">
+        <div class="metric">
+          <span class="metric-label">Latency</span>
+          <span class="metric-value green">~50ms</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Over-fetch</span>
+          <span class="metric-value green">5x limit</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Merge connector -->
+  <div class="connector-split connector-merge">
+    <svg viewBox="0 0 200 36">
+      <path d="M40 0 L40 10 L100 26 L100 36" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M160 0 L160 10 L100 26 L100 36" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M95 30 L100 36 L105 30" stroke="#30363d" stroke-width="2" fill="none"/>
+    </svg>
+  </div>
+
+  <!-- Stage 3: Fusion -->
+  <div class="stage">
+    <div class="stage-header">
+      <div class="stage-number orange">3</div>
+      <span class="stage-title">Reciprocal Rank Fusion</span>
+      <span class="tag orange">fusion.py</span>
+    </div>
+    <p class="stage-desc">Merges both ranked lists without requiring score calibration. Documents appearing in both lists receive scores from both, naturally boosting consensus results. Scores normalized to 0-1.</p>
+    <div class="formula">RRF(d) = &Sigma; 1 / (k + rank(d))&ensp;&ensp;where k = 60</div>
+    <div class="metrics" style="margin-top: 0.75rem">
+      <div class="metric">
+        <span class="metric-label">Constant k</span>
+        <span class="metric-value orange">60</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Latency</span>
+        <span class="metric-value orange">&lt;1ms</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Reference</span>
+        <span class="metric-value orange">Cormack et al. 2009</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">
+    <svg viewBox="0 0 24 28"><path d="M12 0 L12 28" stroke="#30363d" stroke-width="2" fill="none"/><path d="M7 22 L12 28 L17 22" stroke="#30363d" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <!-- Stage 4: Cross-Encoder Reranking -->
+  <div class="stage">
+    <div class="stage-header">
+      <div class="stage-number purple">4</div>
+      <span class="stage-title">Cross-Encoder Reranking</span>
+      <span class="tag purple">reranker.py</span>
+      <span class="tag">configurable</span>
+    </div>
+    <p class="stage-desc">Jointly scores each (query, chunk) pair through a cross-encoder transformer. Unlike the bi-encoder (stage 2b) which embeds query and document independently, the cross-encoder sees both texts together with full attention, catching subtle relevance signals. Reranks the top-20 fusion results.</p>
+    <div class="formula">score = CrossEncoder(concat(query, [SEP], chunk_text))</div>
+    <div class="metrics" style="margin-top: 0.75rem">
+      <div class="metric">
+        <span class="metric-label">Model</span>
+        <span class="metric-value purple">TinyBERT-L-2-v2</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Parameters</span>
+        <span class="metric-value purple">14M</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Latency</span>
+        <span class="metric-value purple">30-60ms / 20 pairs</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Memory</span>
+        <span class="metric-value purple">~50MB (lazy)</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Reference</span>
+        <span class="metric-value purple">Nogueira & Cho 2019</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">
+    <svg viewBox="0 0 24 28"><path d="M12 0 L12 28" stroke="#30363d" stroke-width="2" fill="none"/><path d="M7 22 L12 28 L17 22" stroke="#30363d" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <!-- Stage 5: MMR -->
+  <div class="stage">
+    <div class="stage-header">
+      <div class="stage-number cyan">5</div>
+      <span class="stage-title">MMR Diversity Selection</span>
+      <span class="tag cyan">mmr.py</span>
+      <span class="tag">configurable</span>
+    </div>
+    <p class="stage-desc">Maximum Marginal Relevance eliminates redundant results. Greedily selects the next result that maximizes relevance while penalizing similarity to already-selected results. Ensures 10 results cover 10 topics, not 3.</p>
+    <div class="formula">MMR(d) = &lambda; &middot; relevance(d) - (1 - &lambda;) &middot; max_sim(d, selected)&ensp;&ensp;where &lambda; = 0.8</div>
+    <div class="metrics" style="margin-top: 0.75rem">
+      <div class="metric">
+        <span class="metric-label">Lambda</span>
+        <span class="metric-value cyan">0.8</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Latency</span>
+        <span class="metric-value cyan">&lt;1ms</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Memory</span>
+        <span class="metric-value cyan">0 MB</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Reference</span>
+        <span class="metric-value cyan">Carbonell & Goldstein 1998</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="connector">
+    <svg viewBox="0 0 24 28"><path d="M12 0 L12 28" stroke="#30363d" stroke-width="2" fill="none"/><path d="M7 22 L12 28 L17 22" stroke="#30363d" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <!-- Output -->
+  <div class="stage" style="border-color: var(--accent-green); background: rgba(63, 185, 80, 0.03);">
+    <div class="stage-header">
+      <span class="stage-title" style="color: var(--accent-green);">Ranked Results</span>
+    </div>
+    <p class="stage-desc">Top-N results with rank, normalized score (0-1), chunk text, source path, and section path. Delivered via MCP tools, REST API, CLI, or desktop Quick Search.</p>
+  </div>
+
+</div>
+
+<!-- Resource Table -->
+<table class="resource-table">
+  <thead>
+    <tr>
+      <th>Component</th>
+      <th>RAM (active)</th>
+      <th>RAM (idle)</th>
+      <th>Latency</th>
+      <th>On Disk</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Bi-encoder (snowflake)</td>
+      <td class="mono">~400 MB</td>
+      <td class="mono">0 (unloads)</td>
+      <td class="mono">~50ms</td>
+      <td class="mono">297 MB</td>
+    </tr>
+    <tr>
+      <td>Cross-encoder (TinyBERT)</td>
+      <td class="mono">~50 MB</td>
+      <td class="mono">0 (unloads)</td>
+      <td class="mono">30-60ms</td>
+      <td class="mono">~15 MB</td>
+    </tr>
+    <tr>
+      <td>FTS5 index</td>
+      <td class="mono" colspan="2">Shared with SQLite</td>
+      <td class="mono">&lt;5ms</td>
+      <td class="mono">~ corpus size</td>
+    </tr>
+    <tr>
+      <td>RRF + MMR</td>
+      <td class="mono">negligible</td>
+      <td class="mono">0</td>
+      <td class="mono">&lt;2ms</td>
+      <td class="mono">0</td>
+    </tr>
+    <tr style="font-weight: 600;">
+      <td>Total (search)</td>
+      <td class="mono">~650 MB peak</td>
+      <td class="mono">~200 MB</td>
+      <td class="mono">~100-150ms</td>
+      <td class="mono">~312 MB</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- References -->
+<div class="references">
+  <h2>References</h2>
+  <ol>
+    <li>Cormack, G.V., Clarke, C.L.A., & Buettcher, S. (2009). <a href="https://dl.acm.org/doi/10.1145/1571941.1572114">Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods</a>. <em>SIGIR '09</em>.</li>
+    <li>Nogueira, R. & Cho, K. (2019). <a href="https://arxiv.org/abs/1901.04085">Passage Re-ranking with BERT</a>. <em>arXiv:1901.04085</em>.</li>
+    <li>Thakur, N. et al. (2021). <a href="https://arxiv.org/abs/2104.08663">BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of Information Retrieval Models</a>. <em>NeurIPS 2021</em>.</li>
+    <li>Carbonell, J. & Goldstein, J. (1998). <a href="https://dl.acm.org/doi/10.1145/290941.291025">The Use of MMR, Diversity-Based Reranking for Reordering Documents and Producing Summaries</a>. <em>SIGIR '98</em>.</li>
+    <li>Robertson, S. & Zaragoza, H. (2009). <a href="https://dl.acm.org/doi/10.1561/1500000019">The Probabilistic Relevance Framework: BM25 and Beyond</a>. <em>Foundations and Trends in Information Retrieval</em>.</li>
+  </ol>
+</div>
+
+</body>
+</html>
