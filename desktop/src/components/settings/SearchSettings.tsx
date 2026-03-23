@@ -1,20 +1,49 @@
-// Search settings: relevance threshold, default limit, and exclusion patterns.
+// Search settings: relevance threshold, default limit, reranking, MMR, exclusions.
 
 import { Search, Filter } from "lucide-react";
+import { motion } from "motion/react";
 import { Section, SettingRow } from "./SettingsLayout";
+
+/** Animated toggle switch -- matches SystemSettings pattern. */
+function ToggleSwitch({
+  enabled,
+  onToggle,
+}: {
+  enabled: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`relative w-10 h-5 rounded-full transition-colors ${
+        enabled ? "bg-accent-blue" : "bg-bg-elevated"
+      }`}
+    >
+      <motion.span
+        className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-text-primary"
+        animate={{ x: enabled ? 20 : 0 }}
+        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+      />
+    </button>
+  );
+}
 
 /** Props for the search settings section. */
 interface SearchSettingsProps {
   searchLimit: number;
   relevanceThreshold: number;
+  rerankingEnabled: boolean;
+  mmrEnabled: boolean;
   excludePatterns: readonly unknown[];
   onSave: (key: string, value: unknown) => void;
 }
 
-/** Search configuration: limit, threshold, exclusions. */
+/** Search configuration: limit, threshold, reranking, diversity, exclusions. */
 export function SearchSettings({
   searchLimit,
   relevanceThreshold,
+  rerankingEnabled,
+  mmrEnabled,
   excludePatterns,
   onSave,
 }: SearchSettingsProps) {
@@ -38,7 +67,7 @@ export function SearchSettings({
         </SettingRow>
         <SettingRow
           label="Relevance Threshold"
-          description="Minimum similarity score for search results. Lower values return more results but may include less relevant matches."
+          description="Minimum similarity score for search results"
         >
           <div className="flex items-center gap-3">
             <input
@@ -58,6 +87,24 @@ export function SearchSettings({
               {Math.round(relevanceThreshold * 100)}%
             </span>
           </div>
+        </SettingRow>
+        <SettingRow
+          label="Reranking"
+          description="Cross-encoder reranking for better result ordering"
+        >
+          <ToggleSwitch
+            enabled={rerankingEnabled}
+            onToggle={() => onSave("reranking_enabled", !rerankingEnabled)}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Diversity"
+          description="MMR filtering to reduce redundant results"
+        >
+          <ToggleSwitch
+            enabled={mmrEnabled}
+            onToggle={() => onSave("mmr_enabled", !mmrEnabled)}
+          />
         </SettingRow>
       </Section>
 

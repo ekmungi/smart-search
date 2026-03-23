@@ -316,6 +316,8 @@ export default function Settings() {
       <SearchSettings
         searchLimit={searchLimit}
         relevanceThreshold={relevanceThreshold}
+        rerankingEnabled={config.reranking_enabled !== false}
+        mmrEnabled={config.mmr_enabled !== false}
         excludePatterns={excludes}
         onSave={handleSave}
       />
