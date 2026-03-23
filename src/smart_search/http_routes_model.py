@@ -7,7 +7,9 @@ from typing import Callable
 from fastapi import APIRouter
 
 from smart_search.config import SmartSearchConfig
+from smart_search.gpu_provider import get_device_info
 from smart_search.http_models import (
+    GpuInfoResponse,
     ModelInfoResponse,
     ModelLoadedResponse,
     ModelStatusResponse,
@@ -48,6 +50,7 @@ def create_model_router(
                 default_dims=m.default_dims,
                 modalities=m.modalities,
                 description=m.description,
+                gpu_required=m.gpu_required,
             )
             for m in _list()
         ]
@@ -64,9 +67,11 @@ def create_model_router(
 
         live_config = get_config_mgr().load()
         model_name = live_config.get("embedding_model", config.embedding_model)
+        device_info = get_device_info()
         return ModelStatusResponse(
             cached=Embedder.is_model_cached(model_name),
             model_name=model_name,
+            gpu_info=GpuInfoResponse(**device_info),
         )
 
     @router.get("/model/loaded", response_model=ModelLoadedResponse)

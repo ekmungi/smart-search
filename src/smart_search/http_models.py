@@ -132,11 +132,19 @@ class ConfigUpdateRequest(BaseModel):
     config: dict
 
 
+class GpuInfoResponse(BaseModel):
+    """GPU device detection status."""
+
+    type: str       # "cpu", "cuda", "directml"
+    name: str       # "CPU", "CUDA (RTX 4070)", "DirectML"
+
+
 class ModelStatusResponse(BaseModel):
-    """Embedding model cache status."""
+    """Embedding model cache status with GPU info."""
 
     cached: bool
     model_name: str
+    gpu_info: GpuInfoResponse
 
 
 class ModelLoadedResponse(BaseModel):
@@ -157,6 +165,7 @@ class ModelInfoResponse(BaseModel):
     default_dims: int
     modalities: List[str]
     description: str
+    gpu_required: bool = False
 
 
 class ModelsResponse(BaseModel):
