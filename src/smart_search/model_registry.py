@@ -24,6 +24,7 @@ class ModelInfo:
         query_prefix: Prefix for query texts (None = no prefix).
         modalities: Supported input types (e.g. ["text"], ["text", "image"]).
         description: Short description for the UI tooltip.
+        gpu_required: Whether this model needs GPU to run (too large for CPU).
     """
 
     model_id: str

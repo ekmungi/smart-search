@@ -103,14 +103,11 @@ def get_device_info() -> Dict[str, Any]:
         return {"type": "cpu", "name": "CPU"}
 
     if gpu == "cuda":
-        try:
-            import onnxruntime as ort
-            device_name = ort.get_device()
-            name = f"CUDA ({device_name})" if device_name else "CUDA"
-        except (ImportError, Exception):
-            name = "CUDA"
+        # ort.get_device() returns "GPU" not the actual device name.
+        # Use generic label; detailed GPU name would require torch or pynvml.
+        name = "CUDA GPU"
     elif gpu == "directml":
-        name = "DirectML"
+        name = "DirectML GPU"
     else:
         name = gpu.upper()
 

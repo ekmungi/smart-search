@@ -89,6 +89,13 @@ class TestBuildProviderChain:
         assert chain == []
 
     @patch("smart_search.gpu_provider._get_available_providers")
+    def test_unknown_backend_falls_through_to_auto(self, mock_providers):
+        """Unknown backend values (e.g. stale 'onnx') behave like auto."""
+        mock_providers.return_value = ["CPUExecutionProvider"]
+        chain = build_provider_chain(backend="onnx")
+        assert chain == ["CPUExecutionProvider"]
+
+    @patch("smart_search.gpu_provider._get_available_providers")
     def test_custom_device_id(self, mock_providers):
         """Device ID is passed through to provider options."""
         mock_providers.return_value = ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -122,4 +129,4 @@ class TestGetDeviceInfo:
         mock_detect.return_value = "directml"
         info = get_device_info()
         assert info["type"] == "directml"
-        assert info["name"] == "DirectML"
+        assert info["name"] == "DirectML GPU"
