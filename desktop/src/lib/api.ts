@@ -15,6 +15,8 @@ import type {
   SearchResponse,
   RepairResponse,
   SmartSearchConfig,
+  FilesResponse,
+  RetryFailedResponse,
 } from "./api-types";
 
 // Re-export all types so existing imports like `import { type FolderInfo } from "../lib/api"` keep working.
@@ -38,6 +40,9 @@ export type {
   RepairResponse,
   SmartSearchConfig,
   GpuInfo,
+  IndexedFileInfo,
+  FilesResponse,
+  RetryFailedResponse,
 } from "./api-types";
 
 /** In dev mode, Vite proxies /api to the backend so all requests are
@@ -184,6 +189,23 @@ export async function fetchIndexingStatus(): Promise<IndexingStatusResponse> {
 export async function repairIndex(): Promise<RepairResponse> {
   const res = await fetch(`${BASE_URL}/repair`, { method: "POST" });
   return handleResponse<RepairResponse>(res);
+}
+
+/** Fetch persistent file log (all indexed + failed files from SQLite). */
+export async function fetchFiles(folder?: string): Promise<FilesResponse> {
+  const params = folder ? `?folder=${encodeURIComponent(folder)}` : "";
+  const res = await fetchWithTimeout(`${BASE_URL}/files${params}`);
+  return handleResponse<FilesResponse>(res);
+}
+
+/** Retry failed files: clear their failed status and re-queue indexing. */
+export async function retryFailed(paths?: string[]): Promise<RetryFailedResponse> {
+  const res = await fetch(`${BASE_URL}/retry-failed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(paths ?? null),
+  });
+  return handleResponse<RetryFailedResponse>(res);
 }
 
 /** Clear all file hashes and re-index every watched folder. */

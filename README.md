@@ -2,7 +2,7 @@
 
 A personal, local-first knowledge management system. Index your documents, notes, spreadsheets, and more into a searchable knowledge base that connects with everything running locally -- Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on your machine: no cloud, no GPU, no subscriptions.
 
-**Version:** 0.13.0 | **License:** MIT
+**Version:** 0.13.1 | **License:** MIT
 
 ---
 
@@ -47,8 +47,11 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 ### Indexing
 
 - **14 formats**: all non-Markdown files converted via MarkItDown, then chunked by headings
+- **Keyword-only indexing**: structured files (CSV, XLSX, JSON) indexed in FTS5 for keyword search without vector embeddings
+- **Persistent conversion worker**: long-lived subprocess for binary file conversion -- eliminates per-file process creation overhead on Windows
 - **Background indexing**: non-blocking with per-folder progress, cancellation, and auto-resume on restart
 - **Hash-based dedup**: unchanged files are skipped automatically
+- **Persistent indexing log**: file status (indexed/failed) stored in SQLite, survives server restarts with per-file retry
 - **Ephemeral indexes**: create temporary `.smart-search/` indexes inside any folder
 
 ### Desktop App
@@ -57,8 +60,11 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 - **Quick Search**: `Ctrl+Space` global hotkey opens a floating search overlay (configurable shortcut)
 - **Dashboard**: index stats, per-folder status, model download progress
 - **Folder Manager**: add/remove watch directories with drag-and-drop
+- **Indexing Log**: persistent file log with status, error details, per-file retry, and open-in-default-app
 - **Settings**: font scaling, embedding model selection, Matryoshka dimension picker, relevance threshold, autostart, MCP registration
 - **Repair Index**: one-click maintenance (orphan removal, FTS5 rebuild, LanceDB compaction, compatibility check)
+- **Window state**: remembers size and position between sessions
+- **Graceful shutdown**: server exits cleanly via HTTP signal when desktop app closes
 - **System tray**: background operation with tray icon
 
 ### Embedding
@@ -279,7 +285,7 @@ smart-search temp cleanup /path              # Remove an ephemeral index
 
 ## REST API
 
-The HTTP server runs on `localhost:9742` with 21 endpoints:
+The HTTP server runs on `localhost:9742` with 23 endpoints:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -301,6 +307,8 @@ The HTTP server runs on `localhost:9742` with 21 endpoints:
 | POST | `/api/repair` | Run index maintenance (orphans, FTS5, compaction) |
 | POST | `/api/ephemeral/index` | Create ephemeral index |
 | GET | `/api/ephemeral` | List ephemeral indexes |
+| POST | `/api/retry-failed` | Retry failed files (clear + re-queue) |
+| POST | `/api/shutdown` | Graceful server shutdown |
 | DELETE | `/api/ephemeral?folder_path=...` | Delete ephemeral index |
 
 ---
@@ -382,6 +390,7 @@ Backend (Python, all share the HTTP server)
   mmr.py                         Maximum Marginal Relevance diversity selection
   query_preprocessor.py          Stopword removal (FTS5), query normalization
   indexer.py                     Document ingestion pipeline
+  conversion_worker.py           Persistent subprocess for binary file conversion
   markitdown_parser.py           File -> Markdown conversion
   markdown_chunker.py            Heading-based section splitting
   embedder.py                    ONNX embedding with lazy load/unload

@@ -71,6 +71,7 @@ class IndexStats(BaseModel):
 
     document_count: int
     chunk_count: int
+    failed_count: int = 0
     index_size_bytes: int
     total_files: int = 0
     last_indexed_at: Optional[str] = None

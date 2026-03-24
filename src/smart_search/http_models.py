@@ -21,6 +21,7 @@ class StatsResponse(BaseModel):
 
     document_count: int
     chunk_count: int
+    failed_count: int = 0
     index_size_bytes: int
     index_size_mb: float
     total_files: int = 0
@@ -56,6 +57,8 @@ class FolderInfo(BaseModel):
     path: str
     exists: bool
     status: str
+    indexed_count: int = 0
+    failed_count: int = 0
 
 
 class FoldersResponse(BaseModel):
@@ -92,6 +95,8 @@ class FileInfo(BaseModel):
     source_path: str
     chunk_count: int
     indexed_at: str
+    status: str = "indexed"
+    error: Optional[str] = None
 
 
 class FilesResponse(BaseModel):

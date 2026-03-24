@@ -16,8 +16,8 @@ use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{
     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState as ShortcutState2,
 };
-use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
 
 /// Default port for the smart-search HTTP backend.
 const BACKEND_PORT: u16 = 9742;
@@ -112,15 +112,27 @@ async fn register_mcp() -> Result<String, String> {
         let args: Vec<String> = if sidecar.exists() {
             let path_str = sidecar.to_string_lossy().to_string();
             vec![
-                "mcp".into(), "add".into(), "-s".into(), "user".into(),
-                "smart-search".into(), "--".into(), path_str, "mcp".into(),
+                "mcp".into(),
+                "add".into(),
+                "-s".into(),
+                "user".into(),
+                "smart-search".into(),
+                "--".into(),
+                path_str,
+                "mcp".into(),
             ]
         } else {
             // Dev mode fallback: register via Python module
             vec![
-                "mcp".into(), "add".into(), "-s".into(), "user".into(),
-                "smart-search".into(), "--".into(),
-                "python".into(), "-m".into(), "smart_search.server".into(),
+                "mcp".into(),
+                "add".into(),
+                "-s".into(),
+                "user".into(),
+                "smart-search".into(),
+                "--".into(),
+                "python".into(),
+                "-m".into(),
+                "smart_search.server".into(),
             ]
         };
 
@@ -181,31 +193,74 @@ fn parse_shortcut(s: &str) -> Result<Shortcut, String> {
         "down" | "arrowdown" => Code::ArrowDown,
         "left" | "arrowleft" => Code::ArrowLeft,
         "right" | "arrowright" => Code::ArrowRight,
-        "a" => Code::KeyA, "b" => Code::KeyB, "c" => Code::KeyC,
-        "d" => Code::KeyD, "e" => Code::KeyE, "f" if key_str.len() == 1 => Code::KeyF,
-        "g" => Code::KeyG, "h" => Code::KeyH, "i" => Code::KeyI,
-        "j" => Code::KeyJ, "k" => Code::KeyK, "l" => Code::KeyL,
-        "m" => Code::KeyM, "n" => Code::KeyN, "o" => Code::KeyO,
-        "p" => Code::KeyP, "q" => Code::KeyQ, "r" => Code::KeyR,
-        "s" => Code::KeyS, "t" => Code::KeyT, "u" => Code::KeyU,
-        "v" => Code::KeyV, "w" => Code::KeyW, "x" => Code::KeyX,
-        "y" => Code::KeyY, "z" => Code::KeyZ,
-        "0" => Code::Digit0, "1" => Code::Digit1, "2" => Code::Digit2,
-        "3" => Code::Digit3, "4" => Code::Digit4, "5" => Code::Digit5,
-        "6" => Code::Digit6, "7" => Code::Digit7, "8" => Code::Digit8,
+        "a" => Code::KeyA,
+        "b" => Code::KeyB,
+        "c" => Code::KeyC,
+        "d" => Code::KeyD,
+        "e" => Code::KeyE,
+        "f" if key_str.len() == 1 => Code::KeyF,
+        "g" => Code::KeyG,
+        "h" => Code::KeyH,
+        "i" => Code::KeyI,
+        "j" => Code::KeyJ,
+        "k" => Code::KeyK,
+        "l" => Code::KeyL,
+        "m" => Code::KeyM,
+        "n" => Code::KeyN,
+        "o" => Code::KeyO,
+        "p" => Code::KeyP,
+        "q" => Code::KeyQ,
+        "r" => Code::KeyR,
+        "s" => Code::KeyS,
+        "t" => Code::KeyT,
+        "u" => Code::KeyU,
+        "v" => Code::KeyV,
+        "w" => Code::KeyW,
+        "x" => Code::KeyX,
+        "y" => Code::KeyY,
+        "z" => Code::KeyZ,
+        "0" => Code::Digit0,
+        "1" => Code::Digit1,
+        "2" => Code::Digit2,
+        "3" => Code::Digit3,
+        "4" => Code::Digit4,
+        "5" => Code::Digit5,
+        "6" => Code::Digit6,
+        "7" => Code::Digit7,
+        "8" => Code::Digit8,
         "9" => Code::Digit9,
-        "f1" => Code::F1, "f2" => Code::F2, "f3" => Code::F3,
-        "f4" => Code::F4, "f5" => Code::F5, "f6" => Code::F6,
-        "f7" => Code::F7, "f8" => Code::F8, "f9" => Code::F9,
-        "f10" => Code::F10, "f11" => Code::F11, "f12" => Code::F12,
-        "f13" => Code::F13, "f14" => Code::F14, "f15" => Code::F15,
-        "f16" => Code::F16, "f17" => Code::F17, "f18" => Code::F18,
-        "f19" => Code::F19, "f20" => Code::F20, "f21" => Code::F21,
-        "f22" => Code::F22, "f23" => Code::F23, "f24" => Code::F24,
+        "f1" => Code::F1,
+        "f2" => Code::F2,
+        "f3" => Code::F3,
+        "f4" => Code::F4,
+        "f5" => Code::F5,
+        "f6" => Code::F6,
+        "f7" => Code::F7,
+        "f8" => Code::F8,
+        "f9" => Code::F9,
+        "f10" => Code::F10,
+        "f11" => Code::F11,
+        "f12" => Code::F12,
+        "f13" => Code::F13,
+        "f14" => Code::F14,
+        "f15" => Code::F15,
+        "f16" => Code::F16,
+        "f17" => Code::F17,
+        "f18" => Code::F18,
+        "f19" => Code::F19,
+        "f20" => Code::F20,
+        "f21" => Code::F21,
+        "f22" => Code::F22,
+        "f23" => Code::F23,
+        "f24" => Code::F24,
         _ => return Err(format!("Unknown key: {}", key_str)),
     };
 
-    let mods = if modifiers.is_empty() { None } else { Some(modifiers) };
+    let mods = if modifiers.is_empty() {
+        None
+    } else {
+        Some(modifiers)
+    };
     Ok(Shortcut::new(mods, code))
 }
 
@@ -214,8 +269,8 @@ fn parse_shortcut(s: &str) -> Result<Shortcut, String> {
 /// On Windows: %LOCALAPPDATA%\smart-search\config.json
 /// Falls back to DEFAULT_SHORTCUT if file is missing or key is absent.
 fn read_shortcut_from_config() -> String {
-    let config_path = dirs_next::data_local_dir()
-        .map(|d| d.join("smart-search").join("config.json"));
+    let config_path =
+        dirs_next::data_local_dir().map(|d| d.join("smart-search").join("config.json"));
 
     let path = match config_path {
         Some(p) if p.exists() => p,
@@ -292,11 +347,9 @@ async fn check_backend_health(port: u16) -> bool {
     let url = format!("http://127.0.0.1:{}/api/health", port);
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(3),
-        tauri::async_runtime::spawn_blocking(move || {
-            match ureq::get(&url).call() {
-                Ok(resp) => resp.status() == 200,
-                Err(_) => false,
-            }
+        tauri::async_runtime::spawn_blocking(move || match ureq::get(&url).call() {
+            Ok(resp) => resp.status() == 200,
+            Err(_) => false,
         }),
     )
     .await;
@@ -327,10 +380,16 @@ fn start_sidecar(app: &AppHandle) -> Option<CommandChild> {
                         while let Some(event) = rx.recv().await {
                             match event {
                                 CommandEvent::Stderr(line) => {
-                                    log::debug!("backend stderr: {}", String::from_utf8_lossy(&line));
+                                    log::debug!(
+                                        "backend stderr: {}",
+                                        String::from_utf8_lossy(&line)
+                                    );
                                 }
                                 CommandEvent::Stdout(line) => {
-                                    log::debug!("backend stdout: {}", String::from_utf8_lossy(&line));
+                                    log::debug!(
+                                        "backend stdout: {}",
+                                        String::from_utf8_lossy(&line)
+                                    );
                                 }
                                 CommandEvent::Terminated(payload) => {
                                     log::info!("backend exited with code {:?}", payload.code);
@@ -366,22 +425,42 @@ fn start_dev_backend() -> Option<std::process::Child> {
         .ok()
 }
 
-/// Kill the backend child process if it is running.
+/// Gracefully stop the backend, falling back to force-kill if needed.
 ///
-/// Uses a three-layer approach because Windows doesn't propagate kills
-/// to child processes, and PyInstaller --onefile creates a 2-process tree
-/// (bootloader -> Python interpreter):
-///   1. Tree-kill the managed child PID (kills bootloader + all children)
-///   2. Kill by port (catches processes still LISTENING on the backend port)
-///   3. Kill by exe name from install dir (catches orphans that released
-///      the port but haven't exited)
+/// Four-layer approach:
+///   1. POST /api/shutdown -- asks uvicorn to exit cleanly (flushes DB, stops watchers)
+///   2. Wait up to 5s for the process to exit
+///   3. Tree-kill the managed child PID (Windows doesn't propagate kills)
+///   4. Kill by port / exe name (catches orphans)
 fn stop_backend(state: &BackendState) {
-    // Layer 1a: Tree-kill sidecar child (bootloader + Python subprocess)
+    // Layer 1: Graceful HTTP shutdown request
+    let graceful_ok = graceful_shutdown(BACKEND_PORT);
+
+    if graceful_ok {
+        // Layer 2: Wait for the process to actually exit
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(5);
+        while start.elapsed() < timeout {
+            if std::net::TcpStream::connect(format!("127.0.0.1:{}", BACKEND_PORT)).is_err() {
+                log::info!("Backend shut down gracefully");
+                // Clear managed handles
+                if let Ok(mut guard) = state.child.lock() {
+                    guard.take();
+                }
+                if let Ok(mut guard) = state.dev_child.lock() {
+                    *guard = None;
+                }
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        log::warn!("Backend did not exit within 5s after graceful shutdown, force-killing");
+    }
+
+    // Layer 3: Tree-kill managed child processes
     if let Ok(mut guard) = state.child.lock() {
         if let Some(child) = guard.take() {
             let pid = child.pid();
-            // Use taskkill /T to kill entire process tree -- child.kill()
-            // only sends TerminateProcess to the top-level PID
             let _ = StdCommand::new("taskkill")
                 .args(["/T", "/F", "/PID", &pid.to_string()])
                 .stdout(Stdio::null())
@@ -390,7 +469,6 @@ fn stop_backend(state: &BackendState) {
             log::info!("Tree-killed sidecar process tree from PID {}", pid);
         }
     }
-    // Layer 1b: Tree-kill dev child
     if let Ok(mut guard) = state.dev_child.lock() {
         if let Some(ref mut child) = *guard {
             let pid = child.id();
@@ -404,13 +482,30 @@ fn stop_backend(state: &BackendState) {
         *guard = None;
     }
 
-    // Layer 2: Kill by port -- catches processes spawned outside our control
+    // Layer 4: Kill by port + exe name (orphan cleanup)
     kill_process_on_port(BACKEND_PORT);
-
-    // Layer 3: Kill by exe name from install dir -- catches orphans that
-    // released the port but haven't exited (e.g. PyInstaller child process
-    // in a dying state)
     kill_sidecar_by_name();
+}
+
+/// Send a graceful shutdown request to the backend HTTP server.
+///
+/// Returns true if the server acknowledged the request (HTTP 200).
+/// Returns false on any error (connection refused, timeout, etc.).
+fn graceful_shutdown(port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{}/api/shutdown", port);
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(3))
+        .build();
+    match agent.post(&url).call() {
+        Ok(resp) => {
+            log::info!("Graceful shutdown requested (HTTP {})", resp.status());
+            resp.status() == 200
+        }
+        Err(e) => {
+            log::debug!("Graceful shutdown request failed: {}", e);
+            false
+        }
+    }
 }
 
 /// Find and kill whatever process is listening on the given port.
@@ -474,7 +569,10 @@ fn kill_sidecar_by_name() {
     // paths reliably.  Instead, query via cmd /C to get PIDs of all
     // smart-search.exe, then filter by checking each one's path.
     let output = StdCommand::new("cmd")
-        .args(["/C", "tasklist /FI \"IMAGENAME eq smart-search.exe\" /FO CSV /NH"])
+        .args([
+            "/C",
+            "tasklist /FI \"IMAGENAME eq smart-search.exe\" /FO CSV /NH",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output();
@@ -612,13 +710,23 @@ fn auto_register_mcp_if_needed() {
         if stored.trim() == path_str {
             return;
         }
-        log::info!("MCP sidecar path changed: {} -> {}", stored.trim(), path_str);
+        log::info!(
+            "MCP sidecar path changed: {} -> {}",
+            stored.trim(),
+            path_str
+        );
     }
 
     let result = StdCommand::new("claude")
         .args([
-            "mcp", "add", "-s", "user",
-            "smart-search", "--", &path_str, "mcp",
+            "mcp",
+            "add",
+            "-s",
+            "user",
+            "smart-search",
+            "--",
+            &path_str,
+            "mcp",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -670,6 +778,7 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .manage(Arc::new(BackendState {
             child: Mutex::new(None),
@@ -682,9 +791,8 @@ pub fn run() {
             let state = app.state::<Arc<BackendState>>();
 
             // Start the backend: check if already running, then try appropriate method
-            let backend_alive = std::net::TcpStream::connect(
-                format!("127.0.0.1:{}", BACKEND_PORT)
-            ).is_ok();
+            let backend_alive =
+                std::net::TcpStream::connect(format!("127.0.0.1:{}", BACKEND_PORT)).is_ok();
 
             if backend_alive {
                 log::info!("Backend already running on port {}", BACKEND_PORT);

@@ -38,6 +38,7 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
         self._db = None
         self._table = None
         self._sqlite_conn = None
+        self._sqlite_read_conn = None
         self._cached_index_size: int = 0
         self._cached_index_size_at: float = 0.0
 
@@ -87,7 +88,8 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
         # concurrent reads on *different* connections; the write connection
         # serializes all operations including reads.
         self._sqlite_read_conn = sqlite3.connect(
-            self._config.sqlite_path, check_same_thread=False
+            self._config.sqlite_path, check_same_thread=False,
+            isolation_level=None,  # Autocommit: each SELECT sees latest WAL data
         )
         self._sqlite_read_conn.execute("PRAGMA journal_mode=WAL")
         self._sqlite_conn.execute(
@@ -209,6 +211,34 @@ class ChunkStore(SqliteMetadataStore, StatsStoreMixin):
                 (c.text, c.id, c.source_path, c.source_type),
             )
         self._sqlite_conn.commit()
+
+    def insert_fts_only(self, source_path: str, source_type: str, text: str) -> int:
+        """Insert content into FTS5 keyword index without vector embeddings.
+
+        Used for structured files (CSV, XLSX, JSON) that benefit from
+        keyword search but not semantic search.
+
+        Args:
+            source_path: POSIX-normalized path to the file.
+            source_type: File extension without dot (e.g. "csv").
+            text: Full text content of the file.
+
+        Returns:
+            Number of FTS5 rows inserted (1 for the whole file).
+        """
+        import uuid
+        chunk_id = str(uuid.uuid4())[:12]
+        # Remove any existing FTS entries for this file
+        self._sqlite_conn.execute(
+            "DELETE FROM chunks_fts WHERE source_path = ?", (source_path,)
+        )
+        self._sqlite_conn.execute(
+            "INSERT INTO chunks_fts (text, id, source_path, source_type) "
+            "VALUES (?, ?, ?, ?)",
+            (text, chunk_id, source_path, source_type),
+        )
+        self._sqlite_conn.commit()
+        return 1
 
     def delete_chunks_for_file(self, source_path: str) -> int:
         """Remove all chunks for a given source file from LanceDB and FTS5.

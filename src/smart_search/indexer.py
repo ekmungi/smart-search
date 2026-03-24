@@ -12,12 +12,13 @@ from typing import TYPE_CHECKING, Callable, List, Optional
 _logger = logging.getLogger(__name__)
 
 from smart_search.config import SmartSearchConfig
-from smart_search.constants import MAX_CHUNKS_PER_FILE
+from smart_search.constants import KEYWORD_ONLY_EXTENSIONS, MAX_CHUNKS_PER_FILE
 from smart_search.markdown_chunker import MarkdownChunker
 from smart_search.models import Chunk
 from smart_search.store import ChunkStore
 
 if TYPE_CHECKING:
+    from smart_search.conversion_worker import ConversionWorker
     from smart_search.embedder import Embedder
 
 
@@ -66,46 +67,6 @@ def _get_rss_mb() -> int:
         return 0
 
 
-def _convert_with_timeout(
-    convert_fn: Callable[[str], str],
-    file_path: str,
-    timeout: int = 120,
-) -> str:
-    """Run a file conversion function with a timeout.
-
-    Prevents MarkItDown from blocking the indexing thread indefinitely
-    on problematic files (e.g. complex PDFs).
-
-    Args:
-        convert_fn: Callable that takes a file path and returns markdown text.
-        file_path: Path to the file to convert.
-        timeout: Max seconds to wait (default 120).
-
-    Returns:
-        Converted markdown text.
-
-    Raises:
-        TimeoutError: If conversion exceeds the timeout.
-    """
-    result: list[str] = []
-    error: list[Exception] = []
-
-    def _worker() -> None:
-        try:
-            result.append(convert_fn(file_path))
-        except Exception as e:
-            error.append(e)
-
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
-    thread.join(timeout=timeout)
-
-    if thread.is_alive():
-        _logger.warning("Conversion timed out after %ds: %s", timeout, file_path)
-        raise TimeoutError(f"File conversion timed out after {timeout}s: {file_path}")
-    if error:
-        raise error[0]
-    return result[0]
 
 
 def discover_files(
@@ -190,6 +151,7 @@ class DocumentIndexer:
         embedder: "Embedder",
         store: ChunkStore,
         markdown_chunker: MarkdownChunker | None = None,
+        conversion_worker: "ConversionWorker | None" = None,
     ) -> None:
         """Initialize with all pipeline components.
 
@@ -199,11 +161,15 @@ class DocumentIndexer:
             store: ChunkStore for persistence.
             markdown_chunker: Optional MarkdownChunker instance. Created
                 automatically if not provided.
+            conversion_worker: Optional persistent ConversionWorker for
+                binary file conversion. Falls back to in-process conversion
+                if not provided.
         """
         self._config = config
         self._embedder = embedder
         self._store = store
         self._markdown_chunker = markdown_chunker or MarkdownChunker(config)
+        self._conversion_worker = conversion_worker
 
     def index_file(self, file_path: str, force: bool = False) -> IndexFileResult:
         """Index a single document file.
@@ -253,17 +219,46 @@ class DocumentIndexer:
             return IndexFileResult(file_path=str(path), status="skipped")
 
         try:
+            # Keyword-only path: structured files (CSV, XLSX, JSON) go to
+            # FTS5 for keyword search but skip the embedding pipeline.
+            if path.suffix.lower() in KEYWORD_ONLY_EXTENSIONS:
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if not text.strip():
+                    self._store.record_file_indexed(
+                        source_path, file_hash, 0,
+                        file_mtime=stat_info.st_mtime, file_size=stat_info.st_size,
+                    )
+                    return IndexFileResult(
+                        file_path=str(path), status="indexed", chunk_count=0,
+                    )
+                source_type = path.suffix.lower().lstrip(".")
+                fts_count = self._store.insert_fts_only(
+                    source_path, source_type, text,
+                )
+                del text
+                self._store.record_file_indexed(
+                    source_path, file_hash, fts_count,
+                    file_mtime=stat_info.st_mtime, file_size=stat_info.st_size,
+                )
+                _logger.debug(
+                    "Keyword-indexed %s: %d FTS entries", file_path, fts_count,
+                )
+                return IndexFileResult(
+                    file_path=str(path), status="indexed", chunk_count=fts_count,
+                )
+
             # Route by extension: .md files are chunked directly;
             # all other types are converted to Markdown via MarkItDown first.
             is_binary = path.suffix.lower() != ".md"
             if not is_binary:
                 chunks = self._markdown_chunker.chunk_file(str(path))
             else:
-                from smart_search.markitdown_parser import convert_to_markdown
-
-                markdown_text = _convert_with_timeout(
-                    convert_to_markdown, str(path), timeout=120,
-                )
+                if self._conversion_worker is not None:
+                    markdown_text = self._conversion_worker.convert(str(path))
+                else:
+                    # Fallback for tests or CLI without a persistent worker
+                    from smart_search.markitdown_parser import convert_to_markdown
+                    markdown_text = convert_to_markdown(str(path))
                 source_type = path.suffix.lower().lstrip(".")
                 chunks = self._markdown_chunker.chunk_text(
                     markdown_text,
@@ -281,11 +276,23 @@ class DocumentIndexer:
                 chunks = chunks[:MAX_CHUNKS_PER_FILE]
 
             if not chunks:
-                # Record in SQLite even with 0 chunks so the file is not
-                # retried on every restart. Binary files (PDF, DOCX, etc.)
-                # with no text are tagged needs_ocr for future retry.
+                if is_binary:
+                    # Binary files (PDF, DOCX, etc.) with no extractable text
+                    # are marked as failed -- likely scanned documents needing
+                    # OCR. Recorded so they are not retried unless changed.
+                    error_msg = "No text extracted (scanned document or image-only)"
+                    self._store.record_file_failed(
+                        source_path, file_hash, error_msg,
+                        file_mtime=stat_info.st_mtime, file_size=stat_info.st_size,
+                    )
+                    return IndexFileResult(
+                        file_path=str(path), status="failed", chunk_count=0,
+                        error=error_msg,
+                    )
+                # Text files (.md, .txt, etc.) with no chunks are valid
+                # (e.g. empty file) -- record as indexed with 0 chunks.
                 self._store.record_file_indexed(
-                    source_path, file_hash, 0, needs_ocr=is_binary,
+                    source_path, file_hash, 0,
                     file_mtime=stat_info.st_mtime, file_size=stat_info.st_size,
                 )
                 return IndexFileResult(

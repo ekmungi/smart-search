@@ -1,55 +1,82 @@
-// Real-time indexing log showing per-file status with success/failure icons.
-// Session-only: cleared on app restart, maintained while the app is open.
+// Persistent indexing log sourced from SQLite, with retry for failed files.
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle, XCircle, ScrollText, ChevronDown } from "lucide-react";
-import { fetchIndexingStatus, type ProcessedFile } from "../lib/api";
-import { POLL_INDEXING_ACTIVE_MS } from "../lib/constants";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  CheckCircle,
+  XCircle,
+  ScrollText,
+  ChevronDown,
+  RotateCcw,
+  ExternalLink,
+} from "lucide-react";
+import {
+  fetchFiles,
+  retryFailed,
+  type IndexedFileInfo,
+} from "../lib/api";
+import { POLL_INDEXING_IDLE_MS } from "../lib/constants";
 import { staggerContainer, slideUp } from "../lib/animations";
 import Skeleton from "./Skeleton";
 import EmptyState from "./EmptyState";
 
+/** Extract filename from a POSIX source_path. */
+function fileName(sourcePath: string): string {
+  const parts = sourcePath.split("/");
+  return parts[parts.length - 1] ?? sourcePath;
+}
+
 export default function IndexingLog() {
-  const [files, setFiles] = useState<ProcessedFile[]>([]);
+  const [files, setFiles] = useState<IndexedFileInfo[]>([]);
   const [filter, setFilter] = useState<"all" | "failed">("all");
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-  const [isPolling, setIsPolling] = useState(true);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const prevCount = useRef(0);
+  const [loading, setLoading] = useState(true);
+  const [retrying, setRetrying] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const status = await fetchIndexingStatus();
-        if (cancelled) return;
-        const allFiles: ProcessedFile[] = [];
-        for (const task of status.tasks) {
-          for (const f of task.processed_files ?? []) {
-            allFiles.push(f);
-          }
-        }
-        setFiles(allFiles);
-        setIsPolling(status.active > 0);
-        if (allFiles.length > prevCount.current) {
-          prevCount.current = allFiles.length;
-          setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-        }
-      } catch {
-        // Server not ready
-      }
-    };
-
-    poll();
-    const id = setInterval(poll, POLL_INDEXING_ACTIVE_MS);
-    return () => { cancelled = true; clearInterval(id); };
+  const loadFiles = useCallback(async () => {
+    try {
+      const resp = await fetchFiles();
+      setFiles(resp.files);
+    } catch {
+      // Server not ready
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const displayed = filter === "all"
-    ? files.filter((f) => f.status !== "skipped")
-    : files.filter((f) => f.status === "failed");
+  useEffect(() => {
+    loadFiles();
+    const id = setInterval(loadFiles, POLL_INDEXING_IDLE_MS);
+    return () => clearInterval(id);
+  }, [loadFiles]);
+
+  const handleRetryAll = async () => {
+    setRetrying(true);
+    try {
+      await retryFailed();
+      // Refresh after a short delay to let indexing start
+      setTimeout(loadFiles, 1000);
+    } catch {
+      // ignore
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const handleRetrySingle = async (sourcePath: string) => {
+    try {
+      await retryFailed([sourcePath]);
+      setTimeout(loadFiles, 1000);
+    } catch {
+      // ignore
+    }
+  };
+
+  const displayed =
+    filter === "all"
+      ? files
+      : files.filter((f) => f.status === "failed");
 
   const failedCount = files.filter((f) => f.status === "failed").length;
   const indexedCount = files.filter((f) => f.status === "indexed").length;
@@ -58,7 +85,7 @@ export default function IndexingLog() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Indexing Log</h2>
-        <div className="flex gap-2 text-xs">
+        <div className="flex items-center gap-2 text-xs">
           <button
             onClick={() => setFilter("all")}
             className={`px-2 py-1 rounded transition-colors ${
@@ -79,6 +106,20 @@ export default function IndexingLog() {
           >
             Failed ({failedCount})
           </button>
+          {failedCount > 0 && (
+            <button
+              onClick={handleRetryAll}
+              disabled={retrying}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 transition-colors disabled:opacity-50"
+              title="Retry all failed files"
+            >
+              <RotateCcw
+                size={12}
+                className={retrying ? "animate-spin" : ""}
+              />
+              Retry All
+            </button>
+          )}
         </div>
       </div>
 
@@ -91,12 +132,18 @@ export default function IndexingLog() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
           >
-            {/* Skeleton rows while actively indexing but no results yet */}
-            {files.length === 0 && isPolling ? (
+            {loading ? (
               <div className="space-y-1">
                 {[0, 1, 2, 3, 4].map((i) => (
-                  <div key={i} className="flex items-start gap-2 px-3 py-2 rounded bg-bg-surface">
-                    <Skeleton width="w-4" height="h-4" className="rounded shrink-0 mt-0.5" />
+                  <div
+                    key={i}
+                    className="flex items-start gap-2 px-3 py-2 rounded bg-bg-surface"
+                  >
+                    <Skeleton
+                      width="w-4"
+                      height="h-4"
+                      className="rounded shrink-0 mt-0.5"
+                    />
                     <div className="flex-1 space-y-1">
                       <Skeleton width="w-48" height="h-4" />
                       <Skeleton width="w-16" height="h-3" />
@@ -107,7 +154,9 @@ export default function IndexingLog() {
             ) : (
               <EmptyState
                 icon={ScrollText}
-                heading={files.length === 0 ? "No files processed yet" : "No failed files"}
+                heading={
+                  files.length === 0 ? "No files indexed yet" : "No failed files"
+                }
                 description={
                   files.length === 0
                     ? "Files will appear here as they are indexed."
@@ -133,16 +182,17 @@ export default function IndexingLog() {
             >
               {displayed.map((file, idx) => (
                 <FileRow
-                  key={`${file.path}-${idx}`}
+                  key={file.source_path}
                   file={file}
                   expanded={expandedIdx === idx}
                   onToggleExpand={() =>
                     setExpandedIdx(expandedIdx === idx ? null : idx)
                   }
+                  onRetry={() => handleRetrySingle(file.source_path)}
+                  onOpen={() => invoke("open_file", { path: file.source_path })}
                 />
               ))}
             </motion.div>
-            <div ref={bottomRef} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -152,15 +202,18 @@ export default function IndexingLog() {
 
 /** Props for a single file entry in the log. */
 interface FileRowProps {
-  file: ProcessedFile;
+  file: IndexedFileInfo;
   expanded: boolean;
   onToggleExpand: () => void;
+  onRetry: () => void;
+  onOpen: () => void;
 }
 
-/** Single file row with status icon, name, timestamp, and expandable error. */
-function FileRow({ file, expanded, onToggleExpand }: FileRowProps) {
+/** Single file row with status icon, name, date, and expandable error + retry. */
+function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen }: FileRowProps) {
   const isFailed = file.status === "failed";
   const hasError = isFailed && file.error;
+  const name = fileName(file.source_path);
 
   return (
     <motion.div
@@ -171,24 +224,30 @@ function FileRow({ file, expanded, onToggleExpand }: FileRowProps) {
         className={`flex items-start gap-2 ${hasError ? "cursor-pointer" : ""}`}
         onClick={hasError ? onToggleExpand : undefined}
       >
-        {file.status === "indexed" ? (
-          <CheckCircle size={16} className="text-accent-green shrink-0 mt-0.5" />
-        ) : (
+        {isFailed ? (
           <XCircle size={16} className="text-accent-red shrink-0 mt-0.5" />
+        ) : (
+          <CheckCircle size={16} className="text-accent-green shrink-0 mt-0.5" />
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-sm truncate" title={file.path}>
-            {file.name}
+          <p className="text-sm truncate" title={file.source_path}>
+            {name}
           </p>
-          {file.status === "indexed" && file.chunks && (
-            <p className="text-xs text-text-muted">{file.chunks} chunks</p>
+          {!isFailed && (
+            <p className="text-xs text-text-muted">{file.chunk_count} chunks</p>
           )}
           {isFailed && file.error && !expanded && (
-            <p className="text-xs text-accent-red truncate" title={file.error}>
+            <p
+              className="text-xs text-accent-red truncate"
+              title={file.error}
+            >
               {file.error}
             </p>
           )}
         </div>
+        <span className="text-xs text-text-muted shrink-0 mt-0.5">
+          {file.indexed_at?.slice(0, 10) ?? ""}
+        </span>
         {hasError && (
           <ChevronDown
             size={14}
@@ -198,7 +257,7 @@ function FileRow({ file, expanded, onToggleExpand }: FileRowProps) {
           />
         )}
       </div>
-      {/* Expanded error detail */}
+      {/* Expanded error detail with per-file retry */}
       <AnimatePresence>
         {expanded && hasError && (
           <motion.div
@@ -211,6 +270,28 @@ function FileRow({ file, expanded, onToggleExpand }: FileRowProps) {
             <p className="text-xs text-accent-red mt-2 pl-6 whitespace-pre-wrap break-all">
               {file.error}
             </p>
+            <div className="flex gap-2 mt-2 ml-6">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetry();
+                }}
+                className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 transition-colors"
+              >
+                <RotateCcw size={12} />
+                Retry
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpen();
+                }}
+                className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-bg-elevated text-text-secondary hover:text-text-primary transition-colors"
+              >
+                <ExternalLink size={12} />
+                Open
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

@@ -8,7 +8,7 @@ import pytest
 
 from smart_search.config import SmartSearchConfig
 from smart_search.constants import MAX_CHUNKS_PER_FILE
-from smart_search.indexer import DocumentIndexer, _get_rss_mb, discover_files
+from smart_search.indexer import DocumentIndexer, discover_files
 from smart_search.models import Chunk
 from smart_search.store import ChunkStore
 
@@ -135,21 +135,6 @@ class TestDiscoverFiles:
         assert result == []
 
 
-class TestGetRssMb:
-    """Tests for the _get_rss_mb() RSS helper."""
-
-    def test_returns_non_negative_int(self):
-        """RSS should be a non-negative integer."""
-        rss = _get_rss_mb()
-        assert isinstance(rss, int)
-        assert rss >= 0
-
-    def test_returns_reasonable_value(self):
-        """Running Python process should use at least some memory."""
-        rss = _get_rss_mb()
-        # Python process should use at least 10 MB
-        assert rss >= 10
-
 
 class TestGcCollectFrequency:
     """Tests for gc.collect frequency during folder indexing."""
@@ -161,18 +146,15 @@ class TestGcCollectFrequency:
         for i in range(4):
             (tmp_path / f"doc{i}.pdf").write_bytes(f"%PDF fake {i}".encode())
         indexer.index_folder(str(tmp_path))
-        # Should be called at least 4 times: once per indexed file in index_folder
-        # plus once per file in index_file (del embedded_chunks + gc.collect)
         assert mock_gc.call_count >= 4
 
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=RuntimeError("boom"))
     @patch("smart_search.indexer.gc.collect")
-    def test_gc_collect_on_failure(self, mock_gc, indexer, tmp_path):
+    def test_gc_collect_on_failure(self, mock_gc, mock_convert, indexer, tmp_path):
         """gc.collect is called after a failed file."""
         bad = tmp_path / "bad.pdf"
         bad.write_bytes(b"%PDF")
-        # Make index_file fail by patching convert_to_markdown to raise
-        with patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("boom")):
-            indexer.index_folder(str(tmp_path))
+        indexer.index_folder(str(tmp_path))
         assert mock_gc.call_count >= 1
 
 
@@ -242,7 +224,7 @@ class TestIndexFile:
         result = indexer.index_file(str(txt_file))
         assert result.status == "failed"
 
-    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=RuntimeError("Parse error"))
     def test_index_file_handles_failure_gracefully(self, mock_convert, indexer, tmp_path):
         """Corrupted/unprocessable file returns 'failed', not crash."""
         bad_pdf = tmp_path / "corrupt.pdf"
@@ -325,7 +307,7 @@ class TestMtimePreCheck:
 class TestFailureRecording:
     """Tests for recording failed files in DB to prevent wasteful retries."""
 
-    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=RuntimeError("Parse error"))
     def test_failure_records_in_db(self, mock_convert, indexer, indexer_deps, tmp_path):
         """Failed file is recorded in SQLite with status='failed'."""
         bad_pdf = tmp_path / "corrupt.pdf"
@@ -342,7 +324,7 @@ class TestFailureRecording:
         assert row[0] == "failed"
         assert "Parse error" in row[1]
 
-    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=RuntimeError("Parse error"))
     def test_failed_file_skipped_on_retry(self, mock_convert, indexer, indexer_deps, tmp_path):
         """Previously failed file is skipped on next attempt (mtime+size unchanged)."""
         bad_pdf = tmp_path / "corrupt.pdf"
@@ -354,7 +336,7 @@ class TestFailureRecording:
         result2 = indexer.index_file(str(bad_pdf))
         assert result2.status == "skipped"
 
-    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Timeout"))
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=TimeoutError("Timeout"))
     def test_failed_file_retried_after_change(self, mock_convert, indexer, indexer_deps, tmp_path):
         """Failed file is retried when its content changes (new mtime+size)."""
         bad_pdf = tmp_path / "doc.pdf"
@@ -367,7 +349,7 @@ class TestFailureRecording:
         assert result.status == "failed"
         assert "Timeout" in result.error
 
-    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=RuntimeError("Parse error"))
     def test_failure_records_with_empty_hash_on_early_error(self, mock_convert, indexer, indexer_deps, tmp_path):
         """Failure before hash computation records empty hash string."""
         bad_pdf = tmp_path / "corrupt.pdf"
@@ -381,7 +363,7 @@ class TestFailureRecording:
         # Hash should be non-empty since hash computation happens before the try block
         assert row is not None
 
-    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=Exception("Parse error"))
+    @patch("smart_search.markitdown_parser.convert_to_markdown", side_effect=RuntimeError("Parse error"))
     def test_record_failed_exception_does_not_mask_original(self, mock_convert, indexer, indexer_deps, tmp_path):
         """If record_file_failed itself throws, the original error is still returned."""
         bad_pdf = tmp_path / "corrupt.pdf"

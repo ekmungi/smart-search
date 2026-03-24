@@ -200,10 +200,12 @@ class SqliteMetadataStore:
         """List all indexed files with metadata.
 
         Returns:
-            List of dicts with source_path, file_hash, chunk_count, indexed_at.
+            List of dicts with source_path, file_hash, chunk_count, indexed_at,
+            status, and error.
         """
         cursor = self._sqlite_conn.execute(
-            "SELECT source_path, file_hash, chunk_count, indexed_at "
+            "SELECT source_path, file_hash, chunk_count, indexed_at, "
+            "COALESCE(status, 'indexed'), error "
             "FROM indexed_files ORDER BY indexed_at DESC"
         )
         return [
@@ -212,6 +214,59 @@ class SqliteMetadataStore:
                 "file_hash": row[1],
                 "chunk_count": row[2],
                 "indexed_at": row[3],
+                "status": row[4],
+                "error": row[5],
             }
             for row in cursor.fetchall()
         ]
+
+    def clear_failed_status(self, source_paths: list[str] | None = None) -> int:
+        """Reset failed files so they are retried on next indexing pass.
+
+        Deletes the rows entirely so the indexer treats them as new files.
+
+        Args:
+            source_paths: Specific files to reset. If None, resets all failed.
+
+        Returns:
+            Number of rows deleted.
+        """
+        if source_paths:
+            placeholders = ",".join("?" for _ in source_paths)
+            cursor = self._sqlite_conn.execute(
+                f"DELETE FROM indexed_files WHERE status = 'failed' "
+                f"AND source_path IN ({placeholders})",
+                source_paths,
+            )
+        else:
+            cursor = self._sqlite_conn.execute(
+                "DELETE FROM indexed_files WHERE status = 'failed'"
+            )
+        self._sqlite_conn.commit()
+        return cursor.rowcount
+
+    def get_folder_counts(self, folder_prefix: str) -> dict:
+        """Get indexed and failed file counts for a specific folder.
+
+        Uses the read-only connection so it doesn't block indexing writes.
+
+        Args:
+            folder_prefix: POSIX folder path prefix (e.g. "C:/Users/.../01 PROJECTS").
+
+        Returns:
+            Dict with indexed_count and failed_count.
+        """
+        if not folder_prefix.endswith("/"):
+            folder_prefix += "/"
+        conn = self._sqlite_read_conn or self._sqlite_conn
+        row = conn.execute(
+            "SELECT "
+            "  SUM(CASE WHEN COALESCE(status, 'indexed') != 'failed' THEN 1 ELSE 0 END), "
+            "  SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) "
+            "FROM indexed_files WHERE source_path LIKE ?",
+            (folder_prefix + "%",),
+        ).fetchone()
+        return {
+            "indexed_count": row[0] or 0 if row else 0,
+            "failed_count": row[1] or 0 if row else 0,
+        }

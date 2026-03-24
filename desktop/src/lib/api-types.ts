@@ -11,6 +11,7 @@ export interface HealthResponse {
 export interface StatsResponse {
   document_count: number;
   chunk_count: number;
+  failed_count: number;
   index_size_bytes: number;
   index_size_mb: number;
   total_files: number;
@@ -23,6 +24,8 @@ export interface FolderInfo {
   path: string;
   exists: boolean;
   status: string;
+  indexed_count: number;
+  failed_count: number;
 }
 
 /** Response from GET /api/folders. */
@@ -145,6 +148,27 @@ export interface SearchResponse {
   mode: string;
   total: number;
   results: SearchHit[];
+}
+
+/** Persistent file entry from GET /api/files. */
+export interface IndexedFileInfo {
+  source_path: string;
+  chunk_count: number;
+  indexed_at: string;
+  status: string; // "indexed" | "failed"
+  error: string | null;
+}
+
+/** Response from GET /api/files. */
+export interface FilesResponse {
+  total: number;
+  files: IndexedFileInfo[];
+}
+
+/** Response from POST /api/retry-failed. */
+export interface RetryFailedResponse {
+  cleared: number;
+  folders_resubmitted: number;
 }
 
 /** Response from POST /api/repair. */

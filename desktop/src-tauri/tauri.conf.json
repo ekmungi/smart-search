@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Smart Search",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "identifier": "com.smartsearch.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -15,7 +15,7 @@
         "title": "Smart Search",
         "width": 960,
         "height": 640,
-        "minWidth": 680,
+        "minWidth": 860,
         "minHeight": 480,
         "resizable": true,
         "fullscreen": false,

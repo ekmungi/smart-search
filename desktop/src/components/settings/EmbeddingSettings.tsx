@@ -18,17 +18,38 @@ interface EmbeddingSettingsProps {
   onBackendChange: (backend: string) => void;
 }
 
-/** Inline chip showing the active compute device. */
-function DeviceChip({ gpuInfo }: { gpuInfo: GpuInfo | null }) {
+/** Inline chip showing what compute device(s) the selected model can use. */
+function DeviceChip({
+  gpuInfo,
+  selectedModel,
+}: {
+  gpuInfo: GpuInfo | null;
+  selectedModel: ModelInfo | undefined;
+}) {
   if (!gpuInfo) return null;
-  const isGpu = gpuInfo.type !== "cpu";
-  const chipClass = isGpu
+  const hasGpu = gpuInfo.type !== "cpu";
+  const gpuRequired = selectedModel?.gpu_required ?? false;
+
+  // Determine label based on model capability + hardware availability
+  let label: string;
+  if (gpuRequired) {
+    // Model needs GPU -- show GPU name only
+    label = gpuInfo.name;
+  } else if (hasGpu) {
+    // Model runs on both, GPU is available
+    label = `${gpuInfo.name} / CPU`;
+  } else {
+    // Model runs on CPU (no GPU available)
+    label = "CPU";
+  }
+
+  const chipClass = hasGpu
     ? "bg-accent-green/10 text-accent-green border-accent-green/25"
     : "bg-accent-blue/10 text-accent-blue border-accent-blue/25";
   return (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[0.7rem] font-mono font-medium border ${chipClass}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${isGpu ? "bg-accent-green" : "bg-accent-blue"}`} />
-      {gpuInfo.name}
+      <span className={`w-1.5 h-1.5 rounded-full ${hasGpu ? "bg-accent-green" : "bg-accent-blue"}`} />
+      {label}
     </span>
   );
 }
@@ -119,7 +140,7 @@ export function EmbeddingSettings({
             <option value="local">Local</option>
             <option value="cloud" disabled>Cloud (coming soon)</option>
           </select>
-          <DeviceChip gpuInfo={gpuInfo} />
+          <DeviceChip gpuInfo={gpuInfo} selectedModel={selectedModel} />
         </div>
       </SettingRow>
     </Section>

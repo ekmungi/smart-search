@@ -54,20 +54,28 @@ class StatsStoreMixin:
         # concurrent reads on separate connections.
         doc_count = 0
         chunk_count = 0
+        failed_count = 0
         formats: list[str] = []
         last_indexed = None
         total_files = 0
         conn = self._sqlite_read_conn
         if conn:
             row = conn.execute(
-                "SELECT COUNT(*), COALESCE(SUM(chunk_count), 0) FROM indexed_files"
+                "SELECT COUNT(*), COALESCE(SUM(chunk_count), 0) "
+                "FROM indexed_files WHERE COALESCE(status, 'indexed') != 'failed'"
             ).fetchone()
             doc_count = row[0] if row else 0
             chunk_count = row[1] if row else 0
 
+            fail_row = conn.execute(
+                "SELECT COUNT(*) FROM indexed_files WHERE status = 'failed'"
+            ).fetchone()
+            failed_count = fail_row[0] if fail_row else 0
+
             # Derive formats from file extensions in source_path
             path_rows = conn.execute(
-                "SELECT DISTINCT source_path FROM indexed_files"
+                "SELECT DISTINCT source_path FROM indexed_files "
+                "WHERE COALESCE(status, 'indexed') != 'failed'"
             ).fetchall()
             ext_set = set()
             for r in path_rows:
@@ -77,7 +85,8 @@ class StatsStoreMixin:
             formats = sorted(ext_set)
 
             ts_row = conn.execute(
-                "SELECT MAX(indexed_at) FROM indexed_files"
+                "SELECT MAX(indexed_at) FROM indexed_files "
+                "WHERE COALESCE(status, 'indexed') != 'failed'"
             ).fetchone()
             if ts_row and ts_row[0]:
                 last_indexed = ts_row[0]
@@ -93,6 +102,7 @@ class StatsStoreMixin:
         return IndexStats(
             document_count=doc_count,
             chunk_count=chunk_count,
+            failed_count=failed_count,
             index_size_bytes=index_size,
             total_files=total_files,
             last_indexed_at=last_indexed,

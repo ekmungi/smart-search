@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from smart_search.config import SmartSearchConfig, get_config
 from smart_search.config_manager import ConfigManager
 from smart_search.constants import APP_VERSION, DEFAULT_HOST, DEFAULT_HTTP_PORT
+from smart_search.conversion_worker import ConversionWorker
 from smart_search.data_dir import get_data_dir
 from smart_search.http_routes import create_router
 from smart_search.indexing_task import IndexingTaskManager
@@ -93,6 +94,7 @@ def create_app(
     _config_mgr = config_manager
     _watcher = watcher
     _task_mgr = task_manager
+    _conv_worker: ConversionWorker | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -161,6 +163,8 @@ def create_app(
         t.start()
 
         yield
+        if _conv_worker is not None:
+            _conv_worker.stop()
         if _watcher is not None and getattr(_watcher, "is_running", False):
             _watcher.stop()
         if _task_mgr is not None:  # Only shutdown if it was created
@@ -226,6 +230,7 @@ def create_app(
                         embedder=embedder,
                         store=store,
                         markdown_chunker=chunker,
+                        conversion_worker=get_conv_worker(),
                     )
         return _indexer
 
@@ -256,6 +261,16 @@ def create_app(
                 if _task_mgr is None:
                     _task_mgr = IndexingTaskManager()
         return _task_mgr
+
+    def get_conv_worker():
+        """Get or create the persistent ConversionWorker singleton (thread-safe)."""
+        nonlocal _conv_worker
+        if _conv_worker is None:
+            with _singleton_lock:
+                if _conv_worker is None:
+                    _conv_worker = ConversionWorker()
+                    _conv_worker.start()
+        return _conv_worker
 
     _registry = None
 

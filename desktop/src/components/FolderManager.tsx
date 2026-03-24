@@ -388,6 +388,8 @@ function FolderStatusIcon({
   if (task) return <Loader size={16} className="text-accent-blue animate-spin shrink-0" />;
   if (completedTask?.state === "failed") return <AlertCircle size={16} className="text-accent-red shrink-0" />;
   if (completedTask?.state === "completed") return <CheckCircle size={16} className="text-accent-green shrink-0" />;
+  // No active task -- use SQLite counts to determine icon
+  if (folder.indexed_count > 0 || folder.failed_count > 0) return <CheckCircle size={16} className="text-accent-green shrink-0" />;
   return <Loader size={16} className="text-text-muted animate-spin shrink-0" />;
 }
 
@@ -409,6 +411,9 @@ function FolderStatusText({
     const done = task.indexed + task.skipped + task.failed;
     const pct = task.total > 0 ? (done / task.total) * 100 : 0;
     const failPct = task.total > 0 ? (task.failed / task.total) * 100 : 0;
+    // Use SQLite counts as source of truth, with progress bar showing session progress
+    const indexed = folder.indexed_count;
+    const failed = folder.failed_count;
     return (
       <div className="text-xs text-text-muted">
         <div className="w-full bg-bg-elevated rounded-full h-1.5 mt-0.5 relative overflow-hidden">
@@ -424,12 +429,20 @@ function FolderStatusText({
           )}
         </div>
         <span className="flex items-center gap-2 mt-0.5">
-          <span>{done} of {task.total}</span>
-          {task.failed > 0 && (
+          {indexed > 0 && (
+            <span className="flex items-center gap-1">
+              <FileCheck size={11} className="text-accent-green" />
+              {indexed} indexed
+            </span>
+          )}
+          {failed > 0 && (
             <span className="flex items-center gap-1">
               <FileWarning size={11} className="text-accent-amber" />
-              {task.failed} failed
+              {failed} failed
             </span>
+          )}
+          {indexed === 0 && failed === 0 && (
+            <span>{done} of {task.total}</span>
           )}
         </span>
       </div>
@@ -444,18 +457,23 @@ function FolderStatusText({
     );
   }
 
-  if (completedTask?.state === "completed") {
+  if (completedTask?.state === "completed" || (!task && (folder.indexed_count > 0 || folder.failed_count > 0))) {
+    // Use SQLite counts as source of truth -- persists across restarts
+    const indexed = folder.indexed_count;
+    const failed = folder.failed_count;
     return (
       <p className="text-xs text-text-muted">
         <span className="flex items-center gap-2">
-          <span className="flex items-center gap-1">
-            <FileCheck size={11} className="text-accent-green" />
-            {completedTask.indexed + completedTask.skipped} indexed
-          </span>
-          {completedTask.failed > 0 && (
+          {indexed > 0 && (
+            <span className="flex items-center gap-1">
+              <FileCheck size={11} className="text-accent-green" />
+              {indexed} indexed
+            </span>
+          )}
+          {failed > 0 && (
             <span className="flex items-center gap-1">
               <FileWarning size={11} className="text-accent-amber" />
-              {completedTask.failed} failed
+              {failed} failed
             </span>
           )}
         </span>

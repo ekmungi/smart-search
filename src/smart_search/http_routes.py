@@ -89,6 +89,28 @@ def create_router(
             uptime_seconds=round(get_uptime(), 1),
         )
 
+    @router.post("/shutdown")
+    def shutdown():
+        """Gracefully shut down the server.
+
+        Sends a 200 response, then signals the process to exit cleanly.
+        Uvicorn catches SIGINT and runs the lifespan cleanup (stop watcher,
+        cancel indexing tasks, close DB connections).
+        """
+        import os
+        import signal
+        import threading
+
+        def _delayed_exit():
+            """Wait briefly for the HTTP response to flush, then signal exit."""
+            import time
+            time.sleep(0.5)
+            # SIGINT triggers uvicorn's graceful shutdown on all platforms
+            os.kill(os.getpid(), signal.SIGINT)
+
+        threading.Thread(target=_delayed_exit, daemon=True).start()
+        return {"status": "shutting_down"}
+
     @router.get("/stats", response_model=StatsResponse)
     def stats():
         """Get index statistics: document count, chunks, size, formats.
@@ -102,6 +124,7 @@ def create_router(
         return StatsResponse(
             document_count=s.document_count,
             chunk_count=s.chunk_count,
+            failed_count=s.failed_count,
             index_size_bytes=s.index_size_bytes,
             index_size_mb=round(s.index_size_bytes / BYTES_PER_MB, 2),
             total_files=s.total_files,
@@ -160,14 +183,17 @@ def create_router(
         """List all watched folders with existence status."""
         mgr = get_config_mgr()
         dirs = mgr.list_watch_dirs()
-        folders = [
-            FolderInfo(
+        store = get_store()
+        folders = []
+        for d in dirs:
+            counts = store.get_folder_counts(d)
+            folders.append(FolderInfo(
                 path=d,
                 exists=Path(d).is_dir(),
                 status="active" if Path(d).is_dir() else "missing",
-            )
-            for d in dirs
-        ]
+                indexed_count=counts["indexed_count"],
+                failed_count=counts["failed_count"],
+            ))
         return FoldersResponse(total=len(folders), folders=folders)
 
     @router.post("/folders")
@@ -256,10 +282,41 @@ def create_router(
                 source_path=f["source_path"],
                 chunk_count=f["chunk_count"],
                 indexed_at=f["indexed_at"],
+                status=f.get("status", "indexed"),
+                error=f.get("error"),
             )
             for f in files
         ]
         return FilesResponse(total=len(file_infos), files=file_infos)
+
+    @router.post("/retry-failed")
+    def retry_failed(
+        paths: list[str] | None = None,
+    ):
+        """Clear failed status and re-queue files for indexing.
+
+        Deletes failed rows from SQLite so the indexer treats them as new.
+        Then resubmits the affected folders for background indexing.
+
+        Args:
+            paths: Specific file paths to retry. If None, retries all failed.
+
+        Returns:
+            Count of files cleared and folders resubmitted.
+        """
+        store = get_store()
+        cleared = store.clear_failed_status(paths)
+
+        if cleared == 0:
+            return {"cleared": 0, "folders_resubmitted": 0}
+
+        # Determine which folders need re-indexing
+        config_mgr = get_config_mgr()
+        watch_dirs = config_mgr.list_watch_dirs()
+        for folder in watch_dirs:
+            get_task_mgr().submit(folder, get_indexer())
+
+        return {"cleared": cleared, "folders_resubmitted": len(watch_dirs)}
 
     @router.post("/ingest")
     def ingest(req: IngestRequest):

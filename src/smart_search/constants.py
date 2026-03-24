@@ -21,5 +21,10 @@ MAX_CHUNKS_PER_FILE = 5000  # Safety cap: truncate files producing more chunks
 # Reranking settings
 DEFAULT_RERANK_TOP_N = 20  # Number of fusion results to pass through cross-encoder
 
+# Keyword-only extensions: indexed in FTS5 for keyword search but skipped
+# from the embedding pipeline. Structured data (spreadsheets, data files)
+# doesn't benefit from semantic search but should be findable by content.
+KEYWORD_ONLY_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".jsonl"}
+
 # Application metadata
-APP_VERSION = "0.13.0"
+APP_VERSION = "0.13.1"

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { FileText, Layers, HardDrive, Clock, FolderSearch } from "lucide-react";
+import { FileText, Layers, HardDrive, Clock, FolderSearch, AlertTriangle } from "lucide-react";
 import {
   fetchHealth,
   fetchStats,
@@ -206,14 +206,14 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
       {!hasNoFolders && (
         <>
           {showSkeleton ? (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              {[0, 1, 2, 3].map((i) => (
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(164px,1fr))] gap-4 mb-6">
+              {[0, 1, 2, 3, 4].map((i) => (
                 <StatsCardSkeleton key={i} />
               ))}
             </div>
           ) : (
             <motion.div
-              className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
+              className="grid grid-cols-[repeat(auto-fit,minmax(164px,1fr))] gap-4 mb-6"
               variants={staggerContainer}
               initial="hidden"
               animate="visible"
@@ -223,6 +223,12 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
                 label="Documents"
                 value={stats?.document_count ?? 0}
                 iconColor="text-accent-blue"
+              />
+              <StatsCard
+                icon={AlertTriangle}
+                label="Failed"
+                value={stats?.failed_count ?? 0}
+                iconColor="text-accent-red"
               />
               <StatsCard
                 icon={Layers}
@@ -241,7 +247,13 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
                 label="Last Indexed"
                 value={
                   stats?.last_indexed_at
-                    ? new Date(stats.last_indexed_at).toLocaleDateString()
+                    ? (() => {
+                        const d = new Date(stats.last_indexed_at);
+                        const y = d.getFullYear();
+                        const m = String(d.getMonth() + 1).padStart(2, "0");
+                        const day = String(d.getDate()).padStart(2, "0");
+                        return `${y}/${m}/${day}`;
+                      })()
                     : "Never"
                 }
                 iconColor="text-text-secondary"
