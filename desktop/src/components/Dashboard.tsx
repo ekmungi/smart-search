@@ -8,10 +8,13 @@ import {
   fetchStats,
   fetchModelStatus,
   fetchIndexingStatus,
+  pauseIndexing,
+  resumeIndexing,
   type HealthResponse,
   type StatsResponse,
   type IndexingTask,
 } from "../lib/api";
+import type { ModelStatusResponse } from "../lib/api-types";
 import {
   POLL_STATS_MS,
   POLL_INDEXING_ACTIVE_MS,
@@ -21,6 +24,8 @@ import {
 import { staggerContainer } from "../lib/animations";
 import StatsCard, { StatsCardSkeleton } from "./StatsCard";
 import IndexingBanner from "./IndexingBanner";
+import IndexingControls from "./IndexingControls";
+import ModelTimeoutDialog from "./ModelTimeoutDialog";
 import EmptyState from "./EmptyState";
 
 /** Format seconds into human-readable duration (e.g. "2h 15m", "3d 4h"). */
@@ -52,6 +57,10 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
   const [activeTasks, setActiveTasks] = useState<IndexingTask[]>([]);
   const [startingUp, setStartingUp] = useState<boolean>(!everConnected);
   const failingSince = useRef<number | null>(null);
+  const [modelStatus, setModelStatus] = useState<ModelStatusResponse | null>(null);
+  const [indexingPaused, setIndexingPaused] = useState(false);
+  const [showTimeoutDialog, setShowTimeoutDialog] = useState(false);
+  const [timeoutDismissed, setTimeoutDismissed] = useState(false);
 
   // Poll health + stats
   useEffect(() => {
@@ -96,6 +105,7 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
         const status = await fetchIndexingStatus();
         if (!cancelled) {
           setActiveTasks(status.tasks);
+          setIndexingPaused(status.paused ?? false);
           const nextDelay = status.active > 0 ? POLL_INDEXING_ACTIVE_MS : POLL_INDEXING_IDLE_MS;
           if (intervalId !== null) clearInterval(intervalId);
           if (!cancelled) intervalId = setInterval(checkIndexing, nextDelay);
@@ -114,7 +124,17 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
     const checkModel = async () => {
       try {
         const status = await fetchModelStatus();
-        if (!cancelled) { setModelCached(status.cached); setModelName(status.model_name); }
+        if (!cancelled) {
+          setModelStatus(status);
+          setModelCached(status.cached);
+          setModelName(status.model_name);
+          if (status.download_status === "timeout" && !timeoutDismissed) {
+            setShowTimeoutDialog(true);
+          }
+          if (status.cached) {
+            setShowTimeoutDialog(false);
+          }
+        }
       } catch { /* retry */ }
     };
     checkModel();
@@ -123,7 +143,7 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
       return () => { cancelled = true; clearInterval(interval); };
     }
     return () => { cancelled = true; };
-  }, [health, modelCached]);
+  }, [health, modelCached, timeoutDismissed]);
 
   const showSkeleton = !health && !error;
   const hasNoFolders = health && stats && stats.document_count === 0 && activeTasks.length === 0;
@@ -191,6 +211,15 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
             </div>
           </div>
         </div>
+      )}
+
+      {showTimeoutDialog && modelStatus && (
+        <ModelTimeoutDialog
+          downloadUrl={modelStatus.download_url}
+          cachePath={modelStatus.cache_path}
+          onContinueKeywordOnly={() => setTimeoutDismissed(true)}
+          onDismiss={() => setShowTimeoutDialog(false)}
+        />
       )}
 
       {/* Empty state: no folders configured */}
@@ -261,7 +290,17 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
             </motion.div>
           )}
 
-          {/* Indexing banners (per-folder breakdown) -- below stats */}
+          {/* Indexing controls + banner */}
+          {(activeTasks.some(t => t.state === "running") || indexingPaused) && (
+            <div className="flex items-center gap-2 mb-2">
+              <IndexingControls
+                paused={indexingPaused}
+                hasActiveTasks={activeTasks.some(t => t.state === "running")}
+                onPause={async () => { await pauseIndexing(); setIndexingPaused(true); }}
+                onResume={async () => { await resumeIndexing(); setIndexingPaused(false); }}
+              />
+            </div>
+          )}
           <IndexingBanner tasks={activeTasks} />
 
           {/* Format badges */}
