@@ -24,6 +24,7 @@ from smart_search.http_models import (
     RepairResponse,
     FailedFileInfo,
     FileInfo,
+    PauseResponse,
     ProcessedFileInfo,
     FilesResponse,
     FolderInfo,
@@ -356,14 +357,21 @@ def create_router(
 
     @router.get("/indexing/status", response_model=IndexingStatusResponse)
     def indexing_status():
-        """Get status of all indexing tasks, including active ones.
+        """Get status of all indexing tasks with pause and model state.
 
         Returns a list of all tracked tasks with state, folder, and counts.
+        Also includes whether indexing is paused and whether the model is ready.
         Use this endpoint to poll for background indexing progress.
         """
+        from smart_search.embedder import Embedder
+
         task_mgr = get_task_mgr()
         all_tasks = task_mgr.get_all_tasks()
         active_count = sum(1 for t in all_tasks if t.state == "running")
+
+        live_config = get_config_mgr().load()
+        model_name = live_config.get("embedding_model", config.embedding_model)
+
         task_statuses = [
             IndexingTaskStatus(
                 task_id=t.task_id,
@@ -388,7 +396,24 @@ def create_router(
             )
             for t in all_tasks
         ]
-        return IndexingStatusResponse(active=active_count, tasks=task_statuses)
+        return IndexingStatusResponse(
+            active=active_count,
+            paused=task_mgr.is_paused,
+            model_ready=Embedder.is_model_cached(model_name),
+            tasks=task_statuses,
+        )
+
+    @router.post("/indexing/pause", response_model=PauseResponse)
+    def pause_indexing():
+        """Pause all active indexing tasks."""
+        get_task_mgr().pause()
+        return PauseResponse(paused=True)
+
+    @router.post("/indexing/resume", response_model=PauseResponse)
+    def resume_indexing():
+        """Resume paused indexing tasks."""
+        get_task_mgr().resume()
+        return PauseResponse(paused=False)
 
     @router.get("/config", response_model=ConfigResponse)
     def get_config():

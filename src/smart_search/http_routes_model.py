@@ -58,12 +58,17 @@ def create_model_router(
 
     @router.get("/model/status", response_model=ModelStatusResponse)
     def model_status():
-        """Check whether the embedding model is cached locally.
+        """Check embedding model cache status with download details.
 
         Reads from ConfigManager for live config (B4 fix), falling
         back to startup config if no persisted value exists.
         """
         from smart_search.embedder import Embedder
+        from smart_search.model_download import (
+            get_download_status,
+            get_hf_model_url,
+            get_hf_cache_path,
+        )
 
         live_config = get_config_mgr().load()
         model_name = live_config.get("embedding_model", config.embedding_model)
@@ -72,6 +77,9 @@ def create_model_router(
             cached=Embedder.is_model_cached(model_name),
             model_name=model_name,
             gpu_info=GpuInfoResponse(**device_info),
+            download_status=get_download_status(),
+            download_url=get_hf_model_url(model_name),
+            cache_path=get_hf_cache_path(),
         )
 
     @router.get("/model/loaded", response_model=ModelLoadedResponse)
