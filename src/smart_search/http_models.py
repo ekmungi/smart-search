@@ -294,3 +294,19 @@ class RepairResponse(BaseModel):
     compacted: bool
     compatible: bool
     mismatches: dict
+
+
+class ModelImportRequest(BaseModel):
+    """Request body to import model files from a local directory."""
+
+    source_path: str
+
+
+class ModelImportResponse(BaseModel):
+    """Result of importing model files to HF cache."""
+
+    success: bool
+    files_copied: int = 0
+    error: str = ""
+    cache_path: str = ""
+    native_dims: Optional[int] = None

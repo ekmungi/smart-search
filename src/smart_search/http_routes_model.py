@@ -10,6 +10,8 @@ from smart_search.config import SmartSearchConfig
 from smart_search.gpu_provider import get_device_info
 from smart_search.http_models import (
     GpuInfoResponse,
+    ModelImportRequest,
+    ModelImportResponse,
     ModelInfoResponse,
     ModelLoadedResponse,
     ModelStatusResponse,
@@ -88,5 +90,15 @@ def create_model_router(
         engine = get_engine()
         is_loaded = getattr(engine._embedder, "is_loaded", True)
         return ModelLoadedResponse(loaded=is_loaded)
+
+    @router.post("/model/import")
+    def import_model(req: ModelImportRequest):
+        """Import model files from a local directory to HF cache."""
+        from smart_search.model_importer import copy_model_to_cache
+
+        live_config = get_config_mgr().load()
+        model_name = live_config.get("embedding_model", config.embedding_model)
+        result = copy_model_to_cache(req.source_path, model_name)
+        return ModelImportResponse(**result)
 
     return router
