@@ -144,12 +144,21 @@ class GpuInfoResponse(BaseModel):
     name: str       # "CPU", "CUDA (RTX 4070)", "DirectML"
 
 
+class PauseResponse(BaseModel):
+    """Response for POST /api/indexing/pause and /api/indexing/resume."""
+
+    paused: bool
+
+
 class ModelStatusResponse(BaseModel):
-    """Embedding model cache status with GPU info."""
+    """Embedding model cache status with GPU info and download details."""
 
     cached: bool
     model_name: str
     gpu_info: GpuInfoResponse
+    download_status: str = "idle"
+    download_url: str = ""
+    cache_path: str = ""
 
 
 class ModelLoadedResponse(BaseModel):
@@ -215,6 +224,8 @@ class IndexingStatusResponse(BaseModel):
     """Response for GET /api/indexing/status."""
 
     active: int
+    paused: bool = False
+    model_ready: bool = True
     tasks: List[IndexingTaskStatus]
 
 
@@ -283,3 +294,19 @@ class RepairResponse(BaseModel):
     compacted: bool
     compatible: bool
     mismatches: dict
+
+
+class ModelImportRequest(BaseModel):
+    """Request body to import model files from a local directory."""
+
+    source_path: str
+
+
+class ModelImportResponse(BaseModel):
+    """Result of importing model files to HF cache."""
+
+    success: bool
+    files_copied: int = 0
+    error: str = ""
+    cache_path: str = ""
+    native_dims: Optional[int] = None

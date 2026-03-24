@@ -10,6 +10,8 @@ from smart_search.config import SmartSearchConfig
 from smart_search.gpu_provider import get_device_info
 from smart_search.http_models import (
     GpuInfoResponse,
+    ModelImportRequest,
+    ModelImportResponse,
     ModelInfoResponse,
     ModelLoadedResponse,
     ModelStatusResponse,
@@ -58,12 +60,17 @@ def create_model_router(
 
     @router.get("/model/status", response_model=ModelStatusResponse)
     def model_status():
-        """Check whether the embedding model is cached locally.
+        """Check embedding model cache status with download details.
 
         Reads from ConfigManager for live config (B4 fix), falling
         back to startup config if no persisted value exists.
         """
         from smart_search.embedder import Embedder
+        from smart_search.model_download import (
+            get_download_status,
+            get_hf_model_url,
+            get_hf_cache_path,
+        )
 
         live_config = get_config_mgr().load()
         model_name = live_config.get("embedding_model", config.embedding_model)
@@ -72,6 +79,9 @@ def create_model_router(
             cached=Embedder.is_model_cached(model_name),
             model_name=model_name,
             gpu_info=GpuInfoResponse(**device_info),
+            download_status=get_download_status(),
+            download_url=get_hf_model_url(model_name),
+            cache_path=get_hf_cache_path(),
         )
 
     @router.get("/model/loaded", response_model=ModelLoadedResponse)
@@ -80,5 +90,15 @@ def create_model_router(
         engine = get_engine()
         is_loaded = getattr(engine._embedder, "is_loaded", True)
         return ModelLoadedResponse(loaded=is_loaded)
+
+    @router.post("/model/import")
+    def import_model(req: ModelImportRequest):
+        """Import model files from a local directory to HF cache."""
+        from smart_search.model_importer import copy_model_to_cache
+
+        live_config = get_config_mgr().load()
+        model_name = live_config.get("embedding_model", config.embedding_model)
+        result = copy_model_to_cache(req.source_path, model_name)
+        return ModelImportResponse(**result)
 
     return router

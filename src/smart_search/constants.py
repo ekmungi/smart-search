@@ -26,5 +26,9 @@ DEFAULT_RERANK_TOP_N = 20  # Number of fusion results to pass through cross-enco
 # doesn't benefit from semantic search but should be findable by content.
 KEYWORD_ONLY_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".jsonl"}
 
+# Model download timeout (seconds). If download takes longer than this,
+# abort and offer manual download instructions to the user.
+DEFAULT_MODEL_DOWNLOAD_TIMEOUT = 900  # 15 minutes
+
 # Application metadata
-APP_VERSION = "0.13.1"
+APP_VERSION = "0.13.5"

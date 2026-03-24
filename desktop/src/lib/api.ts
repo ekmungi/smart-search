@@ -17,6 +17,8 @@ import type {
   SmartSearchConfig,
   FilesResponse,
   RetryFailedResponse,
+  PauseResponse,
+  ModelImportResponse,
 } from "./api-types";
 
 // Re-export all types so existing imports like `import { type FolderInfo } from "../lib/api"` keep working.
@@ -43,6 +45,8 @@ export type {
   IndexedFileInfo,
   FilesResponse,
   RetryFailedResponse,
+  PauseResponse,
+  ModelImportResponse,
 } from "./api-types";
 
 /** In dev mode, Vite proxies /api to the backend so all requests are
@@ -212,4 +216,26 @@ export async function retryFailed(paths?: string[]): Promise<RetryFailedResponse
 export async function rebuildIndex(): Promise<{ folders_queued: number; hashes_cleared: number }> {
   const res = await fetch(`${BASE_URL}/rebuild`, { method: "POST" });
   return handleResponse(res);
+}
+
+/** Pause all active indexing tasks. */
+export async function pauseIndexing(): Promise<PauseResponse> {
+  const res = await fetch(`${BASE_URL}/indexing/pause`, { method: "POST" });
+  return handleResponse<PauseResponse>(res);
+}
+
+/** Resume paused indexing tasks. */
+export async function resumeIndexing(): Promise<PauseResponse> {
+  const res = await fetch(`${BASE_URL}/indexing/resume`, { method: "POST" });
+  return handleResponse<PauseResponse>(res);
+}
+
+/** Import model files from a local directory to HF cache. */
+export async function importModel(sourcePath: string): Promise<ModelImportResponse> {
+  const res = await fetch(`${BASE_URL}/model/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_path: sourcePath }),
+  });
+  return handleResponse<ModelImportResponse>(res);
 }

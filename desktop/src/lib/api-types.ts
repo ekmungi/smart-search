@@ -66,6 +66,8 @@ export interface IndexingTask {
 /** Response from GET /api/indexing/status. */
 export interface IndexingStatusResponse {
   active: number;
+  paused: boolean;
+  model_ready: boolean;
   tasks: IndexingTask[];
 }
 
@@ -106,6 +108,23 @@ export interface ModelStatusResponse {
   cached: boolean;
   model_name: string;
   gpu_info: GpuInfo;
+  download_status: "idle" | "downloading" | "cached" | "timeout";
+  download_url: string;
+  cache_path: string;
+}
+
+/** Response from POST /api/indexing/pause or /resume. */
+export interface PauseResponse {
+  paused: boolean;
+}
+
+/** Response from POST /api/model/import. */
+export interface ModelImportResponse {
+  success: boolean;
+  files_copied: number;
+  error: string;
+  cache_path: string;
+  native_dims: number | null;
 }
 
 /** Whether the embedding model is loaded in memory, from GET /api/model/loaded. */

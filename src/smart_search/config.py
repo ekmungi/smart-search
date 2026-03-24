@@ -24,6 +24,7 @@ class SmartSearchConfig(BaseSettings):
     embedding_dimensions: int = 256
     embedding_backend: str = "auto"
     embedder_idle_timeout: float = 60.0
+    model_download_timeout: int = 900  # seconds; 0 = no timeout
 
     # Chunking settings -- word-based limits for size-enforced splitting
     chunk_max_words: int = 200   # Max words per chunk (Chroma Research: 200 optimal)

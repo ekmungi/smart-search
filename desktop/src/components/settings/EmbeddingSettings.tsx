@@ -1,9 +1,10 @@
 // Embedding settings: model selector dropdown and Matryoshka dimension picker.
 
-import { Loader2, AlertTriangle, Cpu } from "lucide-react";
+import { Loader2, AlertTriangle, Cpu, FolderOpen } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Section, SettingRow } from "./SettingsLayout";
 import type { ModelInfo, GpuInfo } from "../../lib/api";
+import { importModel } from "../../lib/api";
 
 /** Props for the embedding settings section. */
 interface EmbeddingSettingsProps {
@@ -142,6 +143,35 @@ export function EmbeddingSettings({
           </select>
           <DeviceChip gpuInfo={gpuInfo} selectedModel={selectedModel} />
         </div>
+      </SettingRow>
+      <SettingRow
+        label="Local Model"
+        description="Import model files downloaded manually"
+      >
+        <button
+          onClick={async () => {
+            try {
+              const { open } = await import("@tauri-apps/plugin-dialog");
+              const selected = await open({ directory: true, title: "Select model directory" });
+              if (selected) {
+                const result = await importModel(selected as string);
+                if (result.success) {
+                  if (result.native_dims) {
+                    onDimsChange("embedding_dimensions", result.native_dims);
+                  }
+                } else {
+                  console.error("Model import failed:", result.error);
+                }
+              }
+            } catch (err) {
+              console.error("Import error:", err);
+            }
+          }}
+          className="flex items-center gap-1.5 px-2 py-1 text-sm rounded bg-bg-elevated border border-border text-text-secondary hover:bg-border"
+        >
+          <FolderOpen size={14} />
+          Import Model
+        </button>
       </SettingRow>
     </Section>
   );

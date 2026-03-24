@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
+from smart_search.constants import KEYWORD_ONLY_EXTENSIONS
+
 _logger = logging.getLogger(__name__)
 
 
@@ -140,6 +142,12 @@ class IndexingTaskManager:
         self._lock = threading.Lock()
         self._max_concurrent = _compute_max_concurrent()
         self._semaphore = threading.Semaphore(self._max_concurrent)
+        # Global pause control: set = running, clear = paused.
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # Start in non-paused (running) state
+        # Model availability watcher state
+        self._model_watcher_active = False
+        self._model_watcher_cancel = threading.Event()
 
     def submit(
         self, folder: str, indexer: "DocumentIndexer", force: bool = False,
@@ -243,11 +251,88 @@ class IndexingTaskManager:
             return self._tasks.get(task_id)
         return None
 
+    def start_model_watcher(
+        self,
+        model_name: str,
+        store,
+        config_mgr,
+        indexer: "DocumentIndexer",
+        check_interval: float = 30.0,
+    ) -> None:
+        """Start watching for model availability to auto-retry failed files.
+
+        If model is already cached, does nothing. Otherwise, starts a daemon
+        thread that periodically checks is_model_cached(). When model becomes
+        available, clears all failed files and resubmits indexing.
+
+        Args:
+            model_name: HuggingFace model identifier.
+            store: ChunkStore for clearing failed status.
+            config_mgr: ConfigManager for listing watch directories.
+            indexer: DocumentIndexer for resubmission.
+            check_interval: Seconds between availability checks.
+        """
+        from smart_search.embedder import Embedder
+
+        if Embedder.is_model_cached(model_name):
+            self._model_watcher_active = False
+            return
+
+        self._model_watcher_active = True
+        self._model_watcher_cancel.clear()
+
+        def _watch() -> None:
+            while not self._model_watcher_cancel.is_set():
+                self._model_watcher_cancel.wait(timeout=check_interval)
+                if self._model_watcher_cancel.is_set():
+                    break
+                try:
+                    if Embedder.is_model_cached(model_name):
+                        _logger.info(
+                            "Model %s now available -- clearing failed files "
+                            "and resubmitting indexing", model_name,
+                        )
+                        store.clear_failed_status()
+                        for folder in config_mgr.list_watch_dirs():
+                            self.submit(folder, indexer)
+                        self._model_watcher_active = False
+                        return
+                except Exception:
+                    _logger.debug("Model watcher check failed", exc_info=True)
+            self._model_watcher_active = False
+
+        thread = threading.Thread(target=_watch, daemon=True, name="model-watcher")
+        thread.start()
+
+    def stop_model_watcher(self) -> None:
+        """Stop the model availability watcher thread."""
+        self._model_watcher_cancel.set()
+        self._model_watcher_active = False
+
     def shutdown(self) -> None:
-        """Cancel all running tasks."""
+        """Cancel all running tasks and stop the model watcher."""
+        self.stop_model_watcher()
         with self._lock:
             for event in self._cancel_events.values():
                 event.set()
+
+    def pause(self) -> None:
+        """Pause all active indexing tasks.
+
+        Tasks block after finishing the current file until resume() is called.
+        """
+        self._pause_event.clear()
+        _logger.info("Indexing paused")
+
+    def resume(self) -> None:
+        """Resume all paused indexing tasks."""
+        self._pause_event.set()
+        _logger.info("Indexing resumed")
+
+    @property
+    def is_paused(self) -> bool:
+        """Whether indexing is currently paused."""
+        return not self._pause_event.is_set()
 
     def _run_indexing(
         self,
@@ -384,6 +469,27 @@ class IndexingTaskManager:
             finally:
                 prescan_conn.close()
 
+            # Model readiness gate: check if embedding model is cached.
+            # If not, filter out files that need vector embeddings and only
+            # process keyword-only files (CSV, XLSX, JSON, etc.).
+            from smart_search.embedder import Embedder
+            model_name = config.embedding_model
+            model_ready = Embedder.is_model_cached(model_name)
+
+            if not model_ready:
+                keyword_only_files = [
+                    f for f in files_needing_work
+                    if f.suffix.lower() in KEYWORD_ONLY_EXTENSIONS
+                ]
+                skipped_for_model = len(files_needing_work) - len(keyword_only_files)
+                if skipped_for_model > 0:
+                    _logger.warning(
+                        "Task %s: embedding model not cached -- skipping %d files "
+                        "that need vector embeddings, processing %d keyword-only files",
+                        task_id, skipped_for_model, len(keyword_only_files),
+                    )
+                files_needing_work = keyword_only_files
+
             # Phase 2: If all files were pre-skipped, no heavy work needed.
             if not files_needing_work:
                 status.state = "completed"
@@ -409,6 +515,11 @@ class IndexingTaskManager:
                     # heavy embedding/conversion work.
                     if result.status in ("indexed", "failed"):
                         gc.collect()
+                    # Pause gate: block until resumed or cancelled.
+                    while not self._pause_event.is_set():
+                        if cancel_event.is_set():
+                            break
+                        self._pause_event.wait(timeout=1.0)
                 if cancel_event.is_set():
                     status.state = "cancelled"
                 else:
