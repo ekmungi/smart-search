@@ -189,25 +189,29 @@ class Embedder:
         Returns:
             True if the model is cached and ready for offline use.
         """
-        return Embedder._get_model_dir(model_name) is not None
+        cached = Embedder._get_model_dir(model_name) is not None
+        if cached:
+            from smart_search.model_download import get_download_status, set_download_status
+            if get_download_status() in ("idle", "downloading"):
+                set_download_status("cached")
+        return cached
 
     @staticmethod
-    def _get_model_path(model_name: str) -> Path:
+    def _get_model_path(model_name: str, timeout_seconds: int = 0) -> Path:
         """Download model if needed and return the local snapshot path.
+
+        Delegates to model_download.download_with_timeout() for timeout
+        protection. See model_download.py for the implementation.
 
         Args:
             model_name: HuggingFace model identifier.
+            timeout_seconds: Max seconds to wait. 0 = no timeout.
 
         Returns:
             Path to the local model directory.
         """
-        from huggingface_hub import snapshot_download
-
-        model_dir = snapshot_download(
-            model_name,
-            ignore_patterns=["*.bin", "*.pt", "*.safetensors", "*.msgpack"],
-        )
-        return Path(model_dir)
+        from smart_search.model_download import download_with_timeout
+        return download_with_timeout(model_name, timeout_seconds)
 
     @staticmethod
     def _load_tokenizer(config: SmartSearchConfig):
@@ -225,7 +229,7 @@ class Embedder:
         """
         from tokenizers import Tokenizer
 
-        model_path = Embedder._get_model_path(config.embedding_model)
+        model_path = Embedder._get_model_path(config.embedding_model, timeout_seconds=config.model_download_timeout)
         tokenizer_path = model_path / "tokenizer.json"
 
         if not tokenizer_path.exists():
@@ -257,7 +261,7 @@ class Embedder:
         """
         import onnxruntime as ort
 
-        model_path = Embedder._get_model_path(config.embedding_model)
+        model_path = Embedder._get_model_path(config.embedding_model, timeout_seconds=config.model_download_timeout)
 
         # Prefer quantized int8, fall back to fp32
         onnx_path = model_path / "onnx" / "model_quantized.onnx"
