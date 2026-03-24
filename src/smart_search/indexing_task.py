@@ -142,6 +142,9 @@ class IndexingTaskManager:
         self._lock = threading.Lock()
         self._max_concurrent = _compute_max_concurrent()
         self._semaphore = threading.Semaphore(self._max_concurrent)
+        # Global pause control: set = running, clear = paused.
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # Start in non-paused (running) state
 
     def submit(
         self, folder: str, indexer: "DocumentIndexer", force: bool = False,
@@ -250,6 +253,24 @@ class IndexingTaskManager:
         with self._lock:
             for event in self._cancel_events.values():
                 event.set()
+
+    def pause(self) -> None:
+        """Pause all active indexing tasks.
+
+        Tasks block after finishing the current file until resume() is called.
+        """
+        self._pause_event.clear()
+        _logger.info("Indexing paused")
+
+    def resume(self) -> None:
+        """Resume all paused indexing tasks."""
+        self._pause_event.set()
+        _logger.info("Indexing resumed")
+
+    @property
+    def is_paused(self) -> bool:
+        """Whether indexing is currently paused."""
+        return not self._pause_event.is_set()
 
     def _run_indexing(
         self,
@@ -432,6 +453,11 @@ class IndexingTaskManager:
                     # heavy embedding/conversion work.
                     if result.status in ("indexed", "failed"):
                         gc.collect()
+                    # Pause gate: block until resumed or cancelled.
+                    while not self._pause_event.is_set():
+                        if cancel_event.is_set():
+                            break
+                        self._pause_event.wait(timeout=1.0)
                 if cancel_event.is_set():
                     status.state = "cancelled"
                 else:
