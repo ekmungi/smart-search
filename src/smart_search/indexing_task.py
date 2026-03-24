@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
+from smart_search.constants import KEYWORD_ONLY_EXTENSIONS
+
 _logger = logging.getLogger(__name__)
 
 
@@ -383,6 +385,27 @@ class IndexingTaskManager:
                     files_needing_work.append(f)
             finally:
                 prescan_conn.close()
+
+            # Model readiness gate: check if embedding model is cached.
+            # If not, filter out files that need vector embeddings and only
+            # process keyword-only files (CSV, XLSX, JSON, etc.).
+            from smart_search.embedder import Embedder
+            model_name = config.embedding_model
+            model_ready = Embedder.is_model_cached(model_name)
+
+            if not model_ready:
+                keyword_only_files = [
+                    f for f in files_needing_work
+                    if f.suffix.lower() in KEYWORD_ONLY_EXTENSIONS
+                ]
+                skipped_for_model = len(files_needing_work) - len(keyword_only_files)
+                if skipped_for_model > 0:
+                    _logger.warning(
+                        "Task %s: embedding model not cached -- skipping %d files "
+                        "that need vector embeddings, processing %d keyword-only files",
+                        task_id, skipped_for_model, len(keyword_only_files),
+                    )
+                files_needing_work = keyword_only_files
 
             # Phase 2: If all files were pre-skipped, no heavy work needed.
             if not files_needing_work:
