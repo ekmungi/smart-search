@@ -114,11 +114,32 @@ def download_with_timeout(model_name: str, timeout_seconds: int = 0) -> Path:
     """
     set_download_status("downloading")
 
+    _ignore = ["*.bin", "*.pt", "*.safetensors", "*.msgpack"]
+
     def _do_download():
-        return snapshot_download(
-            model_name,
-            ignore_patterns=["*.bin", "*.pt", "*.safetensors", "*.msgpack"],
-        )
+        try:
+            return snapshot_download(model_name, ignore_patterns=_ignore)
+        except OSError as e:
+            # Windows symlink privilege error (WinError 1314): enterprise
+            # group policy blocks os.symlink(). Fall back to downloading
+            # into a temp dir (no symlinks), then copy into the HF cache
+            # using the existing model importer.
+            if "1314" not in str(e) and "privilege" not in str(e).lower():
+                raise
+            import tempfile
+            _logger.warning(
+                "Symlink creation failed (enterprise Windows). "
+                "Falling back to direct download for %s", model_name,
+            )
+            local_dir = tempfile.mkdtemp(prefix="hf-download-")
+            snapshot_download(
+                model_name, local_dir=local_dir, ignore_patterns=_ignore,
+            )
+            from smart_search.model_importer import copy_model_to_cache
+            result = copy_model_to_cache(local_dir, model_name)
+            if result.get("success"):
+                return result["cache_path"]
+            raise OSError(result.get("error", str(e)))
 
     try:
         if timeout_seconds > 0:
