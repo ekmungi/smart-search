@@ -19,6 +19,7 @@ import type {
   RetryFailedResponse,
   PauseResponse,
   ModelImportResponse,
+  ModelDownloadResponse,
 } from "./api-types";
 
 // Re-export all types so existing imports like `import { type FolderInfo } from "../lib/api"` keep working.
@@ -238,4 +239,14 @@ export async function importModel(sourcePath: string): Promise<ModelImportRespon
     body: JSON.stringify({ source_path: sourcePath }),
   });
   return handleResponse<ModelImportResponse>(res);
+}
+
+/** Download a model from HuggingFace by ID or URL. */
+export async function downloadModel(modelId: string): Promise<ModelDownloadResponse> {
+  const res = await fetch(`${BASE_URL}/model/download`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model_id: modelId }),
+  });
+  return handleResponse<ModelDownloadResponse>(res);
 }

@@ -118,6 +118,16 @@ export interface PauseResponse {
   paused: boolean;
 }
 
+/** Response from POST /api/model/download. */
+export interface ModelDownloadResponse {
+  success: boolean;
+  model_id: string;
+  error: string;
+  cache_path: string;
+  native_dims: number | null;
+  download_url: string;
+}
+
 /** Response from POST /api/model/import. */
 export interface ModelImportResponse {
   success: boolean;

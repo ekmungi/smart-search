@@ -16,6 +16,10 @@ def main(argv=None):
     Args:
         argv: Command line arguments (defaults to sys.argv).
     """
+    # Inject OS certificate store before any network calls (enterprise SSL).
+    from smart_search.startup import inject_ssl_truststore
+    inject_ssl_truststore()
+
     parser = argparse.ArgumentParser(
         prog="smart-search",
         description="Local semantic search for documents and notes.",

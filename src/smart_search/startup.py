@@ -1,10 +1,11 @@
-# Startup checks: index compatibility, orphan reconciliation, FTS5 backfill.
+# Startup checks: index compatibility, orphan reconciliation, FTS5 backfill, SSL.
 
 """Startup checks run when the HTTP server starts.
 
 Validates that the current config matches the stored index metadata,
 removes orphan chunks for files deleted while the app was offline,
-and backfills the FTS5 index for hybrid search migration."""
+backfills the FTS5 index for hybrid search migration, and injects
+OS certificate store for enterprise SSL compatibility."""
 
 import logging
 import sqlite3
@@ -16,6 +17,29 @@ from smart_search.index_metadata import IndexMetadata
 from smart_search.store import ChunkStore
 
 logger = logging.getLogger(__name__)
+
+
+def inject_ssl_truststore() -> bool:
+    """Inject OS certificate store into Python's SSL context.
+
+    Uses truststore (PEP 543) so that huggingface_hub and other HTTPS
+    clients trust the same CA certificates as the system browser. Fixes
+    model downloads on enterprise networks with SSL inspection proxies.
+
+    Returns:
+        True if injection succeeded, False if truststore is unavailable.
+    """
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+        logger.info("truststore: using OS certificate store for SSL")
+        return True
+    except ImportError:
+        logger.debug("truststore not installed, using default certifi CA bundle")
+        return False
+    except Exception:
+        logger.warning("truststore injection failed, falling back to certifi", exc_info=True)
+        return False
 
 
 def check_index_compatibility(config: SmartSearchConfig, db_path: str) -> Dict:

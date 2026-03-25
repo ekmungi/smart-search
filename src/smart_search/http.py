@@ -109,6 +109,10 @@ def create_app(
 
         state["start_time"] = time.time()
 
+        # Inject OS certificate store before any network calls (enterprise SSL).
+        from smart_search.startup import inject_ssl_truststore
+        inject_ssl_truststore()
+
         def _run_startup_tasks():
             """Run blocking startup checks and auto-resume in a background thread.
 

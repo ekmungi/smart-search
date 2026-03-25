@@ -310,3 +310,20 @@ class ModelImportResponse(BaseModel):
     error: str = ""
     cache_path: str = ""
     native_dims: Optional[int] = None
+
+
+class ModelDownloadRequest(BaseModel):
+    """Request body to download a model from HuggingFace."""
+
+    model_id: str
+
+
+class ModelDownloadResponse(BaseModel):
+    """Result of downloading a model from HuggingFace."""
+
+    success: bool
+    model_id: str = ""
+    error: str = ""
+    cache_path: str = ""
+    native_dims: Optional[int] = None
+    download_url: str = ""

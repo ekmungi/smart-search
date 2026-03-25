@@ -10,6 +10,8 @@ from smart_search.config import SmartSearchConfig
 from smart_search.gpu_provider import get_device_info
 from smart_search.http_models import (
     GpuInfoResponse,
+    ModelDownloadRequest,
+    ModelDownloadResponse,
     ModelImportRequest,
     ModelImportResponse,
     ModelInfoResponse,
@@ -100,5 +102,23 @@ def create_model_router(
         model_name = live_config.get("embedding_model", config.embedding_model)
         result = copy_model_to_cache(req.source_path, model_name)
         return ModelImportResponse(**result)
+
+    @router.post("/model/download", response_model=ModelDownloadResponse)
+    def download_model(req: ModelDownloadRequest):
+        """Download a model from HuggingFace by ID or URL.
+
+        Accepts either 'org/model-name' or a full HuggingFace URL.
+        Downloads all relevant files (ONNX, tokenizer, config) and
+        auto-detects embedding dimensions from the ONNX output shape.
+        """
+        from smart_search.model_download import download_hf_model
+
+        live_config = get_config_mgr().load()
+        timeout = int(live_config.get(
+            "model_download_timeout",
+            config.model_download_timeout,
+        ))
+        result = download_hf_model(req.model_id, timeout_seconds=timeout)
+        return ModelDownloadResponse(**result)
 
     return router

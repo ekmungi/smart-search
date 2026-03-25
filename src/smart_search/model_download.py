@@ -6,9 +6,11 @@ to keep that module under the 400-line hard max."""
 
 import logging
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
+from typing import Any, Dict
 
 from huggingface_hub import snapshot_download
 
@@ -148,3 +150,89 @@ def download_with_timeout(model_name: str, timeout_seconds: int = 0) -> Path:
     except Exception:
         set_download_status("idle")
         raise
+
+
+# --- URL parsing ---
+
+# Matches: https://huggingface.co/org/model-name or org/model-name
+_HF_URL_PATTERN = re.compile(
+    r"^(?:https?://huggingface\.co/)?([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/?$"
+)
+
+
+def parse_model_id(model_id_or_url: str) -> str:
+    """Extract a HuggingFace model ID from a model name or URL.
+
+    Accepts either "org/model-name" or "https://huggingface.co/org/model-name".
+
+    Args:
+        model_id_or_url: Model identifier or full HuggingFace URL.
+
+    Returns:
+        Normalized model ID (e.g. "Snowflake/snowflake-arctic-embed-m-v2.0").
+
+    Raises:
+        ValueError: If the input doesn't match a valid HF model pattern.
+    """
+    cleaned = model_id_or_url.strip()
+    match = _HF_URL_PATTERN.match(cleaned)
+    if not match:
+        raise ValueError(
+            f"Invalid model identifier: '{model_id_or_url}'. "
+            "Expected 'org/model-name' or 'https://huggingface.co/org/model-name'."
+        )
+    return match.group(1)
+
+
+# --- Full download with dimension detection ---
+
+def download_hf_model(model_id_or_url: str, timeout_seconds: int = 0) -> Dict[str, Any]:
+    """Download a model from HuggingFace and detect its embedding dimensions.
+
+    Parses the input (model ID or URL), downloads all relevant files via
+    snapshot_download, then probes the ONNX output shape.
+
+    Args:
+        model_id_or_url: HuggingFace model ID or full URL.
+        timeout_seconds: Max seconds to wait. 0 = no timeout.
+
+    Returns:
+        Dict with success, model_id, cache_path, native_dims, download_url, error.
+    """
+    try:
+        model_id = parse_model_id(model_id_or_url)
+    except ValueError as e:
+        return {"success": False, "model_id": "", "error": str(e)}
+
+    try:
+        model_dir = download_with_timeout(model_id, timeout_seconds)
+    except ModelDownloadTimeoutError as e:
+        return {
+            "success": False,
+            "model_id": model_id,
+            "error": str(e),
+            "download_url": get_hf_model_url(model_id),
+            "cache_path": get_hf_cache_path(),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "model_id": model_id,
+            "error": f"Download failed: {e}",
+        }
+
+    # Auto-detect embedding dimensions from the ONNX model
+    from smart_search.model_importer import _detect_embedding_dims
+    native_dims = _detect_embedding_dims(model_dir)
+
+    _logger.info(
+        "Downloaded model %s to %s (detected dims: %s)",
+        model_id, model_dir, native_dims,
+    )
+    return {
+        "success": True,
+        "model_id": model_id,
+        "cache_path": str(model_dir),
+        "native_dims": native_dims,
+        "download_url": get_hf_model_url(model_id),
+    }

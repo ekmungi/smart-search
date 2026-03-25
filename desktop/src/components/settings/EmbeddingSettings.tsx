@@ -1,10 +1,11 @@
-// Embedding settings: model selector dropdown and Matryoshka dimension picker.
+// Embedding settings: model selector, dimension picker, and HF model download.
 
-import { Loader2, AlertTriangle, Cpu, FolderOpen } from "lucide-react";
+import { useState } from "react";
+import { Loader2, AlertTriangle, Cpu, FolderOpen, Download, CheckCircle2, XCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Section, SettingRow } from "./SettingsLayout";
 import type { ModelInfo, GpuInfo } from "../../lib/api";
-import { importModel } from "../../lib/api";
+import { importModel, downloadModel } from "../../lib/api";
 
 /** Props for the embedding settings section. */
 interface EmbeddingSettingsProps {
@@ -173,7 +174,97 @@ export function EmbeddingSettings({
           Import Model
         </button>
       </SettingRow>
+      <HfModelDownload />
     </Section>
+  );
+}
+
+/** Inline download widget for any HuggingFace model. */
+function HfModelDownload() {
+  const [modelInput, setModelInput] = useState("");
+  const [status, setStatus] = useState<"idle" | "downloading" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  const handleDownload = async () => {
+    const trimmed = modelInput.trim();
+    if (!trimmed) return;
+
+    setStatus("downloading");
+    setMessage("");
+    try {
+      const result = await downloadModel(trimmed);
+      if (result.success) {
+        const dims = result.native_dims ? ` (${result.native_dims}-dim)` : "";
+        setStatus("success");
+        setMessage(`Downloaded ${result.model_id}${dims}`);
+      } else {
+        setStatus("error");
+        setMessage(result.error || "Download failed");
+      }
+    } catch (err) {
+      setStatus("error");
+      setMessage(err instanceof Error ? err.message : "Download failed");
+    }
+  };
+
+  return (
+    <SettingRow
+      label="HuggingFace Download"
+      description="Download any ONNX embedding model by ID or URL"
+    >
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-1.5">
+          <input
+            type="text"
+            value={modelInput}
+            onChange={(e) => {
+              setModelInput(e.target.value);
+              if (status !== "idle" && status !== "downloading") setStatus("idle");
+            }}
+            onKeyDown={(e) => { if (e.key === "Enter") handleDownload(); }}
+            placeholder="org/model-name"
+            disabled={status === "downloading"}
+            className="bg-bg-elevated border border-border rounded px-2 py-1 text-sm text-text-primary w-[220px] placeholder:text-text-secondary/40 focus:outline-none focus:border-accent-blue"
+          />
+          <button
+            onClick={handleDownload}
+            disabled={status === "downloading" || !modelInput.trim()}
+            className="flex items-center gap-1.5 px-2 py-1 text-sm rounded bg-bg-elevated border border-border text-text-secondary hover:bg-border disabled:opacity-40"
+          >
+            {status === "downloading" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Download size={14} />
+            )}
+            {status === "downloading" ? "Downloading..." : "Download"}
+          </button>
+        </div>
+        <AnimatePresence>
+          {status === "success" && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex items-center gap-1.5 text-xs text-accent-green"
+            >
+              <CheckCircle2 size={12} />
+              {message}
+            </motion.div>
+          )}
+          {status === "error" && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex items-start gap-1.5 text-xs text-accent-red max-w-[320px]"
+            >
+              <XCircle size={12} className="mt-0.5 shrink-0" />
+              <span className="break-words">{message}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </SettingRow>
   );
 }
 
