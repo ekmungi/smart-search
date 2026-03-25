@@ -243,8 +243,10 @@ def create_router(
         resolved = Path(path).resolve()
         path_posix = resolved.as_posix()
 
-        # Cancel any active indexing for this folder before removal
-        get_task_mgr().cancel_folder(path_posix)
+        # Cancel active indexing and wait for the thread to fully stop.
+        # Without waiting, the indexing thread may write chunks to LanceDB
+        # after remove_files_for_folder() has already cleaned up.
+        get_task_mgr().cancel_folder_and_wait(path_posix)
 
         mgr = get_config_mgr()
         mgr.remove_watch_dir(str(resolved))

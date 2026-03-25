@@ -138,6 +138,7 @@ class IndexingTaskManager:
         """Initialize with empty task registry and resource-aware semaphore."""
         self._tasks: Dict[str, IndexingStatus] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
+        self._threads: Dict[str, threading.Thread] = {}
         self._folder_to_task: Dict[str, str] = {}
         self._lock = threading.Lock()
         self._max_concurrent = _compute_max_concurrent()
@@ -190,10 +191,16 @@ class IndexingTaskManager:
             daemon=True,
         )
         thread.start()
+        with self._lock:
+            self._threads[task_id] = thread
         return task_id
 
     def cancel_folder(self, folder: str) -> bool:
-        """Cancel any active indexing task for a folder.
+        """Cancel any active indexing task for a folder (non-blocking).
+
+        Sets the cancellation flag but does not wait for the thread to stop.
+        Use cancel_folder_and_wait() when you need the thread fully stopped
+        before proceeding (e.g., before deleting indexed data).
 
         Args:
             folder: Folder path to cancel indexing for.
@@ -207,6 +214,35 @@ class IndexingTaskManager:
             if task_id and task_id in self._cancel_events:
                 self._cancel_events[task_id].set()
                 return True
+
+    def cancel_folder_and_wait(self, folder: str, timeout: float = 10.0) -> bool:
+        """Cancel indexing for a folder and wait for the thread to finish.
+
+        Ensures no more chunks are written after this method returns,
+        making it safe to delete indexed data immediately afterward.
+
+        Args:
+            folder: Folder path to cancel indexing for.
+            timeout: Max seconds to wait for the thread to stop.
+
+        Returns:
+            True if a task was found, cancelled, and stopped within timeout.
+        """
+        folder = Path(folder).as_posix()
+        with self._lock:
+            task_id = self._folder_to_task.get(folder)
+            if not task_id:
+                return False
+            event = self._cancel_events.get(task_id)
+            thread = self._threads.get(task_id)
+            if event:
+                event.set()
+
+        # Wait outside the lock so the indexing thread can acquire it to clean up
+        if thread and thread.is_alive():
+            thread.join(timeout=timeout)
+            return not thread.is_alive()
+        return True
         return False
 
     def get_status(self, task_id: str) -> Optional[IndexingStatus]:
@@ -531,3 +567,6 @@ class IndexingTaskManager:
             status.error = str(e)
         finally:
             status.finished_at = time.time()
+            # Clean up thread reference so join() callers don't wait on dead threads
+            with self._lock:
+                self._threads.pop(task_id, None)
