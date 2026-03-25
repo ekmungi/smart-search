@@ -359,6 +359,25 @@ class TestIsModelCached:
             assert Embedder.is_model_cached("fake/model") is False
 
 
+class TestGetModelDir:
+    """Tests for the static _get_model_dir method."""
+
+    def test_get_model_dir_finds_imported_model(self, tmp_path, monkeypatch):
+        """_get_model_dir should find models via direct snapshot scan."""
+        cache = tmp_path / "hub"
+        snapshot = cache / "models--test--model" / "snapshots" / "abc123" / "onnx"
+        snapshot.mkdir(parents=True)
+        (snapshot / "model_quantized.onnx").write_bytes(b"fake")
+
+        monkeypatch.setenv("HF_HOME", str(tmp_path))
+
+        with patch("huggingface_hub.try_to_load_from_cache", return_value=None), \
+             patch("smart_search.model_download.get_hf_cache_path", return_value=str(cache)):
+            result = Embedder._get_model_dir("test/model")
+        assert result is not None
+        assert "abc123" in str(result)
+
+
 class TestEmbedderGpuProviders:
     """Tests for GPU provider integration in Embedder."""
 

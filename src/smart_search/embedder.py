@@ -177,6 +177,21 @@ class Embedder:
                 return Path(result).parent.parent
         except (ImportError, OSError):
             pass
+        # Fallback: scan snapshot directories directly (handles imported models)
+        try:
+            from smart_search.model_download import get_hf_cache_path
+            cache_base = Path(get_hf_cache_path())
+            safe_name = model_name.replace("/", "--")
+            snapshots_dir = cache_base / f"models--{safe_name}" / "snapshots"
+            if snapshots_dir.exists():
+                for snapshot in sorted(snapshots_dir.iterdir(), reverse=True):
+                    if not snapshot.is_dir():
+                        continue
+                    for onnx_name in ("onnx/model_quantized.onnx", "onnx/model.onnx", "model.onnx"):
+                        if (snapshot / onnx_name).exists():
+                            return snapshot
+        except (OSError, ValueError):
+            pass
         return None
 
     @staticmethod
