@@ -1,5 +1,11 @@
 ; NSIS hooks for Smart Search installer.
-; Manages MCP registration so the claude CLI always points to the correct sidecar path.
+; Manages MCP registration and process cleanup for install/uninstall.
+
+!macro NSIS_HOOK_PREUNINSTALL
+  ; Kill any running smart-search processes before file deletion.
+  ; Without this, Windows cannot delete the exe if the sidecar is still running.
+  nsExec::ExecToLog 'taskkill /F /IM smart-search.exe'
+!macroend
 
 !macro NSIS_HOOK_POSTINSTALL
   ; Deregister any stale MCP entry, then register with the current install path.
