@@ -16,8 +16,9 @@ from huggingface_hub import snapshot_download
 
 _logger = logging.getLogger(__name__)
 
-# --- Download status tracking (module-level, thread-safe) ---
+# --- Download status and progress tracking (module-level, thread-safe) ---
 _download_status = "idle"  # "idle" | "downloading" | "cached" | "timeout"
+_download_progress: float = 0.0  # 0.0-1.0; reset at start, 1.0 on success
 _status_lock = threading.Lock()
 
 
@@ -39,6 +40,27 @@ def set_download_status(status: str) -> None:
     global _download_status
     with _status_lock:
         _download_status = status
+
+
+def get_download_progress() -> float:
+    """Return current download progress as a fraction from 0.0 to 1.0.
+
+    Returns:
+        0.0 when idle or at start of download; 1.0 when download completed
+        successfully. Intermediate values indicate partial progress.
+    """
+    return _download_progress
+
+
+def set_download_progress(progress: float) -> None:
+    """Update download progress thread-safely.
+
+    Args:
+        progress: Value between 0.0 (start) and 1.0 (complete).
+    """
+    global _download_progress
+    with _status_lock:
+        _download_progress = progress
 
 
 # --- HuggingFace helpers ---
@@ -113,12 +135,25 @@ def download_with_timeout(model_name: str, timeout_seconds: int = 0) -> Path:
         ModelDownloadTimeoutError: If download exceeds timeout.
     """
     set_download_status("downloading")
+    set_download_progress(0.0)
 
     _ignore = ["*.bin", "*.pt", "*.safetensors", "*.msgpack"]
 
     def _do_download():
+        """Run snapshot_download and set progress milestone on completion.
+
+        Returns:
+            Local path string returned by snapshot_download.
+
+        Raises:
+            OSError: Re-raised unless it is a Windows symlink privilege error,
+                which triggers the local_dir fallback path.
+        """
         try:
-            return snapshot_download(model_name, ignore_patterns=_ignore)
+            result = snapshot_download(model_name, ignore_patterns=_ignore)
+            # Milestone: snapshot downloaded (file copy/verify still pending)
+            set_download_progress(0.5)
+            return result
         except OSError as e:
             # Windows symlink privilege error (WinError 1314): enterprise
             # group policy blocks os.symlink(). Fall back to downloading
@@ -164,6 +199,7 @@ def download_with_timeout(model_name: str, timeout_seconds: int = 0) -> Path:
         else:
             model_dir = _do_download()
 
+        set_download_progress(1.0)
         set_download_status("cached")
         return Path(model_dir)
     except ModelDownloadTimeoutError:
