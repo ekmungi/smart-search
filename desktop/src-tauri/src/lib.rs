@@ -885,6 +885,13 @@ pub fn run() {
                 )?;
             }
 
+            // Force-hide the search window on startup. The window-state plugin
+            // may restore it as visible from a previous session where the user
+            // had Quick Search open when the app closed.
+            if let Some(search_win) = app.get_webview_window("search") {
+                let _ = search_win.hide();
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
