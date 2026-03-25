@@ -778,7 +778,11 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_denylist(&["search"])
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .manage(Arc::new(BackendState {
             child: Mutex::new(None),
@@ -883,13 +887,6 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
-            }
-
-            // Force-hide the search window on startup. The window-state plugin
-            // may restore it as visible from a previous session where the user
-            // had Quick Search open when the app closed.
-            if let Some(search_win) = app.get_webview_window("search") {
-                let _ = search_win.hide();
             }
 
             Ok(())
