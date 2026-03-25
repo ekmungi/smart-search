@@ -4,6 +4,7 @@
 directory into the HF Hub cache so the embedder can find them. Also
 probes ONNX output shape to auto-detect embedding dimensions."""
 
+import hashlib
 import logging
 import shutil
 from pathlib import Path
@@ -39,10 +40,13 @@ def copy_model_to_cache(
     if not onnx_files:
         return {"success": False, "error": "No ONNX model file found in source directory"}
 
-    # Build HF cache target path
+    # Build HF cache target path.
+    # Use a deterministic SHA1 of "imported-{model_name}" so the snapshot dir
+    # is a valid 40-char hex string that HF Hub expects, not the literal "imported".
+    snapshot_sha = hashlib.sha1(f"imported-{model_name}".encode("utf-8")).hexdigest()
     cache_base = Path(get_hf_cache_path())
     safe_name = model_name.replace("/", "--")
-    model_cache = cache_base / f"models--{safe_name}" / "snapshots" / "imported"
+    model_cache = cache_base / f"models--{safe_name}" / "snapshots" / snapshot_sha
     model_cache.mkdir(parents=True, exist_ok=True)
 
     # Copy all files preserving subdirectory structure
@@ -55,10 +59,11 @@ def copy_model_to_cache(
             shutil.copy2(str(src_file), str(dst_file))
             files_copied += 1
 
-    # Create refs/main pointer so HF Hub resolves the snapshot
+    # Create refs/main pointer so HF Hub resolves the snapshot.
+    # Must contain the same SHA as the snapshot directory name.
     refs_dir = model_cache.parent.parent / "refs"
     refs_dir.mkdir(parents=True, exist_ok=True)
-    (refs_dir / "main").write_text("imported")
+    (refs_dir / "main").write_text(snapshot_sha, encoding="utf-8")
 
     # Auto-detect embedding dimensions from the ONNX model
     native_dims = _detect_embedding_dims(model_cache)
