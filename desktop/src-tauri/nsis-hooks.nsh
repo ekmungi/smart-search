@@ -12,4 +12,12 @@
 !macro NSIS_HOOK_POSTUNINSTALL
   ; Clean up MCP registration on uninstall.
   nsExec::ExecToLog 'claude mcp remove -s user smart-search'
+
+  ; Delete actual app data directory.
+  ; Tauri's built-in cleanup targets $LOCALAPPDATA\com.smartsearch.desktop (bundle ID),
+  ; but the Python backend stores data at $LOCALAPPDATA\smart-search.
+  ${If} $DeleteAppDataCheckboxState = 1
+  ${AndIf} $UpdateMode <> 1
+    RmDir /r "$LOCALAPPDATA\smart-search"
+  ${EndIf}
 !macroend
