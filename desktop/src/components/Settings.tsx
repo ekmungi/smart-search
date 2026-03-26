@@ -43,6 +43,7 @@ export default function Settings() {
   const [mcpRegistering, setMcpRegistering] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [gpuInfo, setGpuInfo] = useState<GpuInfo | null>(null);
+  const [cachedModels, setCachedModels] = useState<string[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<{
     model: string;
     dims: number;
@@ -84,7 +85,10 @@ export default function Settings() {
       .then((res) => setModels(res.models))
       .catch(() => {});
     fetchModelStatus()
-      .then((res) => setGpuInfo(res.gpu_info))
+      .then((res) => {
+        setGpuInfo(res.gpu_info);
+        setCachedModels(res.cached_models ?? []);
+      })
       .catch(() => {});
     const cached = localStorage.getItem(STORAGE_KEY_MCP_REGISTERED);
     if (cached === null) {
@@ -300,6 +304,7 @@ export default function Settings() {
         currentBackend={String(config.embedding_backend || "auto")}
         gpuInfo={gpuInfo}
         reindexing={reindexing}
+        cachedModels={cachedModels}
         onModelChangeRequest={handleModelChangeRequest}
         onDimsChange={handleSave}
         onBackendChange={(backend) => handleSave("embedding_backend", backend)}

@@ -54,7 +54,6 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modelCached, setModelCached] = useState<boolean | null>(null);
-  const [modelName, setModelName] = useState<string | null>(null);
   const [activeTasks, setActiveTasks] = useState<IndexingTask[]>([]);
   const [startingUp, setStartingUp] = useState<boolean>(!everConnected);
   const failingSince = useRef<number | null>(null);
@@ -128,7 +127,6 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
         if (!cancelled) {
           setModelStatus(status);
           setModelCached(status.cached);
-          setModelName(status.model_name);
           if (status.download_status === "timeout" && !timeoutDismissed) {
             setShowTimeoutDialog(true);
           }
