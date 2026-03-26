@@ -175,20 +175,37 @@ class Embedder:
             result = try_to_load_from_cache(model_name, "onnx/model_quantized.onnx")
             if result is not None and isinstance(result, str):
                 return Path(result).parent.parent
-        except (ImportError, OSError):
+        except Exception:
+            pass
+        # Fallback: scan snapshot directories directly (handles imported models)
+        try:
+            from smart_search.model_download import get_hf_cache_path
+            cache_base = Path(get_hf_cache_path())
+            safe_name = model_name.replace("/", "--")
+            snapshots_dir = cache_base / f"models--{safe_name}" / "snapshots"
+            if snapshots_dir.exists():
+                for snapshot in sorted(snapshots_dir.iterdir(), reverse=True):
+                    if not snapshot.is_dir():
+                        continue
+                    for onnx_name in ("onnx/model_quantized.onnx", "onnx/model.onnx", "model.onnx"):
+                        if (snapshot / onnx_name).exists():
+                            return snapshot
+        except (OSError, ValueError):
             pass
         return None
 
     @staticmethod
-    def is_model_cached(model_name: str = "Snowflake/snowflake-arctic-embed-m-v2.0") -> bool:
+    def is_model_cached(model_name: str = "") -> bool:
         """Check whether the ONNX model files are available locally.
 
         Args:
-            model_name: HuggingFace model identifier.
+            model_name: HuggingFace model identifier. Empty string returns False.
 
         Returns:
             True if the model is cached and ready for offline use.
         """
+        if not model_name:
+            return False
         cached = Embedder._get_model_dir(model_name) is not None
         if cached:
             from smart_search.model_download import get_download_status, set_download_status

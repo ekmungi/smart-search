@@ -10,14 +10,15 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from huggingface_hub import snapshot_download
 
 _logger = logging.getLogger(__name__)
 
-# --- Download status tracking (module-level, thread-safe) ---
+# --- Download status and progress tracking (module-level, thread-safe) ---
 _download_status = "idle"  # "idle" | "downloading" | "cached" | "timeout"
+_download_progress: float = 0.0  # 0.0-1.0; reset at start, 1.0 on success
 _status_lock = threading.Lock()
 
 
@@ -39,6 +40,27 @@ def set_download_status(status: str) -> None:
     global _download_status
     with _status_lock:
         _download_status = status
+
+
+def get_download_progress() -> float:
+    """Return current download progress as a fraction from 0.0 to 1.0.
+
+    Returns:
+        0.0 when idle or at start of download; 1.0 when download completed
+        successfully. Intermediate values indicate partial progress.
+    """
+    return _download_progress
+
+
+def set_download_progress(progress: float) -> None:
+    """Update download progress thread-safely.
+
+    Args:
+        progress: Value between 0.0 (start) and 1.0 (complete).
+    """
+    global _download_progress
+    with _status_lock:
+        _download_progress = progress
 
 
 # --- HuggingFace helpers ---
@@ -67,6 +89,34 @@ def get_hf_cache_path() -> str:
     if hf_home:
         return str(Path(hf_home) / "hub")
     return str(Path.home() / ".cache" / "huggingface" / "hub")
+
+
+def list_cached_models() -> List[str]:
+    """Scan HF cache for all models that have ONNX files.
+
+    Returns:
+        List of model IDs (e.g. ["Snowflake/snowflake-arctic-embed-m-v2.0"]),
+        sorted alphabetically. Empty list if cache directory does not exist.
+    """
+    cache_base = Path(get_hf_cache_path())
+    if not cache_base.exists():
+        return []
+    models = []
+    for model_dir in cache_base.iterdir():
+        if not model_dir.name.startswith("models--"):
+            continue
+        snapshots = model_dir / "snapshots"
+        if not snapshots.exists():
+            continue
+        has_onnx = any(
+            f.suffix == ".onnx"
+            for snapshot in snapshots.iterdir() if snapshot.is_dir()
+            for f in snapshot.rglob("*.onnx")
+        )
+        if has_onnx:
+            model_id = model_dir.name.replace("models--", "").replace("--", "/", 1)
+            models.append(model_id)
+    return sorted(models)
 
 
 # --- Exception ---
@@ -113,12 +163,25 @@ def download_with_timeout(model_name: str, timeout_seconds: int = 0) -> Path:
         ModelDownloadTimeoutError: If download exceeds timeout.
     """
     set_download_status("downloading")
+    set_download_progress(0.0)
 
     _ignore = ["*.bin", "*.pt", "*.safetensors", "*.msgpack"]
 
     def _do_download():
+        """Run snapshot_download and set progress milestone on completion.
+
+        Returns:
+            Local path string returned by snapshot_download.
+
+        Raises:
+            OSError: Re-raised unless it is a Windows symlink privilege error,
+                which triggers the local_dir fallback path.
+        """
         try:
-            return snapshot_download(model_name, ignore_patterns=_ignore)
+            result = snapshot_download(model_name, ignore_patterns=_ignore)
+            # Milestone: snapshot downloaded (file copy/verify still pending)
+            set_download_progress(0.5)
+            return result
         except OSError as e:
             # Windows symlink privilege error (WinError 1314): enterprise
             # group policy blocks os.symlink(). Fall back to downloading
@@ -164,6 +227,7 @@ def download_with_timeout(model_name: str, timeout_seconds: int = 0) -> Path:
         else:
             model_dir = _do_download()
 
+        set_download_progress(1.0)
         set_download_status("cached")
         return Path(model_dir)
     except ModelDownloadTimeoutError:

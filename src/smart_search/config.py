@@ -20,7 +20,7 @@ class SmartSearchConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SMART_SEARCH_")
 
     # Embedding settings
-    embedding_model: str = "Snowflake/snowflake-arctic-embed-m-v2.0"
+    embedding_model: str = ""
     embedding_dimensions: int = 256
     embedding_backend: str = "auto"
     embedder_idle_timeout: float = 60.0

@@ -111,6 +111,8 @@ export interface ModelStatusResponse {
   download_status: "idle" | "downloading" | "cached" | "timeout";
   download_url: string;
   cache_path: string;
+  progress: number;
+  cached_models: string[];
 }
 
 /** Response from POST /api/indexing/pause or /resume. */

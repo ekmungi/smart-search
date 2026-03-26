@@ -12,10 +12,11 @@ from smart_search.embedder import Embedder, _mean_pool, _l2_normalize, _truncate
 
 @pytest.fixture
 def tmp_config(tmp_path):
-    """SmartSearchConfig with paths pointing to tmp_path (snowflake default)."""
+    """SmartSearchConfig with paths pointing to tmp_path (snowflake model)."""
     return SmartSearchConfig(
         lancedb_path=str(tmp_path / "vectors"),
         sqlite_path=str(tmp_path / "meta.db"),
+        embedding_model="Snowflake/snowflake-arctic-embed-m-v2.0",
     )
 
 
@@ -357,6 +358,25 @@ class TestIsModelCached:
         """Should return False on any exception, not crash."""
         with patch("huggingface_hub.try_to_load_from_cache", side_effect=Exception("boom")):
             assert Embedder.is_model_cached("fake/model") is False
+
+
+class TestGetModelDir:
+    """Tests for the static _get_model_dir method."""
+
+    def test_get_model_dir_finds_imported_model(self, tmp_path, monkeypatch):
+        """_get_model_dir should find models via direct snapshot scan."""
+        cache = tmp_path / "hub"
+        snapshot = cache / "models--test--model" / "snapshots" / "abc123" / "onnx"
+        snapshot.mkdir(parents=True)
+        (snapshot / "model_quantized.onnx").write_bytes(b"fake")
+
+        monkeypatch.setenv("HF_HOME", str(tmp_path))
+
+        with patch("huggingface_hub.try_to_load_from_cache", return_value=None), \
+             patch("smart_search.model_download.get_hf_cache_path", return_value=str(cache)):
+            result = Embedder._get_model_dir("test/model")
+        assert result is not None
+        assert "abc123" in str(result)
 
 
 class TestEmbedderGpuProviders:
