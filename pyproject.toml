@@ -9,7 +9,7 @@ description = "Local MCP server for semantic search over Markdown, PDF, DOCX, PP
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp",
-    "markitdown[all]",
+    "markitdown[all]>=0.1.5,<0.2",
     "lancedb",
     "pylance",
     "onnxruntime",
