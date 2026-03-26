@@ -156,3 +156,24 @@ class ConversionWorker:
             self._converter_reset_count += 1
 
         return text
+
+
+def create_conversion_worker(**kwargs) -> "ConversionWorker":
+    """Create the appropriate ConversionWorker based on environment.
+
+    Set SMART_SEARCH_SUBPROCESS_CONVERTER=1 to use the old subprocess-based
+    worker as a fallback.
+
+    Args:
+        **kwargs: Passed to the worker constructor (e.g. rss_threshold_mb).
+
+    Returns:
+        ConversionWorker instance (in-process default, or subprocess fallback).
+    """
+    if os.environ.get("SMART_SEARCH_SUBPROCESS_CONVERTER"):
+        from smart_search.subprocess_conversion_worker import SubprocessConversionWorker
+        _logger.info("Using subprocess conversion worker (env override)")
+        worker = SubprocessConversionWorker(**kwargs)
+        worker.start()
+        return worker  # type: ignore[return-value]
+    return ConversionWorker(**kwargs)
