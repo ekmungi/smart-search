@@ -15,6 +15,7 @@ import {
   type IndexingTask,
 } from "../lib/api";
 import type { ModelStatusResponse } from "../lib/api-types";
+import ModelDownloadBanner from "./ModelDownloadBanner";
 import {
   POLL_STATS_MS,
   POLL_INDEXING_ACTIVE_MS,
@@ -196,22 +197,7 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
         </div>
       )}
 
-      {/* Model download banner */}
-      {health && modelCached === false && (
-        <div className="bg-bg-surface border border-accent-amber/30 rounded-lg p-4 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-4 h-4 border-2 border-accent-amber border-t-transparent rounded-full animate-spin" />
-            <div>
-              <p className="text-sm font-medium text-text-primary">
-                Downloading {modelName ?? "embedding model"}...
-              </p>
-              <p className="text-xs text-text-secondary mt-1">
-                First-time setup. Search will be available once complete.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      <ModelDownloadBanner modelStatus={modelStatus} />
 
       {showTimeoutDialog && modelStatus && (
         <ModelTimeoutDialog
