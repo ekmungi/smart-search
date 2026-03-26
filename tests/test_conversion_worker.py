@@ -79,3 +79,44 @@ class TestConversionWorker:
                     side_effect=RuntimeError("conversion failed")):
             with pytest.raises(RuntimeError, match="conversion failed"):
                 worker.convert("/fake.pdf")
+
+
+class TestConversionWorkerIntegration:
+    """Integration tests with real file conversions."""
+
+    def test_converts_real_md_file(self, tmp_path):
+        """End-to-end: .md file -> convert -> returns content."""
+        from smart_search.conversion_worker import ConversionWorker
+        md = tmp_path / "doc.md"
+        md.write_text("# Title\n\nParagraph here.\n\n## Section\n\nMore text.")
+        worker = ConversionWorker()
+        result = worker.convert(str(md))
+        assert "Title" in result
+        assert "Section" in result
+
+    def test_converts_real_pdf_file(self, sample_pdf_path):
+        """End-to-end: PDF file -> convert -> returns content."""
+        from smart_search.conversion_worker import ConversionWorker
+        worker = ConversionWorker()
+        result = worker.convert(str(sample_pdf_path))
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+
+    def test_converts_real_docx_file(self, sample_docx_path):
+        """End-to-end: DOCX file -> convert -> returns content."""
+        from smart_search.conversion_worker import ConversionWorker
+        worker = ConversionWorker()
+        result = worker.convert(str(sample_docx_path))
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+
+    def test_multiple_files_sequentially(self, tmp_path):
+        """Worker handles multiple files in sequence without errors."""
+        from smart_search.conversion_worker import ConversionWorker
+        worker = ConversionWorker()
+        for i in range(5):
+            md = tmp_path / f"doc{i}.md"
+            md.write_text(f"# Document {i}\n\nContent for doc {i}.")
+            result = worker.convert(str(md))
+            assert f"Document {i}" in result
+        worker.stop()
