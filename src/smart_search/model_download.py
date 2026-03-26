@@ -10,7 +10,7 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from huggingface_hub import snapshot_download
 
@@ -89,6 +89,34 @@ def get_hf_cache_path() -> str:
     if hf_home:
         return str(Path(hf_home) / "hub")
     return str(Path.home() / ".cache" / "huggingface" / "hub")
+
+
+def list_cached_models() -> List[str]:
+    """Scan HF cache for all models that have ONNX files.
+
+    Returns:
+        List of model IDs (e.g. ["Snowflake/snowflake-arctic-embed-m-v2.0"]),
+        sorted alphabetically. Empty list if cache directory does not exist.
+    """
+    cache_base = Path(get_hf_cache_path())
+    if not cache_base.exists():
+        return []
+    models = []
+    for model_dir in cache_base.iterdir():
+        if not model_dir.name.startswith("models--"):
+            continue
+        snapshots = model_dir / "snapshots"
+        if not snapshots.exists():
+            continue
+        has_onnx = any(
+            f.suffix == ".onnx"
+            for snapshot in snapshots.iterdir() if snapshot.is_dir()
+            for f in snapshot.rglob("*.onnx")
+        )
+        if has_onnx:
+            model_id = model_dir.name.replace("models--", "").replace("--", "/", 1)
+            models.append(model_id)
+    return sorted(models)
 
 
 # --- Exception ---

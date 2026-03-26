@@ -257,3 +257,42 @@ def test_model_download_timeout_error_message():
     )
     assert "30s" in str(err)
     assert "org/m" in str(err)
+
+
+# ---------------------------------------------------------------------------
+# list_cached_models
+# ---------------------------------------------------------------------------
+
+
+def test_list_cached_models_empty(tmp_path, monkeypatch):
+    """list_cached_models returns [] when cache directory does not exist."""
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "nonexistent"))
+    from smart_search.model_download import list_cached_models
+    result = list_cached_models()
+    assert result == []
+
+
+def test_list_cached_models_finds_onnx(tmp_path, monkeypatch):
+    """list_cached_models returns model IDs for dirs containing ONNX files."""
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    hub = tmp_path / "hub"
+    snapshot = hub / "models--Snowflake--snowflake-arctic-embed-m-v2.0" / "snapshots" / "abc123"
+    snapshot.mkdir(parents=True)
+    (snapshot / "model.onnx").write_text("fake onnx", encoding="utf-8")
+
+    from smart_search.model_download import list_cached_models
+    result = list_cached_models()
+    assert result == ["Snowflake/snowflake-arctic-embed-m-v2.0"]
+
+
+def test_list_cached_models_skips_non_onnx(tmp_path, monkeypatch):
+    """list_cached_models excludes model dirs that contain no .onnx files."""
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    hub = tmp_path / "hub"
+    snapshot = hub / "models--org--some-model" / "snapshots" / "def456"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+
+    from smart_search.model_download import list_cached_models
+    result = list_cached_models()
+    assert result == []

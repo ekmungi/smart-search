@@ -159,6 +159,8 @@ class ModelStatusResponse(BaseModel):
     download_status: str = "idle"
     download_url: str = ""
     cache_path: str = ""
+    progress: float = 0.0           # 0.0-1.0 download progress
+    cached_models: List[str] = []   # all cached model IDs with ONNX files
 
 
 class ModelLoadedResponse(BaseModel):

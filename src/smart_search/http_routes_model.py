@@ -70,8 +70,10 @@ def create_model_router(
         from smart_search.embedder import Embedder
         from smart_search.model_download import (
             get_download_status,
+            get_download_progress,
             get_hf_model_url,
             get_hf_cache_path,
+            list_cached_models,
         )
 
         live_config = get_config_mgr().load()
@@ -84,6 +86,8 @@ def create_model_router(
             download_status=get_download_status(),
             download_url=get_hf_model_url(model_name),
             cache_path=get_hf_cache_path(),
+            progress=get_download_progress(),
+            cached_models=list_cached_models(),
         )
 
     @router.get("/model/loaded", response_model=ModelLoadedResponse)
