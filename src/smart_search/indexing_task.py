@@ -510,7 +510,10 @@ class IndexingTaskManager:
             # process keyword-only files (CSV, XLSX, JSON, etc.).
             from smart_search.embedder import Embedder
             model_name = config.embedding_model
-            model_ready = Embedder.is_model_cached(model_name)
+            if not model_name:
+                model_ready = False
+            else:
+                model_ready = Embedder.is_model_cached(model_name)
 
             if not model_ready:
                 keyword_only_files = [

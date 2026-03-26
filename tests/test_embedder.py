@@ -12,10 +12,11 @@ from smart_search.embedder import Embedder, _mean_pool, _l2_normalize, _truncate
 
 @pytest.fixture
 def tmp_config(tmp_path):
-    """SmartSearchConfig with paths pointing to tmp_path (snowflake default)."""
+    """SmartSearchConfig with paths pointing to tmp_path (snowflake model)."""
     return SmartSearchConfig(
         lancedb_path=str(tmp_path / "vectors"),
         sqlite_path=str(tmp_path / "meta.db"),
+        embedding_model="Snowflake/snowflake-arctic-embed-m-v2.0",
     )
 
 
