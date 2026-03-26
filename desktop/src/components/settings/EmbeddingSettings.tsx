@@ -15,9 +15,11 @@ interface EmbeddingSettingsProps {
   currentBackend: string;
   gpuInfo: GpuInfo | null;
   reindexing: boolean;
+  cachedModels: string[];
   onModelChangeRequest: (modelId: string) => void;
   onDimsChange: (key: string, value: number) => void;
   onBackendChange: (backend: string) => void;
+  onAutoDownload?: (modelId: string) => void;
 }
 
 /** Inline chip showing what compute device(s) the selected model can use. */
@@ -64,9 +66,11 @@ export function EmbeddingSettings({
   currentBackend,
   gpuInfo,
   reindexing,
+  cachedModels,
   onModelChangeRequest,
   onDimsChange,
   onBackendChange,
+  onAutoDownload,
 }: EmbeddingSettingsProps) {
   const isGpuAvailable = gpuInfo != null && gpuInfo.type !== "cpu";
   // Filter models: hide GPU-required models when no GPU is available
@@ -85,12 +89,22 @@ export function EmbeddingSettings({
         {availableModels.length > 0 ? (
           <select
             value={currentModel}
-            onChange={(e) => onModelChangeRequest(e.target.value)}
+            onChange={(e) => {
+              const selected = e.target.value;
+              onModelChangeRequest(selected);
+              if (!cachedModels.includes(selected) && onAutoDownload) {
+                onAutoDownload(selected);
+              }
+            }}
             disabled={reindexing}
             className="bg-bg-elevated border border-border rounded px-2 py-1 text-sm text-text-primary max-w-[220px]"
           >
+            {currentModel === "" && (
+              <option value="" disabled>(select a model)</option>
+            )}
             {availableModels.map((m) => (
               <option key={m.model_id} value={m.model_id}>
+                {cachedModels.includes(m.model_id) ? "\u2713 " : ""}
                 {m.display_name} ({m.size_mb} MB, {(m.mteb_retrieval * 100).toFixed(1)}%)
                 {m.gpu_required ? " [GPU]" : ""}
               </option>
