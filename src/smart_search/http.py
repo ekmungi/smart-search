@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from smart_search.config import SmartSearchConfig, get_config
 from smart_search.config_manager import ConfigManager
 from smart_search.constants import APP_VERSION, DEFAULT_HOST, DEFAULT_HTTP_PORT
-from smart_search.conversion_worker import ConversionWorker
+from smart_search.conversion_worker import ConversionWorker, create_conversion_worker
 from smart_search.data_dir import get_data_dir
 from smart_search.http_routes import create_router
 from smart_search.indexing_task import IndexingTaskManager
@@ -272,8 +272,7 @@ def create_app(
         if _conv_worker is None:
             with _singleton_lock:
                 if _conv_worker is None:
-                    _conv_worker = ConversionWorker()
-                    _conv_worker.start()
+                    _conv_worker = create_conversion_worker()
         return _conv_worker
 
     _registry = None
