@@ -56,11 +56,9 @@ def convert_to_markdown(file_path: str) -> str:
     """
     file_size = Path(file_path).stat().st_size
     if file_size > MAX_FILE_SIZE_BYTES:
-        _logger.warning(
-            "Skipping %s: file size %d MB exceeds 100 MB limit",
-            file_path, file_size // (1024 * 1024),
+        raise ValueError(
+            f"File too large ({file_size // (1024 * 1024)} MB > 100 MB limit): {file_path}"
         )
-        return ""
 
     converter = _get_converter()
     last_error = None
