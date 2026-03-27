@@ -54,5 +54,9 @@
   ${If} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
     RmDir /r "$LOCALAPPDATA\smart-search"
+    ; Delete HuggingFace model cache (ONNX embedding models).
+    ; Only delete known model prefixes to avoid nuking other HF-cached models.
+    RMDir /r "$PROFILE\.cache\huggingface\hub\models--Snowflake*"
+    RMDir /r "$PROFILE\.cache\huggingface\hub\models--nomic*"
   ${EndIf}
 !macroend

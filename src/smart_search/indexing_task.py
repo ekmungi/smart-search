@@ -121,6 +121,7 @@ class IndexingStatus:
     skipped: int = 0
     failed: int = 0
     error: Optional[str] = None
+    current_file: Optional[str] = None
     failed_files: List[Dict[str, str]] = field(default_factory=list)
     processed_files: List[Dict[str, str]] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
@@ -548,8 +549,10 @@ class IndexingTaskManager:
                     if cancel_event.is_set():
                         status.state = "cancelled"
                         return
+                    status.current_file = f.name
                     result = indexer.index_file(str(f))
                     _on_progress(str(f), result)
+                    status.current_file = None
                     # Per-file GC to prevent memory accumulation during
                     # heavy embedding/conversion work.
                     if result.status in ("indexed", "failed"):

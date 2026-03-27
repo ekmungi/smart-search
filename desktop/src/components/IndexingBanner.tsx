@@ -38,6 +38,11 @@ function FolderProgress({ task }: { task: IndexingTask }) {
           <span className="text-accent-amber ml-1">({task.failed} err)</span>
         )}
       </span>
+      {task.current_file && (
+        <span className="text-[11px] text-text-muted truncate max-w-[200px]" title={task.current_file}>
+          {task.current_file}
+        </span>
+      )}
     </div>
   );
 }

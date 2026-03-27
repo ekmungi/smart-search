@@ -218,6 +218,7 @@ class IndexingTaskStatus(BaseModel):
     skipped: int = 0
     failed: int = 0
     error: Optional[str] = None
+    current_file: Optional[str] = None
     failed_files: list[FailedFileInfo] = []
     processed_files: list[ProcessedFileInfo] = []
 

@@ -60,6 +60,7 @@ export interface IndexingTask {
   skipped: number;
   failed: number;
   error: string | null;
+  current_file: string | null;
   processed_files: ProcessedFile[];
 }
 

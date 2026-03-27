@@ -137,11 +137,10 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
       } catch { /* retry */ }
     };
     checkModel();
-    if (modelCached !== true) {
-      const interval = setInterval(checkModel, POLL_MODEL_MS);
-      return () => { cancelled = true; clearInterval(interval); };
-    }
-    return () => { cancelled = true; };
+    // Always poll so ModelDownloadBanner can detect download completion.
+    // Slower interval once cached to reduce unnecessary requests.
+    const interval = setInterval(checkModel, modelCached ? POLL_MODEL_MS * 3 : POLL_MODEL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [health, modelCached, timeoutDismissed]);
 
   const showSkeleton = !health && !error;

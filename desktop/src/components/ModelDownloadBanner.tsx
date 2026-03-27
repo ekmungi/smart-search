@@ -17,10 +17,16 @@ export default function ModelDownloadBanner({ modelStatus }: ModelDownloadBanner
   useEffect(() => {
     if (!modelStatus) return;
     const curr = modelStatus.download_status;
-    // Detect downloading -> cached transition
-    if (prevStatus.current === "downloading" && curr === "cached") {
+    // Detect download completion: either direct "cached" transition or
+    // missed transition (polls jumped past "cached" with progress at 100%).
+    const wasDownloading = prevStatus.current === "downloading";
+    const completed = wasDownloading && (
+      curr === "cached" || (curr !== "downloading" && modelStatus.progress >= 1.0)
+    );
+    if (completed) {
       setShowComplete(true);
       const timer = setTimeout(() => setShowComplete(false), 3000);
+      prevStatus.current = curr;
       return () => clearTimeout(timer);
     }
     prevStatus.current = curr;
