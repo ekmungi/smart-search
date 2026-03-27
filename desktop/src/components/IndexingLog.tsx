@@ -10,6 +10,7 @@ import {
   ChevronDown,
   RotateCcw,
   ExternalLink,
+  FolderOpen,
 } from "lucide-react";
 import {
   fetchFiles,
@@ -190,6 +191,7 @@ export default function IndexingLog() {
                   }
                   onRetry={() => handleRetrySingle(file.source_path)}
                   onOpen={() => invoke("open_file", { path: file.source_path })}
+                  onShowInFolder={() => invoke("show_in_folder", { path: file.source_path })}
                 />
               ))}
             </motion.div>
@@ -207,10 +209,11 @@ interface FileRowProps {
   onToggleExpand: () => void;
   onRetry: () => void;
   onOpen: () => void;
+  onShowInFolder: () => void;
 }
 
-/** Single file row with status icon, name, date, and expandable error + retry. */
-function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen }: FileRowProps) {
+/** Single file row with status icon, name, date, and inline action icons. */
+function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen, onShowInFolder }: FileRowProps) {
   const isFailed = file.status === "failed";
   const hasError = isFailed && file.error;
   const name = fileName(file.source_path);
@@ -218,7 +221,7 @@ function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen }: FileRowPro
   return (
     <motion.div
       variants={slideUp}
-      className="px-3 py-2 rounded bg-bg-surface hover:bg-bg-elevated transition-colors"
+      className="group/row px-3 py-2 rounded bg-bg-surface hover:bg-bg-elevated transition-colors"
     >
       <div
         className={`flex items-start gap-2 ${hasError ? "cursor-pointer" : ""}`}
@@ -248,6 +251,34 @@ function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen }: FileRowPro
         <span className="text-xs text-text-muted shrink-0 mt-0.5">
           {file.indexed_at?.slice(0, 10) ?? ""}
         </span>
+        {/* Inline action icons: visible on hover, always visible for failed rows */}
+        <div
+          className={`flex items-center gap-1 shrink-0 mt-0.5 transition-opacity ${
+            isFailed ? "opacity-100" : "opacity-0 group-hover/row:opacity-100"
+          }`}
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); onRetry(); }}
+            className="p-1 rounded text-text-muted hover:text-accent-blue hover:bg-accent-blue/10 transition-colors"
+            title="Retry indexing"
+          >
+            <RotateCcw size={13} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpen(); }}
+            className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-elevated transition-colors"
+            title="Open file"
+          >
+            <ExternalLink size={13} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onShowInFolder(); }}
+            className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-elevated transition-colors"
+            title="Open file location"
+          >
+            <FolderOpen size={13} />
+          </button>
+        </div>
         {hasError && (
           <ChevronDown
             size={14}
@@ -257,7 +288,7 @@ function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen }: FileRowPro
           />
         )}
       </div>
-      {/* Expanded error detail with per-file retry */}
+      {/* Expanded error detail (error text only, actions are inline now) */}
       <AnimatePresence>
         {expanded && hasError && (
           <motion.div
@@ -270,28 +301,6 @@ function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen }: FileRowPro
             <p className="text-xs text-accent-red mt-2 pl-6 whitespace-pre-wrap break-all">
               {file.error}
             </p>
-            <div className="flex gap-2 mt-2 ml-6">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRetry();
-                }}
-                className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 transition-colors"
-              >
-                <RotateCcw size={12} />
-                Retry
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpen();
-                }}
-                className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-bg-elevated text-text-secondary hover:text-text-primary transition-colors"
-              >
-                <ExternalLink size={12} />
-                Open
-              </button>
-            </div>
           </motion.div>
         )}
       </AnimatePresence>

@@ -68,6 +68,28 @@ fn open_file(path: String) -> Result<(), String> {
     open::that(&path).map_err(|e| format!("Failed to open {}: {}", path, e))
 }
 
+/// Open the file's parent folder and highlight the file in the file manager.
+#[tauri::command]
+fn show_in_folder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        StdCommand::new("explorer")
+            .arg("/select,")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to show {}: {}", path, e))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let parent = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+        open::that(&parent).map_err(|e| format!("Failed to open folder: {}", e))
+    }
+}
+
 /// Check whether smart-search is registered as an MCP server with Claude Code.
 ///
 /// Runs with a 3-second timeout to avoid blocking the Tauri IPC thread.
@@ -904,6 +926,7 @@ pub fn run() {
             get_backend_url,
             hide_search_window,
             open_file,
+            show_in_folder,
             quit_app,
             check_mcp_registered,
             register_mcp,

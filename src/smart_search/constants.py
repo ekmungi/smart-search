@@ -31,4 +31,4 @@ KEYWORD_ONLY_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".jsonl"}
 DEFAULT_MODEL_DOWNLOAD_TIMEOUT = 900  # 15 minutes
 
 # Application metadata
-APP_VERSION = "0.14.1"
+APP_VERSION = "0.14.2"

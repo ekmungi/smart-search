@@ -429,6 +429,7 @@ function FolderStatusText({
           )}
         </div>
         <span className="flex items-center gap-2 mt-0.5">
+          <span>{indexed + failed} total</span>
           {indexed > 0 && (
             <span className="flex items-center gap-1">
               <FileCheck size={11} className="text-accent-green" />
@@ -464,6 +465,7 @@ function FolderStatusText({
     return (
       <p className="text-xs text-text-muted">
         <span className="flex items-center gap-2">
+          <span>{indexed + failed} total</span>
           {indexed > 0 && (
             <span className="flex items-center gap-1">
               <FileCheck size={11} className="text-accent-green" />
