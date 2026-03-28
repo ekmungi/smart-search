@@ -51,8 +51,10 @@
   ; Delete actual app data directory.
   ; Tauri's built-in cleanup targets $LOCALAPPDATA\com.smartsearch.desktop (bundle ID),
   ; but the Python backend stores data at $LOCALAPPDATA\smart-search.
+  ; Respect the user's explicit "delete data" choice regardless of update mode --
+  ; previously $UpdateMode <> 1 blocked deletion during upgrade-triggered uninstalls
+  ; even when the user checked the delete checkbox (B72).
   ${If} $DeleteAppDataCheckboxState = 1
-  ${AndIf} $UpdateMode <> 1
     RmDir /r "$LOCALAPPDATA\smart-search"
     ; Delete HuggingFace model cache (ONNX embedding models).
     ; Only delete known model prefixes to avoid nuking other HF-cached models.
