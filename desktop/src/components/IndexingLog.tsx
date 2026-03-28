@@ -18,7 +18,6 @@ import {
   fetchIndexingStatus,
   retryFailed,
   type IndexedFileInfo,
-  type IndexingTask,
 } from "../lib/api";
 import { POLL_INDEXING_IDLE_MS, POLL_INDEXING_ACTIVE_MS } from "../lib/constants";
 import { staggerContainer, slideUp } from "../lib/animations";
@@ -37,7 +36,7 @@ export default function IndexingLog() {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
-  const [activeTasks, setActiveTasks] = useState<IndexingTask[]>([]);
+  const [currentFile, setCurrentFile] = useState<string | null>(null);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -65,9 +64,11 @@ export default function IndexingLog() {
       try {
         const status = await fetchIndexingStatus();
         if (!cancelled) {
-          const running = status.tasks.filter((t) => t.state === "running");
-          setActiveTasks(running);
-          const delay = running.length > 0 ? POLL_INDEXING_ACTIVE_MS : POLL_INDEXING_IDLE_MS;
+          // Find the first running task with a current_file
+          const active = status.tasks.find((t) => t.state === "running" && t.current_file);
+          setCurrentFile(active?.current_file ?? null);
+          const isActive = status.tasks.some((t) => t.state === "running");
+          const delay = isActive ? POLL_INDEXING_ACTIVE_MS : POLL_INDEXING_IDLE_MS;
           if (intervalId !== null) clearInterval(intervalId);
           if (!cancelled) intervalId = setInterval(checkIndexing, delay);
         }
@@ -150,37 +151,23 @@ export default function IndexingLog() {
         </div>
       </div>
 
-      {/* Currently indexing indicator */}
+      {/* Currently indexing file indicator */}
       <AnimatePresence>
-        {activeTasks.length > 0 && (
+        {currentFile && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.15 }}
-            className="mb-3 space-y-1"
+            className="mb-3"
           >
-            {activeTasks.map((task) => (
-              <div
-                key={task.task_id}
-                className="flex items-center gap-2 px-3 py-2 rounded bg-accent-blue/10 border border-accent-blue/20"
-              >
-                <Loader size={14} className="text-accent-blue animate-spin shrink-0" />
-                <span className="text-xs text-accent-blue font-medium shrink-0">Indexing</span>
-                {task.current_file ? (
-                  <span className="text-xs font-mono text-text-secondary truncate" title={task.current_file}>
-                    {fileName(task.current_file)}
-                  </span>
-                ) : (
-                  <span className="text-xs text-text-muted">
-                    {task.folder.split(/[\\/]/).pop()}
-                  </span>
-                )}
-                <span className="text-xs text-text-muted tabular-nums ml-auto shrink-0">
-                  {task.indexed + task.skipped + task.failed}/{task.total}
-                </span>
-              </div>
-            ))}
+            <div className="flex items-center gap-2 px-3 py-2 rounded bg-accent-blue/10 border border-accent-blue/20">
+              <Loader size={14} className="text-accent-blue animate-spin shrink-0" />
+              <span className="text-xs text-accent-blue font-medium shrink-0">Indexing</span>
+              <span className="text-xs font-mono text-text-secondary truncate" title={currentFile}>
+                {fileName(currentFile)}
+              </span>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
