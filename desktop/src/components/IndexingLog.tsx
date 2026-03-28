@@ -151,29 +151,8 @@ export default function IndexingLog() {
         </div>
       </div>
 
-      {/* Currently indexing file indicator */}
-      <AnimatePresence>
-        {currentFile && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.15 }}
-            className="mb-3"
-          >
-            <div className="flex items-center gap-2 px-3 py-2 rounded bg-accent-blue/10 border border-accent-blue/20">
-              <Loader size={14} className="text-accent-blue animate-spin shrink-0" />
-              <span className="text-xs text-accent-blue font-medium shrink-0">Indexing</span>
-              <span className="text-xs font-mono text-text-secondary truncate" title={currentFile}>
-                {fileName(currentFile)}
-              </span>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <AnimatePresence mode="wait">
-        {displayed.length === 0 ? (
+        {displayed.length === 0 && !currentFile ? (
           <motion.div
             key="empty"
             initial={{ opacity: 0 }}
@@ -216,7 +195,7 @@ export default function IndexingLog() {
           </motion.div>
         ) : (
           <motion.div
-            key={filter}
+            key={`${filter}-${currentFile ? "active" : "idle"}`}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -229,6 +208,24 @@ export default function IndexingLog() {
               initial="hidden"
               animate="visible"
             >
+              {/* Currently indexing file appears as first row with spinner */}
+              {currentFile && filter === "all" && (
+                <motion.div
+                  key="current-indexing"
+                  variants={slideUp}
+                  className="px-3 py-2 rounded bg-bg-surface border border-accent-blue/20"
+                >
+                  <div className="flex items-start gap-2">
+                    <Loader size={16} className="text-accent-blue animate-spin shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-mono truncate" title={currentFile}>
+                        {fileName(currentFile)}
+                      </p>
+                      <p className="text-xs text-accent-blue">indexing...</p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
               {displayed.map((file, idx) => (
                 <FileRow
                   key={file.source_path}
