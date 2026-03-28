@@ -11,13 +11,16 @@ import {
   RotateCcw,
   ExternalLink,
   FolderOpen,
+  Loader,
 } from "lucide-react";
 import {
   fetchFiles,
+  fetchIndexingStatus,
   retryFailed,
   type IndexedFileInfo,
+  type IndexingTask,
 } from "../lib/api";
-import { POLL_INDEXING_IDLE_MS } from "../lib/constants";
+import { POLL_INDEXING_IDLE_MS, POLL_INDEXING_ACTIVE_MS } from "../lib/constants";
 import { staggerContainer, slideUp } from "../lib/animations";
 import Skeleton from "./Skeleton";
 import EmptyState from "./EmptyState";
@@ -34,6 +37,7 @@ export default function IndexingLog() {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
+  const [activeTasks, setActiveTasks] = useState<IndexingTask[]>([]);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -51,6 +55,28 @@ export default function IndexingLog() {
     const id = setInterval(loadFiles, POLL_INDEXING_IDLE_MS);
     return () => clearInterval(id);
   }, [loadFiles]);
+
+  // Poll indexing status for "currently indexing" indicator
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const checkIndexing = async () => {
+      try {
+        const status = await fetchIndexingStatus();
+        if (!cancelled) {
+          const running = status.tasks.filter((t) => t.state === "running");
+          setActiveTasks(running);
+          const delay = running.length > 0 ? POLL_INDEXING_ACTIVE_MS : POLL_INDEXING_IDLE_MS;
+          if (intervalId !== null) clearInterval(intervalId);
+          if (!cancelled) intervalId = setInterval(checkIndexing, delay);
+        }
+      } catch { /* ignore */ }
+    };
+    checkIndexing();
+    intervalId = setInterval(checkIndexing, POLL_INDEXING_ACTIVE_MS);
+    return () => { cancelled = true; if (intervalId !== null) clearInterval(intervalId); };
+  }, []);
 
   const handleRetryAll = async () => {
     setRetrying(true);
@@ -123,6 +149,41 @@ export default function IndexingLog() {
           )}
         </div>
       </div>
+
+      {/* Currently indexing indicator */}
+      <AnimatePresence>
+        {activeTasks.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }}
+            className="mb-3 space-y-1"
+          >
+            {activeTasks.map((task) => (
+              <div
+                key={task.task_id}
+                className="flex items-center gap-2 px-3 py-2 rounded bg-accent-blue/10 border border-accent-blue/20"
+              >
+                <Loader size={14} className="text-accent-blue animate-spin shrink-0" />
+                <span className="text-xs text-accent-blue font-medium shrink-0">Indexing</span>
+                {task.current_file ? (
+                  <span className="text-xs font-mono text-text-secondary truncate" title={task.current_file}>
+                    {fileName(task.current_file)}
+                  </span>
+                ) : (
+                  <span className="text-xs text-text-muted">
+                    {task.folder.split(/[\\/]/).pop()}
+                  </span>
+                )}
+                <span className="text-xs text-text-muted tabular-nums ml-auto shrink-0">
+                  {task.indexed + task.skipped + task.failed}/{task.total}
+                </span>
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence mode="wait">
         {displayed.length === 0 ? (
