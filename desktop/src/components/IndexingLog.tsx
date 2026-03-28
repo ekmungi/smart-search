@@ -18,15 +18,16 @@ import {
   fetchIndexingStatus,
   retryFailed,
   type IndexedFileInfo,
+  type IndexingTask,
 } from "../lib/api";
 import { POLL_INDEXING_IDLE_MS, POLL_INDEXING_ACTIVE_MS } from "../lib/constants";
 import { staggerContainer, slideUp } from "../lib/animations";
 import Skeleton from "./Skeleton";
 import EmptyState from "./EmptyState";
 
-/** Extract filename from a POSIX source_path. */
+/** Extract filename from a source_path (handles both / and \ separators). */
 function fileName(sourcePath: string): string {
-  const parts = sourcePath.split("/");
+  const parts = sourcePath.split(/[\\/]/);
   return parts[parts.length - 1] ?? sourcePath;
 }
 
@@ -36,7 +37,7 @@ export default function IndexingLog() {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
-  const [currentFile, setCurrentFile] = useState<string | null>(null);
+  const [activeTasks, setActiveTasks] = useState<IndexingTask[]>([]);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -64,11 +65,9 @@ export default function IndexingLog() {
       try {
         const status = await fetchIndexingStatus();
         if (!cancelled) {
-          // Find the first running task with a current_file
-          const active = status.tasks.find((t) => t.state === "running" && t.current_file);
-          setCurrentFile(active?.current_file ?? null);
-          const isActive = status.tasks.some((t) => t.state === "running");
-          const delay = isActive ? POLL_INDEXING_ACTIVE_MS : POLL_INDEXING_IDLE_MS;
+          const running = status.tasks.filter((t) => t.state === "running");
+          setActiveTasks(running);
+          const delay = running.length > 0 ? POLL_INDEXING_ACTIVE_MS : POLL_INDEXING_IDLE_MS;
           if (intervalId !== null) clearInterval(intervalId);
           if (!cancelled) intervalId = setInterval(checkIndexing, delay);
         }
@@ -152,7 +151,7 @@ export default function IndexingLog() {
       </div>
 
       <AnimatePresence mode="wait">
-        {displayed.length === 0 && !currentFile ? (
+        {displayed.length === 0 && activeTasks.length === 0 ? (
           <motion.div
             key="empty"
             initial={{ opacity: 0 }}
@@ -195,7 +194,7 @@ export default function IndexingLog() {
           </motion.div>
         ) : (
           <motion.div
-            key={`${filter}-${currentFile ? "active" : "idle"}`}
+            key={`${filter}-${activeTasks.length > 0 ? "active" : "idle"}`}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -208,24 +207,35 @@ export default function IndexingLog() {
               initial="hidden"
               animate="visible"
             >
-              {/* Currently indexing file appears as first row with spinner */}
-              {currentFile && filter === "all" && (
-                <motion.div
-                  key="current-indexing"
-                  variants={slideUp}
-                  className="px-3 py-2 rounded bg-bg-surface border border-accent-blue/20"
-                >
-                  <div className="flex items-start gap-2">
-                    <Loader size={16} className="text-accent-blue animate-spin shrink-0 mt-0.5" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-mono truncate" title={currentFile}>
-                        {fileName(currentFile)}
-                      </p>
-                      <p className="text-xs text-accent-blue">indexing...</p>
+              {/* Active indexing: show the file currently/last being processed */}
+              {activeTasks.length > 0 && filter === "all" && (() => {
+                // Find the best filename to display: current_file first, then last processed file
+                const activeFile = activeTasks.find((t) => t.current_file)?.current_file
+                  ?? activeTasks.flatMap((t) => t.processed_files).pop()?.name
+                  ?? null;
+                const totalDone = activeTasks.reduce((s, t) => s + t.indexed + t.skipped + t.failed, 0);
+                const totalAll = activeTasks.reduce((s, t) => s + t.total, 0);
+                if (!activeFile) return null;
+                return (
+                  <motion.div
+                    key="indexing-active"
+                    variants={slideUp}
+                    className="px-3 py-2 rounded bg-bg-surface"
+                  >
+                    <div className="flex items-start gap-2">
+                      <Loader size={16} className="text-accent-amber animate-spin shrink-0 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-mono truncate" title={activeFile}>
+                          {activeFile}
+                        </p>
+                        <p className="text-xs text-accent-amber">
+                          indexing... ({totalDone}/{totalAll})
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                </motion.div>
-              )}
+                  </motion.div>
+                );
+              })()}
               {displayed.map((file, idx) => (
                 <FileRow
                   key={file.source_path}

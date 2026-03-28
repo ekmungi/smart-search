@@ -552,7 +552,6 @@ class IndexingTaskManager:
                     status.current_file = f.name
                     result = indexer.index_file(str(f))
                     _on_progress(str(f), result)
-                    status.current_file = None
                     # Per-file GC to prevent memory accumulation during
                     # heavy embedding/conversion work.
                     if result.status in ("indexed", "failed"):
