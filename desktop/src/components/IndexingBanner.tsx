@@ -21,7 +21,7 @@ function FolderProgress({ task }: { task: IndexingTask }) {
       <div className="flex-1 bg-bg-elevated rounded-full h-1.5 relative overflow-hidden">
         {/* Blue: indexed+skipped portion */}
         <div
-          className="absolute inset-y-0 left-0 bg-accent-blue rounded-full transition-all duration-300"
+          className="absolute inset-y-0 left-0 bg-gradient-to-r from-accent-blue to-accent-blue/80 rounded-full transition-all duration-300"
           style={{ width: `${pct}%` }}
         />
         {/* Amber overlay: failed portion */}

@@ -289,7 +289,7 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
           {/* Format badges */}
           {stats && stats.formats_indexed.length > 0 && (
             <div className="mt-6 bg-bg-surface rounded-lg p-4">
-              <h2 className="text-sm font-medium text-text-secondary mb-2">
+              <h2 className="text-sm font-medium text-text-secondary mb-3">
                 Indexed Formats
               </h2>
               <div className="flex gap-2">
@@ -308,7 +308,7 @@ export default function Dashboard({ everConnected, onConnected }: DashboardProps
           {/* Server info */}
           {health && (
             <div className="mt-4 bg-bg-surface rounded-lg p-4">
-              <h2 className="text-sm font-medium text-text-secondary mb-2">
+              <h2 className="text-sm font-medium text-text-secondary mb-3">
                 Server
               </h2>
               <div className="flex gap-6 text-sm">

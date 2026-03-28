@@ -62,11 +62,11 @@ export default function StatsCard({
   return (
     <motion.div
       variants={slideUp}
-      className="bg-bg-surface rounded-lg p-4 hover:bg-bg-elevated/50 transition-colors min-w-0 overflow-hidden"
+      className="bg-bg-surface rounded-lg p-4 hover:bg-bg-elevated/50 transition-colors min-w-0 min-h-[5.5rem] overflow-hidden"
     >
       <div className="flex items-center gap-2 mb-2">
         <Icon size={16} className={iconColor} />
-        <span className="text-xs text-text-secondary">{label}</span>
+        <span className="text-sm text-text-secondary">{label}</span>
       </div>
       <div
         className="text-2xl font-semibold font-mono tracking-tight truncate"

@@ -1,6 +1,6 @@
 // Main app layout with custom title bar, icon sidebar, and animated routed content.
 
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,11 +12,22 @@ import IndexingLog from "./components/IndexingLog";
 import Settings from "./components/Settings";
 import { STORAGE_KEY_CLOSE_TO_TRAY } from "./lib/constants";
 
+export type Theme = "dark" | "light";
+
 type View = "dashboard" | "folders" | "log" | "settings";
 
 function App() {
   const [activeView, setActiveView] = useState<View>("dashboard");
   const [everConnected, setEverConnected] = useState(false);
+  const [theme, setTheme] = useState<Theme>(
+    () => (localStorage.getItem("theme") as Theme) ?? "dark",
+  );
+
+  /** Apply data-theme attribute and persist to localStorage. */
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
   const appWindow = getCurrentWindow();
 
@@ -35,7 +46,7 @@ function App() {
       {/* Custom title bar */}
       <div
         data-tauri-drag-region
-        className="flex items-center justify-between h-9 bg-bg-surface border-b border-border select-none shrink-0"
+        className="flex items-center justify-between h-9 bg-bg-surface/80 backdrop-blur-sm border-b border-border select-none shrink-0"
       >
         <span
           data-tauri-drag-region
@@ -79,7 +90,9 @@ function App() {
               )}
               {activeView === "folders" && <FolderManager />}
               {activeView === "log" && <IndexingLog />}
-              {activeView === "settings" && <Settings />}
+              {activeView === "settings" && (
+                <Settings theme={theme} onThemeChange={setTheme} />
+              )}
             </motion.div>
           </AnimatePresence>
         </main>

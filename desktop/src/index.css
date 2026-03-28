@@ -2,12 +2,13 @@
 @import "@fontsource-variable/jetbrains-mono";
 
 @theme {
+  /* Dark theme (default) -- overridden by [data-theme="light"] below */
   --color-bg-primary: #262624;
   --color-bg-surface: #2E2D2B;
   --color-bg-elevated: #383632;
   --color-text-primary: #E8E8E0;
-  --color-text-secondary: #909088;
-  --color-text-muted: #606058;
+  --color-text-secondary: #A0A098;
+  --color-text-muted: #7A7A72;
   --color-accent-blue: #4A90D9;
   --color-accent-green: #3AB56B;
   --color-accent-amber: #D4A017;
@@ -16,6 +17,21 @@
 
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace,
     monospace;
+}
+
+/* Light theme overrides */
+[data-theme="light"] {
+  --color-bg-primary: #F5F4F2;
+  --color-bg-surface: #FFFFFF;
+  --color-bg-elevated: #ECEAE6;
+  --color-text-primary: #1A1A18;
+  --color-text-secondary: #5C5C56;
+  --color-text-muted: #8A8A82;
+  --color-accent-blue: #3B7DD8;
+  --color-accent-green: #2D9656;
+  --color-accent-amber: #B8870E;
+  --color-accent-red: #D42E2E;
+  --color-border: #D8D6D2;
 }
 
 /* Typography tokens */
@@ -37,6 +53,7 @@ body {
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Skeleton shimmer animation */

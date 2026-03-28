@@ -25,13 +25,13 @@ export default function Sidebar({ activeView, onNavigate }: Props) {
           key={id}
           onClick={() => onNavigate(id)}
           title={label}
-          className="relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors text-text-secondary hover:text-text-primary"
+          className="relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors text-text-secondary hover:text-text-primary hover:bg-bg-elevated/50"
         >
           {/* Animated active background pill */}
           {activeView === id && (
             <motion.div
               layoutId="sidebar-active"
-              className="absolute inset-0 bg-bg-elevated rounded-lg"
+              className="absolute inset-0 bg-bg-elevated rounded-lg ring-1 ring-accent-blue/20"
               transition={{ type: "spring", stiffness: 400, damping: 30 }}
             />
           )}

@@ -13,7 +13,7 @@ interface SectionProps {
 /** Section wrapper with optional icon, title, and grouped card styling. */
 export function Section({ title, icon: Icon, children }: SectionProps) {
   return (
-    <div className="mb-6">
+    <div className="mb-8">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3 flex items-center gap-2">
         {Icon && <Icon size={14} />}
         {title}

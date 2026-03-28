@@ -27,7 +27,12 @@ import { SystemSettings } from "./settings/SystemSettings";
 import { EmbeddingSettings, ModelChangeDialog } from "./settings/EmbeddingSettings";
 import { SearchSettings } from "./settings/SearchSettings";
 
-export default function Settings() {
+interface SettingsProps {
+  theme: "dark" | "light";
+  onThemeChange: (theme: "dark" | "light") => void;
+}
+
+export default function Settings({ theme, onThemeChange }: SettingsProps) {
   const [config, setConfig] = useState<SmartSearchConfig>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -276,6 +281,8 @@ export default function Settings() {
         onFontSizeChange={handleFontChange}
         fontMin={FONT_MIN}
         fontMax={FONT_MAX}
+        theme={theme}
+        onThemeChange={onThemeChange}
       />
 
       <SystemSettings

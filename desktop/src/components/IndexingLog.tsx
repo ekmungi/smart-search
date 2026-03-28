@@ -233,7 +233,7 @@ function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen, onShowInFold
           <CheckCircle size={16} className="text-accent-green shrink-0 mt-0.5" />
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-sm truncate" title={file.source_path}>
+          <p className="text-sm font-mono truncate" title={file.source_path}>
             {name}
           </p>
           {!isFailed && (

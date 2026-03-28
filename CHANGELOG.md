@@ -6,6 +6,152 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.15.0] - 2026-03-28
+
+Visual refresh with light/dark theme support and polish. Zero functional changes.
+
+### Added
+- Light/dark theme system with CSS custom property overrides
+- Theme toggle (segmented control) in Appearance settings with Sun/Moon icons
+- Theme persists across app restarts via localStorage
+
+### Changed
+- Dark theme text contrast improved: `text-muted` #606058 -> #7A7A72, `text-secondary` #909088 -> #A0A098
+- Typography hierarchy: StatsCard labels larger, IndexingLog filenames use monospace, FolderManager paths use monospace
+- Spacing polish: tighter folder cards, consistent stats card heights, increased settings section gaps
+- Sidebar active indicator: added subtle blue ring for stronger visual feedback
+- Sidebar hover states: added background highlight on hover
+- Title bar: frosted glass effect with `backdrop-blur-sm`
+- IndexingBanner progress bar: subtle gradient for depth
+- Dashboard section headings: increased bottom margin for breathing room
+- Smooth 200ms CSS transition on theme change
+
+---
+
+## [0.14.2] - 2026-03-28
+
+### Added
+- Inline file actions in IndexingLog: retry, open file, show in folder (hover-revealed icons)
+- Folder total count display in FolderManager status text
+- `show_in_folder` Tauri command for opening file location in OS explorer
+
+---
+
+## [0.14.1] - 2026-03-28
+
+### Fixed
+- B69: NSIS installer now cleans up HuggingFace cache directory on uninstall
+- B70: Per-file progress tracking during indexing (indexed/failed counts from SQLite)
+- B71: ModelDownloadBanner race condition -- poll continues after cache, transition detection fires correctly
+
+---
+
+## [0.14.0] - 2026-03-28
+
+### Changed
+- Replaced subprocess-based ConversionWorker with in-process architecture
+- MarkItDown calls run directly in the indexing thread (no IPC overhead)
+- Added subprocess fallback via `SMART_SEARCH_SUBPROCESS_CONVERTER` env var
+- Retry logic and detailed error reporting in markitdown_parser
+
+---
+
+## [0.13.8] - 2026-03-27
+
+### Changed
+- Model management redesign: model selector with cache checkmarks and auto-download
+- ModelDownloadBanner on Dashboard showing real-time download progress
+- Default to no model on fresh install (user selects preferred model)
+- Download progress tracking via backend polling
+- SHA-based snapshot directories for imported models
+- Windows symlink privilege error handling in HF model download
+
+---
+
+## [0.13.7] - 2026-03-27
+
+### Fixed
+- Enterprise SSL certificate handling for HuggingFace model downloads
+- Quick Search window no longer opens on app startup
+- Installer prompts to close running Smart Search before upgrading
+- NSIS uninstaller deletes actual data directory
+
+---
+
+## [0.13.5] - 2026-03-26
+
+### Added
+- Model readiness gate: blocks vector indexing until embedding model is cached
+- Download timeout wrapper with configurable limit (default 15 min)
+- ModelDownloadTimeoutError with recovery info (HF URL + cache path)
+- Pause/resume indexing controls on Dashboard
+- Model import endpoint: copy local model files to HF cache
+- Auto-retry failed files when embedding model becomes available
+- Timeout dialog with continue-keyword-only option
+
+---
+
+## [0.13.1] - 2026-03-25
+
+### Added
+- Persistent indexing: background task manager with per-folder cancellation
+- Graceful shutdown: stop indexing tasks cleanly on app exit
+- Persistent conversion worker (single subprocess for all binary files)
+
+---
+
+## [0.13.0] - 2026-03-25
+
+### Added
+- GPU acceleration support (CUDA/DirectML execution providers)
+- Backend dropdown with GPU detection chip in Embedding settings
+- Reranking and MMR diversity toggles in Search settings
+- GPU status in model status API and gpu_required flag in model registry
+- GPU provider detection module with automatic fallback chain
+
+---
+
+## [0.12.0] - 2026-03-24
+
+### Added
+- Cross-encoder reranker (TinyBERT-L-2, ~50MB, lazy ONNX with idle unload)
+- Maximum Marginal Relevance (MMR) diversity selection (lambda=0.8)
+- Query preprocessing: stopword removal for FTS5, whitespace normalization for embeddings
+
+---
+
+## [0.11.5] - 2026-03-23
+
+### Added
+- Expanded to 14 supported file formats
+
+---
+
+## [0.11.4] - 2026-03-23
+
+### Changed
+- UI overhaul with motion animations, typography improvements, and visual polish
+
+---
+
+## [0.11.3] - 2026-03-22
+
+### Added
+- Failed file tracking in SQLite (skip on restart until file changes)
+- Mtime backfill for pre-migration indexed rows
+- True-state pre-scan: categorize files as indexed/failed/needs-OCR before indexing
+
+---
+
+## [0.11.1] - 2026-03-22
+
+### Fixed
+- Dashboard stats showing "--" instead of values
+- Search query normalization for better matching
+- Hybrid search RRF threshold calculation
+
+---
+
 ## [0.9.0] - 2026-03-21
 
 Search quality overhaul. Fixes YouTube transcript not appearing in search despite

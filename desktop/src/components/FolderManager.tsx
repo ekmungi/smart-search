@@ -340,12 +340,12 @@ function FolderRow({ folder, task, completedTask, busy, onReindex, onRemove }: F
   return (
     <motion.div
       variants={slideUp}
-      className="bg-bg-surface rounded-lg p-4 flex items-center justify-between hover:-translate-y-px hover:shadow-lg hover:shadow-black/10 transition-all duration-150"
+      className="bg-bg-surface rounded-lg px-4 py-3 flex items-center justify-between hover:-translate-y-px hover:shadow-lg hover:shadow-black/10 transition-all duration-150"
     >
       <div className="flex items-center gap-3 min-w-0">
         <FolderStatusIcon folder={folder} task={task} completedTask={completedTask} />
         <div className="min-w-0">
-          <p className="text-sm truncate" title={folder.path}>
+          <p className="text-sm font-mono truncate" title={folder.path}>
             {truncatePath(folder.path)}
           </p>
           <FolderStatusText folder={folder} task={task} completedTask={completedTask} />
