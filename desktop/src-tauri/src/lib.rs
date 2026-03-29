@@ -8,6 +8,8 @@
 
 use std::process::Command as StdCommand;
 use std::process::Stdio;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::sync::{Arc, Mutex};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -73,9 +75,13 @@ fn open_file(path: String) -> Result<(), String> {
 fn show_in_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        StdCommand::new("explorer")
-            .arg("/select,")
-            .arg(&path)
+        // Convert POSIX slashes to backslashes for Windows explorer.
+        // Use cmd /c to pass the entire command as a raw string -- Rust's
+        // Command escapes arguments in ways explorer.exe doesn't understand.
+        let win_path = path.replace('/', "\\");
+        StdCommand::new("cmd")
+            .args(["/C", &format!("explorer /select,\"{}\"", win_path)])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW: hide cmd flash
             .spawn()
             .map_err(|e| format!("Failed to show {}: {}", path, e))?;
         Ok(())

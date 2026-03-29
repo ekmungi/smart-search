@@ -17,11 +17,13 @@ from smart_search.markitdown_parser import convert_to_markdown, reset_converter
 
 _logger = logging.getLogger(__name__)
 
-# Restart threshold for RSS (megabytes).
-_RSS_RESTART_THRESHOLD_MB = 1024
+# Restart threshold for RSS (megabytes). Lowered from 1024 to 512
+# because image-heavy PDFs can spike memory faster than the check runs.
+_RSS_RESTART_THRESHOLD_MB = 512
 
 # GC interval: run gc.collect() every N conversions.
-_GC_INTERVAL = 5
+# Set to 1 so every binary file conversion gets immediate cleanup.
+_GC_INTERVAL = 1
 
 
 def _get_rss_mb() -> int:
@@ -138,20 +140,25 @@ class ConversionWorker:
 
         text = result_box.get("text", "")
 
-        # Memory management: periodic GC
+        # Memory management: always reset converter after each file (B72).
+        # pdfminer and other C extensions hold internal buffers that
+        # gc.collect() alone cannot free -- only dropping the converter
+        # object releases them. The singleton is cheap to recreate.
+        reset_converter()
+
+        # Periodic GC to reclaim Python-level objects
         self._conversions_since_gc += 1
         if self._conversions_since_gc >= self._gc_interval:
             gc.collect()
             self._conversions_since_gc = 0
 
-        # Memory management: RSS check + converter reset
+        # RSS safety net: force aggressive GC if memory is still high
         rss = _get_rss_mb()
         if rss > self._rss_threshold_mb:
             _logger.warning(
-                "RSS %d MB exceeds %d MB threshold, resetting converter",
+                "RSS %d MB exceeds %d MB threshold after converter reset",
                 rss, self._rss_threshold_mb,
             )
-            reset_converter()
             gc.collect()
             self._converter_reset_count += 1
 

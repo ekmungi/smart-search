@@ -6,6 +6,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.15.1] - 2026-03-29
+
+Memory optimization for image-heavy PDF indexing. Fixes B72: process RSS climbing to 5GB+ when indexing PDFs with embedded images.
+
+### Fixed
+- B72: Strip base64-encoded image data from MarkItDown output before chunking -- prevents megabytes of useless data URIs from entering the embedding/storage pipeline
+- B72: Reset MarkItDown converter after every binary file conversion to release pdfminer C-level buffers that `gc.collect()` cannot free
+- B72: Lowered ConversionWorker RSS threshold from 1024 MB to 512 MB for earlier safety-net detection
+- B72: Reduced GC interval from every 5 conversions to every 1 for immediate cleanup
+
+### Fixed (UI)
+- B73: IndexingLog unified list -- active, indexed, and failed files render through the same FileRow component; active files seamlessly transition to indexed/failed on completion; no duplicate rows
+- B74: "Open file location" button now correctly highlights the file in Explorer (was opening default Documents folder due to `/select,` arg splitting and POSIX path slashes)
+
+### Changed
+- Folder status display: compact format "X indexed, Y failed / Z total" replaces separate labeled items for faster visual scanning
+
+### Added
+- Base64 image regex patterns (`_BASE64_MD_IMAGE_RE`, `_BASE64_HTML_IMAGE_RE`) in markitdown_parser for stripping Markdown and HTML data URIs
+- Post-strip emptiness check: files containing only base64 images (no text) are correctly reported as "no text" rather than indexed with placeholder-only content
+- 6 new tests for base64 stripping: Markdown images, HTML images, multiple images, passthrough of normal text, image-only files
+
+---
+
 ## [0.15.0] - 2026-03-28
 
 Visual refresh with light/dark theme support and polish. Zero functional changes.

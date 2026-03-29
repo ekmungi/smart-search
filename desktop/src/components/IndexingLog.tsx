@@ -100,9 +100,30 @@ export default function IndexingLog() {
     }
   };
 
+  // Build synthetic "indexing" entries from active tasks, using the same
+  // IndexedFileInfo shape so FileRow can render them identically.
+  const activeEntries: IndexedFileInfo[] = activeTasks
+    .map((t) => {
+      const name = t.current_file ?? t.processed_files[t.processed_files.length - 1]?.name ?? null;
+      if (!name) return null;
+      return {
+        source_path: `${t.folder}/${name}`,
+        chunk_count: 0,
+        indexed_at: "",
+        status: "indexing",
+        error: null as string | null,
+      };
+    })
+    .filter((e): e is IndexedFileInfo => e !== null);
+  const activeFileNames = new Set(activeEntries.map((e) => fileName(e.source_path)));
+
+  // Unified list: active files at top, then completed files (deduped).
   const displayed =
     filter === "all"
-      ? files
+      ? [
+          ...activeEntries,
+          ...files.filter((f) => !activeFileNames.has(fileName(f.source_path))),
+        ]
       : files.filter((f) => f.status === "failed");
 
   const failedCount = files.filter((f) => f.status === "failed").length;
@@ -151,7 +172,7 @@ export default function IndexingLog() {
       </div>
 
       <AnimatePresence mode="wait">
-        {displayed.length === 0 && activeTasks.length === 0 ? (
+        {displayed.length === 0 ? (
           <motion.div
             key="empty"
             initial={{ opacity: 0 }}
@@ -207,35 +228,6 @@ export default function IndexingLog() {
               initial="hidden"
               animate="visible"
             >
-              {/* Active indexing: show the file currently/last being processed */}
-              {activeTasks.length > 0 && filter === "all" && (() => {
-                // Find the best filename to display: current_file first, then last processed file
-                const activeFile = activeTasks.find((t) => t.current_file)?.current_file
-                  ?? activeTasks.flatMap((t) => t.processed_files).pop()?.name
-                  ?? null;
-                const totalDone = activeTasks.reduce((s, t) => s + t.indexed + t.skipped + t.failed, 0);
-                const totalAll = activeTasks.reduce((s, t) => s + t.total, 0);
-                if (!activeFile) return null;
-                return (
-                  <motion.div
-                    key="indexing-active"
-                    variants={slideUp}
-                    className="px-3 py-2 rounded bg-bg-surface"
-                  >
-                    <div className="flex items-start gap-2">
-                      <Loader size={16} className="text-accent-amber animate-spin shrink-0 mt-0.5" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-mono truncate" title={activeFile}>
-                          {activeFile}
-                        </p>
-                        <p className="text-xs text-accent-amber">
-                          indexing... ({totalDone}/{totalAll})
-                        </p>
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })()}
               {displayed.map((file, idx) => (
                 <FileRow
                   key={file.source_path}
@@ -270,6 +262,7 @@ interface FileRowProps {
 /** Single file row with status icon, name, date, and inline action icons. */
 function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen, onShowInFolder }: FileRowProps) {
   const isFailed = file.status === "failed";
+  const isIndexing = file.status === "indexing";
   const hasError = isFailed && file.error;
   const name = fileName(file.source_path);
 
@@ -282,7 +275,9 @@ function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen, onShowInFold
         className={`flex items-start gap-2 ${hasError ? "cursor-pointer" : ""}`}
         onClick={hasError ? onToggleExpand : undefined}
       >
-        {isFailed ? (
+        {isIndexing ? (
+          <Loader size={16} className="text-accent-amber animate-spin shrink-0 mt-0.5" />
+        ) : isFailed ? (
           <XCircle size={16} className="text-accent-red shrink-0 mt-0.5" />
         ) : (
           <CheckCircle size={16} className="text-accent-green shrink-0 mt-0.5" />
@@ -291,7 +286,10 @@ function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen, onShowInFold
           <p className="text-sm font-mono truncate" title={file.source_path}>
             {name}
           </p>
-          {!isFailed && (
+          {isIndexing && (
+            <p className="text-xs text-accent-amber">indexing...</p>
+          )}
+          {!isIndexing && !isFailed && (
             <p className="text-xs text-text-muted">{file.chunk_count} chunks</p>
           )}
           {isFailed && file.error && !expanded && (
@@ -303,9 +301,11 @@ function FileRow({ file, expanded, onToggleExpand, onRetry, onOpen, onShowInFold
             </p>
           )}
         </div>
-        <span className="text-xs text-text-muted shrink-0 mt-0.5">
-          {file.indexed_at?.slice(0, 10) ?? ""}
-        </span>
+        {!isIndexing && (
+          <span className="text-xs text-text-muted shrink-0 mt-0.5">
+            {file.indexed_at?.slice(0, 10) ?? ""}
+          </span>
+        )}
         {/* Inline action icons: visible on hover, always visible for failed rows */}
         <div
           className={`flex items-center gap-1 shrink-0 mt-0.5 transition-opacity ${

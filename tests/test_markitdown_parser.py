@@ -124,3 +124,81 @@ def test_reset_converter_clears_singleton():
     mod._converter = "something"
     reset_converter()
     assert mod._converter is None
+
+
+class TestBase64ImageStripping:
+    """Tests for base64 image stripping in convert_to_markdown (B72)."""
+
+    @patch("smart_search.markitdown_parser.Path")
+    @patch("smart_search.markitdown_parser._converter")
+    def test_strips_markdown_base64_images(self, mock_converter, mock_path):
+        """Base64 Markdown images are replaced with [image] placeholder."""
+        mock_path.return_value.stat.return_value.st_size = 100
+        text_with_b64 = (
+            "# Title\n"
+            "Some text before.\n"
+            "![diagram](data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==)\n"
+            "Some text after."
+        )
+        mock_converter.convert.return_value = MagicMock(text_content=text_with_b64)
+        result = convert_to_markdown("/fake/doc.pdf")
+        assert "iVBORw0KGgo" not in result
+        assert "[image]" in result
+        assert "Some text before." in result
+        assert "Some text after." in result
+
+    @patch("smart_search.markitdown_parser.Path")
+    @patch("smart_search.markitdown_parser._converter")
+    def test_strips_html_base64_images(self, mock_converter, mock_path):
+        """Base64 HTML img tags are replaced with [image] placeholder."""
+        mock_path.return_value.stat.return_value.st_size = 100
+        text_with_html = (
+            "# Title\n"
+            '<img src="data:image/jpeg;base64,/9j/4AAQSkZJRg==" />\n'
+            "Real content here."
+        )
+        mock_converter.convert.return_value = MagicMock(text_content=text_with_html)
+        result = convert_to_markdown("/fake/doc.pdf")
+        assert "/9j/4AAQ" not in result
+        assert "[image]" in result
+        assert "Real content here." in result
+
+    @patch("smart_search.markitdown_parser.Path")
+    @patch("smart_search.markitdown_parser._converter")
+    def test_strips_multiple_base64_images(self, mock_converter, mock_path):
+        """Multiple base64 images are all stripped."""
+        mock_path.return_value.stat.return_value.st_size = 100
+        text = (
+            "![a](data:image/png;base64,AAAA)\n"
+            "Text between.\n"
+            "![b](data:image/gif;base64,BBBB)\n"
+            '<img src="data:image/png;base64,CCCC">\n'
+            "End."
+        )
+        mock_converter.convert.return_value = MagicMock(text_content=text)
+        result = convert_to_markdown("/fake/doc.pdf")
+        assert result.count("[image]") == 3
+        assert "AAAA" not in result
+        assert "BBBB" not in result
+        assert "CCCC" not in result
+        assert "Text between." in result
+
+    @patch("smart_search.markitdown_parser.Path")
+    @patch("smart_search.markitdown_parser._converter")
+    def test_preserves_text_without_base64(self, mock_converter, mock_path):
+        """Text without base64 images passes through unchanged."""
+        mock_path.return_value.stat.return_value.st_size = 100
+        plain_text = "# Title\n\nJust normal text with ![alt](https://example.com/img.png)"
+        mock_converter.convert.return_value = MagicMock(text_content=plain_text)
+        result = convert_to_markdown("/fake/doc.pdf")
+        assert result == plain_text
+
+    @patch("smart_search.markitdown_parser.Path")
+    @patch("smart_search.markitdown_parser._converter")
+    def test_only_base64_images_raises_value_error(self, mock_converter, mock_path):
+        """File with only base64 images and no text raises ValueError."""
+        mock_path.return_value.stat.return_value.st_size = 100
+        only_images = "![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==)"
+        mock_converter.convert.return_value = MagicMock(text_content=only_images)
+        with pytest.raises(ValueError, match="No text after stripping"):
+            convert_to_markdown("/fake/doc.pdf")

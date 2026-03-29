@@ -4,6 +4,7 @@
 detailed error logging, and lazy singleton initialization."""
 
 import logging
+import re
 import time
 import traceback
 from pathlib import Path
@@ -15,6 +16,13 @@ _logger = logging.getLogger(__name__)
 
 # Files larger than this are skipped to avoid excessive memory usage.
 MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+
+# Matches Markdown images with base64 data URIs: ![alt](data:image/png;base64,...)
+# Base64 alphabet is [A-Za-z0-9+/=] so ')' never appears in the payload.
+_BASE64_MD_IMAGE_RE = re.compile(r'!\[[^\]]*\]\(data:image/[^)]+\)')
+
+# Matches HTML img tags with base64 data URIs: <img src="data:image/...">
+_BASE64_HTML_IMAGE_RE = re.compile(r'<img[^>]*src="data:image/[^"]*"[^>]*/?\s*>')
 
 # Retry config for file access errors (antivirus locks, sharing violations).
 _MAX_RETRIES = 3
@@ -69,9 +77,31 @@ def convert_to_markdown(file_path: str) -> str:
             # Extract text before releasing result to free internal buffers.
             text_content = result.text_content
             del result
+
             if not text_content or not text_content.strip():
                 raise ValueError(
                     f"MarkItDown returned empty output for {file_path}"
+                )
+
+            # Strip base64-encoded images from output (B72).
+            # MarkItDown embeds PDF images as data URIs which can be
+            # megabytes each -- useless for text search, massive RAM cost.
+            raw_len = len(text_content)
+            text_content = _BASE64_MD_IMAGE_RE.sub("[image]", text_content)
+            text_content = _BASE64_HTML_IMAGE_RE.sub("[image]", text_content)
+            stripped_len = raw_len - len(text_content)
+            if stripped_len > 0:
+                _logger.info(
+                    "Stripped %d KB of base64 image data from %s",
+                    stripped_len // 1024, file_path,
+                )
+
+            # Check if any real text remains beyond [image] placeholders.
+            # A document with only images has nothing useful for text search.
+            real_text = text_content.replace("[image]", "").strip()
+            if not real_text:
+                raise ValueError(
+                    f"No text after stripping base64 images from {file_path}"
                 )
             return text_content
         except PermissionError as e:
