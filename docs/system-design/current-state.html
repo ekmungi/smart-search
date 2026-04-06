@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Current State - Smart-search &amp; Jeeves</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav>
+  <div class="nav-inner">
+    <span class="brand">KB System Design</span>
+    <a href="index.html">Overview</a>
+    <a href="current-state.html" class="active">Current State</a>
+    <a href="vault-structure.html">Vault Structure</a>
+    <a href="workflow.html">Workflow</a>
+    <a href="smart-search-vs-qmd.html">Smart-search vs QMD</a>
+    <a href="skills.html">Jeeves Skills</a>
+  </div>
+</nav>
+
+<div class="container">
+  <h1>Current State of the System</h1>
+  <p class="subtitle">Where smart-search (v0.15.1) and Jeeves (v1.11.1) stand today, and what's missing for the knowledge base vision.</p>
+
+  <!-- SMART-SEARCH STATUS -->
+  <h2>Smart-search &mdash; v0.15.1 <span class="badge badge-green">Production Ready</span></h2>
+
+  <div class="highlight-box green">
+    <p><strong>What it is:</strong> A local-first, offline semantic search engine that indexes documents in your Obsidian vault and provides hybrid search (keyword + vector + reranking). It runs as an HTTP server on your machine with multiple client interfaces: MCP server for Claude Code, REST API, CLI, and a Tauri desktop app.</p>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="color:var(--green);margin-top:0;">What's Working Well</h3>
+      <table>
+        <tr><td><strong>File Format Support</strong></td><td>14 formats via MarkItDown: PDF, DOCX, XLSX, PPTX, EPUB, CSV, JSON, HTML, MD, TXT, MSG, IPYNB, and more. Converts everything to Markdown before indexing.</td></tr>
+        <tr><td><strong>Hybrid Search</strong></td><td>BM25 full-text search + vector semantic search, combined via Reciprocal Rank Fusion (RRF, k=60). Cross-encoder reranking (TinyBERT) on top-20 results. Maximum Marginal Relevance (MMR) for diversity.</td></tr>
+        <tr><td><strong>MCP Integration</strong></td><td>11 MCP tools available to Claude Code/Jeeves: <code>knowledge_search</code>, <code>knowledge_ingest</code>, <code>find_related</code>, <code>read_note</code>, <code>knowledge_stats</code>, folder management, temp indexes.</td></tr>
+        <tr><td><strong>File Watching</strong></td><td>Watchdog-based automatic detection of new/changed files. Debounced re-indexing with per-folder cancellation.</td></tr>
+        <tr><td><strong>Desktop App</strong></td><td>Tauri v2 desktop app with system tray, Ctrl+Space quick search, folder management UI, indexing log.</td></tr>
+        <tr><td><strong>Performance</strong></td><td>Vector search &lt;50ms, BM25 &lt;30ms, reranking 30-60ms. Idle RAM &lt;200MB. ONNX embeddings with GPU auto-detection.</td></tr>
+        <tr><td><strong>Test Coverage</strong></td><td>425+ pytest tests with slow test markers. Comprehensive coverage of indexing, search, chunking, and API.</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3 style="color:var(--yellow);margin-top:0;">Current Limitations</h3>
+      <table>
+        <tr><td><strong>No Knowledge Compilation</strong></td><td>Smart-search indexes raw documents but does not synthesize, cross-link, or build entity pages. It's a search engine, not a knowledge manager. <span class="badge badge-red">Key Gap</span></td></tr>
+        <tr><td><strong>No Query Expansion</strong></td><td>Unlike QMD, smart-search does not use LLM-powered query expansion to improve search recall. Searches only the literal query (after normalization).</td></tr>
+        <tr><td><strong>Indexes Raw Files Directly</strong></td><td>Currently embeds chunks from converted binary files. In the new architecture, it should only need to index MD files (companion MDs + knowledge pages).</td></tr>
+        <tr><td><strong>No Context System</strong></td><td>Unlike QMD's collection context, smart-search doesn't attach metadata about what a folder represents. PARA context is lost during search.</td></tr>
+        <tr><td><strong>No OCR</strong></td><td>Image-based PDFs and scanned documents can't be indexed yet. Flagged in SQLite as <code>needs_ocr</code> for future work.</td></tr>
+        <tr><td><strong>Maintenance Burden</strong></td><td>You (a scientist, not a developer) maintain a complex Python codebase with FastAPI, LanceDB, ONNX, Tauri, Watchdog, and 425+ tests. This is significant overhead.</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h3>Smart-search Architecture (Current)</h3>
+  <div class="tree">
+<span class="comment"># How smart-search currently processes files:</span>
+
+Raw File (e.g., report.pdf)
+  &darr;
+<span class="folder">MarkItDown Conversion</span> &mdash; Converts PDF/DOCX/PPTX/XLSX to Markdown text
+  &darr;
+<span class="folder">Markdown Chunker</span> &mdash; Splits on heading boundaries (# / ## / ###), ~200 words per chunk
+  &darr;
+<span class="folder">ONNX Embedder</span> &mdash; Snowflake Arctic Embed M v2.0, 256-dim Matryoshka vectors
+  &darr;
+<span class="folder">LanceDB</span> (vector storage) + <span class="folder">SQLite FTS5</span> (keyword index)
+  &darr;
+<span class="comment"># At query time:</span>
+Query &rarr; Vector Search + BM25 &rarr; RRF Fusion &rarr; Cross-encoder Rerank &rarr; MMR Diversity &rarr; Results
+  </div>
+
+  <div class="highlight-box yellow" style="margin-top:1.5rem;">
+    <p><strong>What changes in the new architecture:</strong> Smart-search's MarkItDown conversion capability moves to the compilation layer (Jeeves skill). Smart-search itself only indexes pre-processed MD files. This dramatically simplifies its role and reduces the maintenance surface. Alternatively, QMD could replace it entirely (see <a href="smart-search-vs-qmd.html" style="color:var(--yellow);">comparison</a>).</p>
+  </div>
+
+  <!-- JEEVES STATUS -->
+  <h2>Jeeves &mdash; v1.11.1 <span class="badge badge-green">Production Ready</span></h2>
+
+  <div class="highlight-box green">
+    <p><strong>What it is:</strong> A Claude Code plugin providing 8 specialized AI agents and 22 domain skills for a Global AI Product Manager working in healthcare/medical devices. Jeeves is the "brain" that orchestrates research, analysis, and document creation. Smart-search is one of its tools for finding information in the vault.</p>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="color:var(--green);margin-top:0;">What's Working Well</h3>
+      <table>
+        <tr><td><strong>8 Specialized Agents</strong></td><td>regulatory-sme, clinical-sme, research-analyst, technical-researcher, partnership-evaluator, user-researcher, product-manager, strategist. Each with deep domain methodology.</td></tr>
+        <tr><td><strong>22 Domain Skills</strong></td><td>meeting-prep, partnership-evaluation, market-research, technical-research, daily-briefing, project-docs, prioritization, product-requirements, roadmap-planning, session-notes, and more.</td></tr>
+        <tr><td><strong>SME Trio Pattern</strong></td><td>Partnership evaluations spawn 3 parallel subagents (regulatory + clinical + product-tech) that synthesize into a scored recommendation. Powerful orchestration pattern.</td></tr>
+        <tr><td><strong>Memory System</strong></td><td>Cross-session persistent memory: preferences.md, learnings.md (curated), learnings-staging.md (pending). Domain agents write findings before returning.</td></tr>
+        <tr><td><strong>Smart-search Integration</strong></td><td>Vault-first research: meeting prep, daily briefing, and other skills check Obsidian vault via smart-search MCP before falling back to web search.</td></tr>
+        <tr><td><strong>54 Structural Tests</strong></td><td>Pre-commit validation of manifest, agents, skills, persona, rules, and cross-references. Prevents silent drift.</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3 style="color:var(--yellow);margin-top:0;">Current Limitations</h3>
+      <table>
+        <tr><td><strong>No Wiki/Compilation Skills</strong></td><td>Jeeves has no skills for generating companion MDs, extracting entities, building cross-linked knowledge pages, or maintaining an index. <span class="badge badge-red">Key Gap</span></td></tr>
+        <tr><td><strong>No Vault Structure Awareness</strong></td><td>Jeeves doesn't understand your PARA structure. It can search files but doesn't know "this folder is a Project" vs "this folder is Research." <span class="badge badge-red">Key Gap</span></td></tr>
+        <tr><td><strong>No File Coverage Audit</strong></td><td>No way to know which raw files have associated notes and which are "orphaned" (no knowledge captured from them). <span class="badge badge-red">Key Gap</span></td></tr>
+        <tr><td><strong>0 Triggering Tests</strong></td><td>No automated tests for whether the right agent/skill gets activated for a given query. Structural tests only validate file formats.</td></tr>
+        <tr><td><strong>0 Behavioral Tests</strong></td><td>Evaluation framework designed but not executed. No baselines for output quality or token efficiency.</td></tr>
+        <tr><td><strong>Orphan Skills</strong></td><td>5 skills (clinical-expertise, obsidian-knowledge, regulatory-intelligence, executive-communication, curate-memory) have no command entry point, rely on implicit triggering.</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h3>Jeeves Skill Map (Current)</h3>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>Category</th><th>Skill</th><th>Status</th><th>Uses Smart-search?</th><th>Needs Wiki Layer?</th></tr>
+      </thead>
+      <tbody>
+        <tr><td rowspan="3">Research</td><td>market-research</td><td><span class="badge badge-green">Working</span></td><td>Yes (vault-first)</td><td>Would benefit from entity pages for competitors, market data</td></tr>
+        <tr><td>technical-research</td><td><span class="badge badge-green">Working</span></td><td>Yes</td><td>Would benefit from concept pages for technology areas</td></tr>
+        <tr><td>smart-search</td><td><span class="badge badge-green">Working</span></td><td>Direct proxy</td><td>Gateway to search layer</td></tr>
+        <tr><td rowspan="3">Analysis</td><td>partnership-evaluation</td><td><span class="badge badge-green">Working</span></td><td>Via agents</td><td>Entity pages for partners, regulations would accelerate analysis</td></tr>
+        <tr><td>clinical-expertise</td><td><span class="badge badge-yellow">Orphan</span></td><td>Via agent</td><td>Concept pages for evidence frameworks</td></tr>
+        <tr><td>regulatory-intelligence</td><td><span class="badge badge-yellow">Orphan</span></td><td>Via agent</td><td>Entity pages for regulatory bodies, pathways</td></tr>
+        <tr><td rowspan="4">Planning</td><td>project-docs</td><td><span class="badge badge-green">Working</span></td><td>No</td><td>Could link to project knowledge pages</td></tr>
+        <tr><td>product-requirements</td><td><span class="badge badge-green">Working</span></td><td>No</td><td>Could pull requirements from entity pages</td></tr>
+        <tr><td>roadmap-planning</td><td><span class="badge badge-green">Working</span></td><td>No</td><td>Could reference milestone entities</td></tr>
+        <tr><td>prioritization</td><td><span class="badge badge-green">Working</span></td><td>No</td><td>Could use knowledge graph for impact assessment</td></tr>
+        <tr><td rowspan="3">Daily Ops</td><td>meeting-prep</td><td><span class="badge badge-green">Working</span></td><td>Yes (vault-first)</td><td><strong>High value:</strong> entity pages for attendees, projects, topics</td></tr>
+        <tr><td>daily-briefing</td><td><span class="badge badge-green">Working</span></td><td>Yes (vault-first)</td><td><strong>High value:</strong> knowledge graph surfaces connections</td></tr>
+        <tr><td>session-notes</td><td><span class="badge badge-green">Working</span></td><td>No</td><td>Should trigger wiki-ingest after writing notes</td></tr>
+        <tr style="background:var(--purple-bg);">
+          <td rowspan="5"><strong>NEW (Needed)</strong></td>
+          <td>wiki-crawl</td><td><span class="badge badge-red">Missing</span></td><td>No</td><td>Audit: which files have notes, which don't</td></tr>
+        <tr style="background:var(--purple-bg);"><td>wiki-compile</td><td><span class="badge badge-red">Missing</span></td><td>Uses MarkItDown</td><td>Auto-generate companion MDs for uncovered files</td></tr>
+        <tr style="background:var(--purple-bg);"><td>wiki-ingest</td><td><span class="badge badge-red">Missing</span></td><td>No</td><td>Extract entities/concepts, update knowledge graph</td></tr>
+        <tr style="background:var(--purple-bg);"><td>wiki-query</td><td><span class="badge badge-red">Missing</span></td><td>Yes</td><td>Ask questions against the knowledge graph</td></tr>
+        <tr style="background:var(--purple-bg);"><td>wiki-lint</td><td><span class="badge badge-red">Missing</span></td><td>No</td><td>Health checks: orphans, stale, contradictions</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- HOW THEY CONNECT TODAY -->
+  <h2>How They Connect Today</h2>
+
+  <div class="tree">
+<span class="comment"># Current integration (simplified):</span>
+
+You ask Claude Code a question (e.g., "Prepare me for the FDA meeting tomorrow")
+  &darr;
+<span class="folder">Jeeves</span> routes to <span class="folder">meeting-prep</span> skill
+  &darr;
+meeting-prep triggers "vault-first research":
+  &darr;
+  <span class="folder">Tier 1:</span> Calls smart-search MCP &rarr; <code>knowledge_search("FDA meeting attendees")</code>
+    &darr;
+    smart-search searches its index of raw documents (PDF chunks, DOCX chunks, etc.)
+    &darr;
+    Returns: matching chunks with file paths and relevance scores
+  &darr;
+  <span class="folder">Tier 2 (fallback):</span> Grep/Glob across vault if smart-search unavailable
+  &darr;
+Jeeves synthesizes results into meeting prep brief
+
+<span class="comment"># The problem: smart-search returns raw document chunks, not synthesized knowledge.</span>
+<span class="comment"># There are no entity pages for attendees, no concept pages for FDA pathways.</span>
+<span class="comment"># Every question requires re-synthesizing from raw sources every time.</span>
+  </div>
+
+  <h2>What Changes with the Knowledge Base System</h2>
+
+  <div class="tree">
+<span class="comment"># Future integration (with wiki layer):</span>
+
+You ask Claude Code: "Prepare me for the FDA meeting tomorrow"
+  &darr;
+<span class="folder">Jeeves</span> routes to <span class="folder">meeting-prep</span> skill
+  &darr;
+meeting-prep triggers "wiki-first research":
+  &darr;
+  <span class="knowledge">Tier 0:</span> Check _knowledge/ entity pages:
+    &rarr; <span class="knowledge">_knowledge/entities/fda-510k.md</span> &mdash; pre-synthesized regulatory pathway knowledge
+    &rarr; <span class="knowledge">_knowledge/entities/dr-smith.md</span> &mdash; attendee background from past meetings
+    &rarr; <span class="knowledge">_knowledge/entities/product-cams.md</span> &mdash; everything we know about the product
+    <span class="comment"># These pages already contain cross-referenced, synthesized knowledge!</span>
+  &darr;
+  <span class="folder">Tier 1:</span> Semantic search via smart-search/QMD across all MD notes
+    &rarr; Searches <span class="wiki">_wiki/</span> companion MDs + <span class="knowledge">_knowledge/</span> pages + your notes
+    &rarr; Finds specific meeting transcripts, regulatory documents, clinical evidence
+  &darr;
+  <span class="folder">Tier 2 (fallback):</span> Grep/Glob
+  &darr;
+Jeeves synthesizes a <strong>much richer</strong> meeting prep brief because:
+  - Entity pages provide pre-synthesized context (no re-reading raw documents)
+  - Cross-links surface connections you might have missed
+  - Source attribution traces back to specific documents
+
+<span class="comment"># The knowledge graph means answers are faster, richer, and more connected.</span>
+  </div>
+
+</div>
+</body>
+</html>

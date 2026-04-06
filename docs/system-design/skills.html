@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jeeves Skills - New &amp; Updated</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav>
+  <div class="nav-inner">
+    <span class="brand">KB System Design</span>
+    <a href="index.html">Overview</a>
+    <a href="current-state.html">Current State</a>
+    <a href="vault-structure.html">Vault Structure</a>
+    <a href="workflow.html">Workflow</a>
+    <a href="smart-search-vs-qmd.html">Smart-search vs QMD</a>
+    <a href="skills.html" class="active">Jeeves Skills</a>
+  </div>
+</nav>
+
+<div class="container">
+  <h1>Jeeves Skills for the Knowledge Base</h1>
+  <p class="subtitle">Five new skills form the compilation layer. Three existing skills get updates. Together they implement the full Karpathy LLM Wiki pattern on your PARA vault.</p>
+
+  <h2>How the Skills Relate to Each Other</h2>
+
+  <div class="tree" style="font-size:0.85rem; line-height:2;">
+<span class="comment"># The compilation pipeline: skills trigger each other in sequence</span>
+
+<span style="color:var(--orange);font-weight:700;">wiki-crawl</span> &mdash; "What files need attention?"
+  &boxvr;&boxh;&boxh; Scans vault for uncovered raw files (no user note, no companion MD)
+  &boxvr;&boxh;&boxh; Identifies stale companions (source file changed since last compile)
+  &boxvr;&boxh;&boxh; Reports coverage statistics
+  &boxur;&boxh;&boxh; Triggers &darr; for uncovered files
+          &boxv;
+<span style="color:var(--green);font-weight:700;">wiki-compile</span> &mdash; "Generate companion MDs for uncovered files"
+  &boxvr;&boxh;&boxh; Converts raw file to text (MarkItDown for binary formats)
+  &boxvr;&boxh;&boxh; LLM generates structured summary with frontmatter
+  &boxvr;&boxh;&boxh; Writes companion MD to _wiki/ subfolder
+  &boxur;&boxh;&boxh; Triggers &darr; for the new companion
+          &boxv;
+<span style="color:var(--purple);font-weight:700;">wiki-ingest</span> &mdash; "Extract entities and concepts, build knowledge graph"
+  &boxvr;&boxh;&boxh; Reads any source note (user-authored OR auto-generated)
+  &boxvr;&boxh;&boxh; Extracts entities (products, people, regulations, companies, studies)
+  &boxvr;&boxh;&boxh; Extracts concepts (regulatory pathways, clinical evidence, market dynamics)
+  &boxvr;&boxh;&boxh; Creates or updates pages in _knowledge/entities/ and _knowledge/concepts/
+  &boxvr;&boxh;&boxh; Updates _knowledge/index.md and log.md
+  &boxur;&boxh;&boxh; Cross-references are bidirectional (source &harr; entity page)
+
+<span class="comment"># Query and maintenance: used on-demand</span>
+
+<span style="color:var(--accent);font-weight:700;">wiki-query</span> &mdash; "Ask questions against the knowledge graph"
+  &boxvr;&boxh;&boxh; Tier 0: Read _knowledge/ entity and concept pages directly
+  &boxvr;&boxh;&boxh; Tier 1: Semantic search via smart-search/QMD across all MDs
+  &boxvr;&boxh;&boxh; Tier 2: Grep/Glob fallback
+  &boxur;&boxh;&boxh; Synthesize answer with source attribution
+
+<span style="color:var(--yellow);font-weight:700;">wiki-lint</span> &mdash; "Health check the knowledge base"
+  &boxvr;&boxh;&boxh; Orphaned companions, stale content, uncovered files
+  &boxvr;&boxh;&boxh; Missing cross-references, index completeness
+  &boxvr;&boxh;&boxh; Contradiction detection across sources
+  &boxur;&boxh;&boxh; Produces actionable report
+  </div>
+
+  <!-- SKILL 1: wiki-crawl -->
+  <h2>New Skill: <code>wiki-crawl</code></h2>
+
+  <div class="grid-2">
+    <div class="card" style="border-color:var(--orange);">
+      <h3 style="color:var(--orange);margin-top:0;">Purpose &amp; Trigger</h3>
+      <p><strong>What it does:</strong> Walks your entire vault (Projects/, Areas/, Resources/ &mdash; not Archives) and produces a complete inventory of all raw files and their coverage status. For each non-Markdown file, it determines whether you've written a note for it, whether an auto-generated companion exists, or whether it's completely uncovered.</p>
+      <p><strong>When to use:</strong></p>
+      <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
+        <li>First time: Run on your entire vault to understand current coverage</li>
+        <li>Periodically: Run weekly or after adding many files</li>
+        <li>Automatically: File watcher can trigger for individual new files</li>
+      </ul>
+      <p><strong>Invocation:</strong> <code>/jeeves:wiki-crawl</code> or <code>/jeeves:wiki-crawl ~/vault/Resources/Literature</code></p>
+    </div>
+    <div class="card" style="border-color:var(--orange);">
+      <h3 style="color:var(--orange);margin-top:0;">How It Works (Detailed)</h3>
+      <p><strong>Step 1: Walk the vault.</strong> Recursively scan all folders under Projects/, Areas/, Resources/. Skip folders starting with <code>_</code> (like _wiki/, _knowledge/) and skip Archives/ entirely. Collect all non-MD files (PDF, DOCX, PPTX, XLSX, PNG, JPEG, etc.).</p>
+      <p><strong>Step 2: For each raw file, check coverage.</strong> Look for an associated Markdown note by checking:</p>
+      <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
+        <li>Wiki-links: Any MD in the same folder or parent folder contains <code>[[filename]]</code></li>
+        <li>Markdown links: <code>[text](./filename)</code> or <code>[text](filename)</code></li>
+        <li>Frontmatter: <code>source: filename</code> in any nearby MD</li>
+        <li>Name matching: <code>filename.md</code> exists next to <code>filename.pdf</code></li>
+        <li>Companion: <code>_wiki/filename.md</code> exists</li>
+      </ul>
+      <p><strong>Step 3: Produce report.</strong> Categorize each file as: covered (has user note), auto-covered (has companion MD), stale (companion older than source), or uncovered (no note at all).</p>
+    </div>
+  </div>
+
+  <!-- SKILL 2: wiki-compile -->
+  <h2>New Skill: <code>wiki-compile</code></h2>
+
+  <div class="grid-2">
+    <div class="card" style="border-color:var(--green);">
+      <h3 style="color:var(--green);margin-top:0;">Purpose &amp; Trigger</h3>
+      <p><strong>What it does:</strong> For a raw file that has no user note, generates a structured Markdown companion file. This is the "gap-filler" &mdash; it ensures every file in your vault is represented as searchable, LLM-readable Markdown text.</p>
+      <p><strong>When to use:</strong></p>
+      <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
+        <li>Called by wiki-crawl for uncovered files</li>
+        <li>Triggered by file watcher when a new raw file appears and no note is found</li>
+        <li>Manually: <code>/jeeves:wiki-compile path/to/file.pdf</code></li>
+      </ul>
+      <p><strong>Does NOT:</strong> Overwrite any existing user notes. Only creates new files in <code>_wiki/</code> subfolders. If you later write your own note for a file, the companion becomes redundant (wiki-lint will flag it).</p>
+    </div>
+    <div class="card" style="border-color:var(--green);">
+      <h3 style="color:var(--green);margin-top:0;">How It Works (Detailed)</h3>
+      <p><strong>Step 1: Convert file to text.</strong> Uses MarkItDown (the same library in smart-search) to convert binary formats to Markdown. Handles: PDF (text extraction + table recognition), DOCX (paragraphs + tables + headers), PPTX (slide-by-slide with speaker notes), XLSX (sheet-by-sheet with headers), images (vision model generates description), HTML (article text extraction).</p>
+      <p><strong>Step 2: LLM generates summary.</strong> The converted text is sent to Claude Sonnet (cost-efficient) with a structured prompt requesting:</p>
+      <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
+        <li>YAML frontmatter: source_path, source_hash (SHA-256), source_mtime, file_type, auto_generated: true, tags (3-7 descriptive tags), created_at, updated_at</li>
+        <li>One-paragraph summary capturing the document's purpose and key content</li>
+        <li>Structured key takeaways as bullet points (5-15 depending on document size)</li>
+        <li>Identified entities and concepts (used by wiki-ingest in the next step)</li>
+        <li>Obsidian wiki-links to any existing _knowledge/ pages that are relevant</li>
+        <li>A source attribution link back to the original file</li>
+      </ul>
+      <p><strong>Step 3: Write to _wiki/.</strong> Creates the <code>_wiki/</code> subfolder if it doesn't exist. Writes the companion MD. The filename matches the source file (e.g., <code>roadmap.xlsx</code> &rarr; <code>_wiki/roadmap.md</code>).</p>
+    </div>
+  </div>
+
+  <!-- SKILL 3: wiki-ingest -->
+  <h2>New Skill: <code>wiki-ingest</code></h2>
+
+  <div class="grid-2">
+    <div class="card" style="border-color:var(--purple);">
+      <h3 style="color:var(--purple);margin-top:0;">Purpose &amp; Trigger</h3>
+      <p><strong>What it does:</strong> This is the most important skill. It reads a source note (either your handwritten note or an auto-generated companion) and extracts entities and concepts into the cross-cutting <code>_knowledge/</code> graph. This is what makes the knowledge base compound over time &mdash; each note contributes to entity and concept pages that grow richer with every ingestion.</p>
+      <p><strong>When to use:</strong></p>
+      <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
+        <li>After wiki-compile generates a new companion MD</li>
+        <li>After you write or update a note</li>
+        <li>After session-notes creates a session summary</li>
+        <li>Manually: <code>/jeeves:wiki-ingest path/to/note.md</code></li>
+        <li>Batch: <code>/jeeves:wiki-ingest path/to/folder/</code> (processes all MDs in folder)</li>
+      </ul>
+      <p><strong>Model:</strong> Claude Opus (cross-referencing and entity extraction require deep reasoning about what constitutes a meaningful entity vs noise).</p>
+    </div>
+    <div class="card" style="border-color:var(--purple);">
+      <h3 style="color:var(--purple);margin-top:0;">How It Works (Detailed)</h3>
+      <p><strong>Step 1: Read the source note.</strong> Parse the MD file, extract frontmatter metadata, understand the document type and context (meeting note? literature note? project plan?).</p>
+      <p><strong>Step 2: Extract entities.</strong> The LLM identifies specific, named things mentioned:</p>
+      <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
+        <li><strong>Products:</strong> CAMS, EndoVision, AI Colonoscopy v2</li>
+        <li><strong>People:</strong> Dr. Smith, Prof. Mueller, stakeholder names</li>
+        <li><strong>Companies:</strong> Acme AI, MedTech Corp, competitors</li>
+        <li><strong>Regulations:</strong> FDA 510(k), EU MDR, IEC 62304, ISO 13485</li>
+        <li><strong>Studies:</strong> CLEOPATRA-III Trial, Smith 2025 RCT</li>
+        <li><strong>Standards &amp; Frameworks:</strong> GRADE, QUADAS-2, IEC 62366</li>
+      </ul>
+      <p><strong>Step 3: Extract concepts.</strong> Abstract topics that span multiple entities: regulatory strategy, clinical evidence planning, market positioning, software lifecycle.</p>
+      <p><strong>Step 4: Update knowledge pages.</strong> For each entity/concept:</p>
+      <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
+        <li>If page exists in _knowledge/: Read the current page, append new information under a source-attributed section. Increment <code>source_count</code> in frontmatter. Update <code>last_updated</code> timestamp.</li>
+        <li>If page is new: Create it using the template from <code>_knowledge/SCHEMA.md</code>. Populate with initial content from this source.</li>
+        <li>Add bidirectional wiki-links: source note links to entity page, entity page links to source note.</li>
+      </ul>
+      <p><strong>Step 5: Update index.md and log.md.</strong> Add/update entries in the master catalog. Append chronological record.</p>
+    </div>
+  </div>
+
+  <!-- SKILL 4: wiki-query -->
+  <h2>New Skill: <code>wiki-query</code></h2>
+
+  <div class="card" style="border-color:var(--accent);">
+    <h3 style="color:var(--accent);margin-top:0;">Purpose</h3>
+    <p><strong>What it does:</strong> Answers questions using the knowledge base. Implements the three-tier search pattern (Tier 0: direct knowledge page reads, Tier 1: semantic search, Tier 2: Grep/Glob fallback). This skill is also used internally by other Jeeves agents and skills when they need vault knowledge.</p>
+    <p><strong>Invocation:</strong> <code>/jeeves:wiki-query "What regulatory pathway should we use for CAMS in the EU?"</code></p>
+    <p><strong>How it differs from smart-search skill:</strong> The existing <code>smart-search</code> skill is a direct proxy to the search engine. <code>wiki-query</code> is smarter &mdash; it checks _knowledge/ entity pages first (often answering without any search), falls back to search, and synthesizes answers with full source attribution. It understands the knowledge graph structure.</p>
+    <p><strong>Optional behavior:</strong> If the query reveals new information or connections not yet in the knowledge graph, wiki-query can optionally trigger wiki-ingest to update entity/concept pages with its findings. This means the act of querying can itself improve the knowledge base.</p>
+  </div>
+
+  <!-- SKILL 5: wiki-lint -->
+  <h2>New Skill: <code>wiki-lint</code></h2>
+
+  <div class="card" style="border-color:var(--yellow);">
+    <h3 style="color:var(--yellow);margin-top:0;">Purpose</h3>
+    <p><strong>What it does:</strong> Periodic health check for the knowledge base. Scans for problems that naturally accumulate over time: files deleted but companions still exist, sources updated but knowledge pages not refreshed, contradictions between sources, index entries missing. Produces a human-readable report with actionable items.</p>
+    <p><strong>Invocation:</strong> <code>/jeeves:wiki-lint</code> (run weekly or on-demand)</p>
+    <p><strong>Checks performed:</strong> Orphaned companions (source deleted), stale companions (source newer), uncovered files, redundant companions (you wrote a note after auto-generation), missing cross-references, stale entity pages, contradictions, index completeness. See the <a href="workflow.html" style="color:var(--yellow);">Workflow page</a> for a detailed example of lint output.</p>
+  </div>
+
+  <!-- UPDATED SKILLS -->
+  <h2>Updates to Existing Skills</h2>
+
+  <div class="grid-3">
+    <div class="card" style="border-color:var(--blue);">
+      <h3 style="color:var(--blue);margin-top:0;">obsidian-knowledge</h3>
+      <p style="font-size:0.9rem;"><strong>Current:</strong> 2-tier search (Tier 1: smart-search MCP, Tier 2: Grep/Glob fallback).</p>
+      <p style="font-size:0.9rem;"><strong>Update:</strong> Add Tier 0 before current tiers. Tier 0 checks <code>_knowledge/</code> entity and concept pages by direct file read. This is the fastest and highest-quality search path because knowledge pages contain pre-synthesized, cross-referenced information. The existing Tier 1 and Tier 2 remain as fallbacks.</p>
+      <p style="font-size:0.9rem;"><strong>Why:</strong> Entity pages often answer questions directly without needing semantic search. A question about "FDA 510(k)" can be answered by reading <code>_knowledge/entities/fda-510k.md</code> instead of searching across hundreds of document chunks.</p>
+    </div>
+    <div class="card" style="border-color:var(--blue);">
+      <h3 style="color:var(--blue);margin-top:0;">session-notes</h3>
+      <p style="font-size:0.9rem;"><strong>Current:</strong> Writes a session summary MD to the vault.</p>
+      <p style="font-size:0.9rem;"><strong>Update:</strong> After writing the session note, automatically trigger <code>wiki-ingest</code> on the new note. This ensures that knowledge generated during a Claude Code session (research findings, decisions, analysis) is captured in the knowledge graph before the session context is lost.</p>
+      <p style="font-size:0.9rem;"><strong>Why:</strong> Without this, session knowledge evaporates. With it, every session contributes to the permanent knowledge base. Entities discovered during research, decisions made, and connections identified all flow into entity/concept pages automatically.</p>
+    </div>
+    <div class="card" style="border-color:var(--blue);">
+      <h3 style="color:var(--blue);margin-top:0;">daily-briefing</h3>
+      <p style="font-size:0.9rem;"><strong>Current:</strong> Pulls from vault via smart-search + web.</p>
+      <p style="font-size:0.9rem;"><strong>Update:</strong> Include a "Knowledge Base Updates" section showing: new entity/concept pages created since last briefing, updated pages (what changed), any contradictions flagged by wiki-lint, and uncovered files count. This gives you a daily pulse on how the knowledge base is growing.</p>
+      <p style="font-size:0.9rem;"><strong>Why:</strong> Keeps you aware of knowledge base health without needing to run wiki-lint manually. Surfaces interesting connections that were discovered automatically.</p>
+    </div>
+  </div>
+
+  <!-- CROSS-CUTTING INTERACTIONS -->
+  <h2>How Everything Cross-Functions</h2>
+
+  <div class="highlight-box purple">
+    <p><strong>The power of this system comes from the cross-cutting interactions between tools.</strong> No single tool does everything &mdash; they compose. Smart-search/QMD handles search. Jeeves skills handle compilation and knowledge management. The PARA vault provides organizational structure. Obsidian provides the viewing and editing interface. Here's how they interact:</p>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Interaction</th><th>How It Works</th><th>Why It Matters</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>File watcher &rarr; wiki-crawl &rarr; wiki-compile</strong></td>
+        <td>Smart-search's Watchdog detects a new file. If it's a non-MD file, it checks coverage. If uncovered, wiki-compile generates a companion MD.</td>
+        <td>Automatic: new files get Markdown representation without manual effort.</td>
+      </tr>
+      <tr>
+        <td><strong>wiki-compile &rarr; wiki-ingest &rarr; _knowledge/</strong></td>
+        <td>After a companion MD is generated, wiki-ingest extracts entities and concepts into the knowledge graph.</td>
+        <td>The knowledge graph grows automatically with every new file.</td>
+      </tr>
+      <tr>
+        <td><strong>session-notes &rarr; wiki-ingest &rarr; _knowledge/</strong></td>
+        <td>When you end a session, session-notes writes a summary, then wiki-ingest captures the session's knowledge.</td>
+        <td>Research sessions, decisions, and analysis don't evaporate when the session ends.</td>
+      </tr>
+      <tr>
+        <td><strong>Jeeves agents &rarr; wiki-query &rarr; _knowledge/ + search</strong></td>
+        <td>When regulatory-sme, clinical-sme, or any agent needs vault knowledge, it goes through wiki-query's 3-tier search (knowledge graph first, then semantic search, then Grep).</td>
+        <td>Agent answers are richer and faster because they tap pre-synthesized knowledge.</td>
+      </tr>
+      <tr>
+        <td><strong>meeting-prep &rarr; _knowledge/entities/ &rarr; attendee pages</strong></td>
+        <td>When preparing for a meeting, Jeeves reads entity pages for attendees (their background, past interactions) and topic pages (what we know about the discussion topics).</td>
+        <td>Meeting prep is dramatically better because it draws from accumulated knowledge about people and topics.</td>
+      </tr>
+      <tr>
+        <td><strong>wiki-lint &rarr; daily-briefing</strong></td>
+        <td>Lint findings (contradictions, stale content, uncovered files) are surfaced in the daily briefing.</td>
+        <td>You stay aware of knowledge base health without running manual audits.</td>
+      </tr>
+      <tr>
+        <td><strong>PARA structure &rarr; QMD contexts &rarr; search results</strong></td>
+        <td>If using QMD, PARA folder contexts are attached to collections ("these are active project resources", "these are reference materials"). Search results include this context.</td>
+        <td>Jeeves agents know whether a result comes from an active project or archived reference material, improving decision-making.</td>
+      </tr>
+      <tr>
+        <td><strong>_knowledge/SCHEMA.md &rarr; all wiki skills</strong></td>
+        <td>The schema file defines templates, conventions, and rules that all wiki skills follow when creating or updating content.</td>
+        <td>Consistency across the entire knowledge base. Every entity page looks the same, every cross-reference follows the same format.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Implementation Priority</h2>
+
+  <div class="highlight-box blue">
+    <p><strong>Start here, in this order:</strong></p>
+  </div>
+
+  <div class="flow">
+    <div class="flow-step" style="border-color:var(--orange);">
+      <h4>1. wiki-crawl (Foundation)</h4>
+      <p>Build this first. It's purely read-only and gives you immediate visibility into your vault's coverage. You'll see exactly how many files have notes, how many don't, and where the biggest gaps are. This informs everything else.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--green);">
+      <h4>2. wiki-compile (Gap-filling)</h4>
+      <p>Build this second. It fills the gaps that wiki-crawl identified. After running this on your vault, every file has a Markdown representation. The vault is now fully searchable as text.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step highlight" style="border-color:var(--purple);">
+      <h4>3. wiki-ingest (The Compounding Layer)</h4>
+      <p>This is the highest-value skill. It builds the knowledge graph from all your notes. Start with a small subset of your vault (e.g., one project folder), validate the entity extraction quality, then scale to the full vault. This is where Karpathy's pattern truly comes alive.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--accent);">
+      <h4>4. wiki-query + obsidian-knowledge update</h4>
+      <p>Once the knowledge graph has meaningful content, build the query layer. Update obsidian-knowledge to include Tier 0 (knowledge graph direct reads). This is when Jeeves agents get dramatically better.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--yellow);">
+      <h4>5. wiki-lint + daily-briefing update</h4>
+      <p>Maintenance and monitoring. Build once the system has been running for a while and needs health checks.</p>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

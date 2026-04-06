@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart-search vs QMD - Critical Comparison</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav>
+  <div class="nav-inner">
+    <span class="brand">KB System Design</span>
+    <a href="index.html">Overview</a>
+    <a href="current-state.html">Current State</a>
+    <a href="vault-structure.html">Vault Structure</a>
+    <a href="workflow.html">Workflow</a>
+    <a href="smart-search-vs-qmd.html" class="active">Smart-search vs QMD</a>
+    <a href="skills.html">Jeeves Skills</a>
+  </div>
+</nav>
+
+<div class="container">
+  <h1>Smart-search vs QMD</h1>
+  <p class="subtitle">A critical, honest comparison to decide whether to continue developing smart-search or adopt QMD as the search layer.</p>
+
+  <h2>The Key Question</h2>
+
+  <div class="highlight-box yellow">
+    <p><strong>In the new architecture where every raw file has a companion MD, and only Markdown files get indexed, smart-search's biggest differentiator (14-format conversion via MarkItDown) becomes irrelevant for the search layer.</strong> The conversion capability moves to the compilation layer (Jeeves wiki-compile skill). Both smart-search and QMD can index Markdown files. So the question becomes: which one does Markdown search better?</p>
+  </div>
+
+  <h2>Head-to-Head Comparison</h2>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th style="width:20%;">Dimension</th><th style="width:35%;">Smart-search (v0.15.1)</th><th style="width:35%;">QMD (Tobi Lutke)</th><th style="width:10%;">Edge</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Search Pipeline</strong></td>
+          <td>BM25 full-text + vector semantic search, combined via Reciprocal Rank Fusion (RRF, k=60). Cross-encoder reranking with TinyBERT (15MB model, 30-60ms). Maximum Marginal Relevance for result diversity.</td>
+          <td>BM25 + vector + RRF, same as smart-search, <strong>plus</strong>: LLM-powered query expansion (generates variant phrasings before search, 2x weight on original), LLM reranking with qwen3-reranker (0.6B model, full cross-encoder), and position-aware blending (top-ranked results trust RRF more, lower-ranked trust reranker more).</td>
+          <td class="compare-winner"><strong>QMD</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Query Expansion</strong></td>
+          <td>None. The search runs only the user's exact query (after normalization).</td>
+          <td>A fine-tuned 1.7B GGUF model generates 1-2 alternative phrasings of the query before search. This significantly improves recall for natural language questions where the exact wording might not match document text.</td>
+          <td class="compare-winner"><strong>QMD</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Context System</strong></td>
+          <td>None. Search results don't include metadata about what folder/collection a document belongs to. A result from Resources/Literature/ looks the same as one from Projects/.</td>
+          <td>Collections can have context strings attached at any path level. When results are returned, matching context is included. For PARA, this means you can add "These are active project documents" to Projects/ and "These are reference research materials" to Resources/. LLM agents use this context to make better decisions about which results to prioritize.</td>
+          <td class="compare-winner"><strong>QMD</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Reranking Quality</strong></td>
+          <td>TinyBERT-L-2 cross-encoder (~15MB). Fast (30-60ms) but limited capacity. A tiny model compared to modern LLMs.</td>
+          <td>Qwen3-Reranker 0.6B (~640MB). Full cross-encoder via node-llama-cpp. Significantly more capable at understanding query-document relevance, especially for nuanced questions.</td>
+          <td class="compare-winner"><strong>QMD</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Embedding Model</strong></td>
+          <td>Snowflake Arctic Embed M v2.0 (~297MB), 256-dim Matryoshka. MTEB: 0.554. Via ONNX Runtime with GPU auto-detection (CUDA/DirectML).</td>
+          <td>EmbeddingGemma 300M (~300MB), via node-llama-cpp GGUF. Comparable size and quality. Uses task-prefixed prompts ("task: search result | query: ...").</td>
+          <td>Tie</td>
+        </tr>
+        <tr>
+          <td><strong>MCP Server</strong></td>
+          <td>11 tools: knowledge_search, knowledge_ingest, find_related, read_note, knowledge_stats, knowledge_add_folder, knowledge_remove_folder, knowledge_list_folders, knowledge_list_files, knowledge_temp_index, knowledge_temp_cleanup. Comprehensive management interface.</td>
+          <td>4 tools: query (search), get (retrieve document), multi_get (batch retrieve), status (index stats). Simpler but covers the essential use case. Supports both stdio and HTTP transport.</td>
+          <td><strong>Smart-search</strong> (more tools)</td>
+        </tr>
+        <tr>
+          <td><strong>File Format Support</strong></td>
+          <td>14 formats via MarkItDown: PDF, DOCX, XLSX, PPTX, EPUB, CSV, JSON, HTML, MD, TXT, MSG, IPYNB, etc.</td>
+          <td>Markdown and code files only (.md, .ts, .js, .py, .go, .rs). No binary format support.</td>
+          <td><strong>Smart-search</strong> (but irrelevant in companion-MD architecture)</td>
+        </tr>
+        <tr>
+          <td><strong>Chunking</strong></td>
+          <td>Heading-based Markdown splitting (# / ## / ###). Configurable: 200 words max, 50 min, 40 overlap. Max 100 chunks per file.</td>
+          <td>Scored break-point system: headings (50-100), code boundaries (80), blank lines (20). ~900 tokens with 15% overlap. AST-aware chunking for code files (tree-sitter). Code fence protection.</td>
+          <td class="compare-winner"><strong>QMD</strong> (more sophisticated)</td>
+        </tr>
+        <tr>
+          <td><strong>Desktop App</strong></td>
+          <td>Tauri v2 desktop app with system tray, Ctrl+Space quick search overlay, folder management UI, indexing log, light/dark themes.</td>
+          <td>CLI only. No graphical interface.</td>
+          <td><strong>Smart-search</strong></td>
+        </tr>
+        <tr>
+          <td><strong>File Watching</strong></td>
+          <td>Built-in Watchdog-based file watcher with debouncing, per-folder cancellation, and progress tracking.</td>
+          <td>None built-in. Collections are re-indexed on demand (<code>qmd embed</code>).</td>
+          <td><strong>Smart-search</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Storage</strong></td>
+          <td>LanceDB (columnar vector storage) + SQLite (metadata + FTS5). Two storage systems to manage.</td>
+          <td>Single SQLite database with sqlite-vec extension. One file, simpler backup and migration.</td>
+          <td class="compare-winner"><strong>QMD</strong> (simpler)</td>
+        </tr>
+        <tr>
+          <td><strong>Runtime</strong></td>
+          <td>Python 3.11+. FastAPI + Uvicorn. ONNX Runtime. Requires pip/uv install. PyInstaller for desktop bundling.</td>
+          <td>Node.js/Bun. node-llama-cpp for all ML inference. <code>npm install -g</code>. Lighter dependency chain for a non-Python user, though models are downloaded on first run.</td>
+          <td>Depends on preference</td>
+        </tr>
+        <tr>
+          <td><strong>Maintenance</strong></td>
+          <td>You maintain this. Python codebase with FastAPI, LanceDB, ONNX, Tauri, Watchdog. 425+ tests. Significant ongoing effort for a non-developer.</td>
+          <td>Tobi Lutke (Shopify CEO) and contributors maintain this. Active development, regular releases. You use it as a dependency, not maintain it.</td>
+          <td class="compare-winner"><strong>QMD</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Ecosystem Fit</strong></td>
+          <td>Custom tool, deeply integrated with Jeeves. Switching has a cost.</td>
+          <td>Karpathy specifically recommends QMD as the companion tool for the LLM Wiki pattern. It was designed for exactly this use case.</td>
+          <td class="compare-winner"><strong>QMD</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Test Coverage</strong></td>
+          <td>425+ pytest tests. Comprehensive. Well-maintained.</td>
+          <td>Unknown public test count. Maintained by Tobi Lutke's team.</td>
+          <td><strong>Smart-search</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>The Honest Assessment</h2>
+
+  <div class="grid-2">
+    <div class="card" style="border-color: var(--green);">
+      <h3 style="color:var(--green);margin-top:0;">Arguments for Keeping Smart-search</h3>
+      <p><strong>1. Already built and integrated.</strong> Smart-search works today. It's deeply integrated with Jeeves (11 MCP tools, dedicated skill). Switching to QMD requires re-integration work: new MCP configuration, updated Jeeves skills, testing.</p>
+      <p><strong>2. Desktop app.</strong> The Tauri desktop app provides a visual interface for managing folders, viewing indexing status, and quick searching. QMD has no GUI. If you value the visual management experience, this matters.</p>
+      <p><strong>3. File watching.</strong> Smart-search automatically detects and re-indexes changed files. QMD requires manual re-indexing (<code>qmd embed</code>). In the new architecture, the file watcher serves double duty: triggering both search re-indexing and wiki compilation.</p>
+      <p><strong>4. You control it.</strong> Full ownership means you can add features, fix bugs, and customize behavior without waiting for upstream changes. Smart-search is exactly what you need because you shaped it.</p>
+      <p><strong>5. MarkItDown integration.</strong> Even though format conversion moves to the compilation layer, having MarkItDown already integrated in smart-search means the <code>wiki-compile</code> skill can leverage smart-search's existing <code>read_note</code> MCP tool for file conversion.</p>
+    </div>
+
+    <div class="card" style="border-color: var(--red);">
+      <h3 style="color:var(--red);margin-top:0;">Arguments for Switching to QMD</h3>
+      <p><strong>1. Superior search quality.</strong> QMD has query expansion, LLM reranking (not just a tiny cross-encoder), and position-aware blending. For a knowledge base system where search quality directly impacts the quality of Jeeves agent answers, this matters significantly.</p>
+      <p><strong>2. Context system.</strong> QMD's ability to attach metadata to collections/paths is a natural fit for PARA. Your Jeeves agents would receive search results with context like "this result comes from a regulatory resource" or "this is from an active project document." Smart-search has nothing comparable.</p>
+      <p><strong>3. Maintenance burden.</strong> You are a scientist, not a software developer. Maintaining a complex Python codebase with FastAPI, LanceDB, ONNX, Tauri, and 425 tests is significant overhead. QMD is a dependency you use, not code you maintain. Your time is better spent on the compilation layer (wiki skills) and your actual PM work.</p>
+      <p><strong>4. Purpose-built for this pattern.</strong> QMD was designed to be the search layer for markdown knowledge bases. It's the tool Karpathy recommends. It solves exactly the problem you have, and it's optimized for agentic workflows (LLM agents searching your knowledge base).</p>
+      <p><strong>5. Simpler storage.</strong> Single SQLite file vs. LanceDB + SQLite. Easier to backup, migrate, debug.</p>
+    </div>
+  </div>
+
+  <h2>Recommended Path Forward</h2>
+
+  <div class="flow">
+    <div class="flow-step" style="border-color:var(--green);">
+      <h4>Phase 1: Keep Smart-search (Now)</h4>
+      <p>Don't change the search layer while building the compilation layer. Smart-search works today. Use it. Focus your development effort on the high-value, novel work: the wiki-crawl, wiki-compile, wiki-ingest, wiki-query, and wiki-lint skills. These are the skills that make the Karpathy pattern work. The search engine underneath is a replaceable commodity &mdash; the compilation layer is the differentiator.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--yellow);">
+      <h4>Phase 2: Evaluate QMD (After compilation layer works)</h4>
+      <p>Once the wiki skills are working and you have a meaningful set of companion MDs and knowledge pages, install QMD alongside smart-search. Index the same content in both. Run 20-30 representative queries through both engines and compare result quality. Pay special attention to:<br>
+      &bull; Does QMD's query expansion find things smart-search misses?<br>
+      &bull; Does the context system improve Jeeves agent decisions?<br>
+      &bull; Is the LLM reranker noticeably better than TinyBERT?<br>
+      This is an empirical question that should be answered with your actual data, not theoretical analysis.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--accent);">
+      <h4>Phase 3: Decision (Based on evidence)</h4>
+      <p><strong>If QMD is clearly better:</strong> Migrate search to QMD. Update Jeeves's smart-search skill to proxy to QMD instead. Keep smart-search's MarkItDown + Watchdog capabilities in a lightweight utility for the compilation layer. Stop maintaining the search engine.<br><br>
+      <strong>If QMD is comparable:</strong> Consider maintenance burden. If smart-search is consuming significant development time, switch to QMD anyway for the time savings. If it's stable and low-maintenance, keep it.<br><br>
+      <strong>If smart-search is better for your use case:</strong> Keep it. Consider adopting specific QMD ideas (context system, query expansion) into smart-search.</p>
+    </div>
+  </div>
+
+  <h2>What Smart-search Built That Remains Valuable</h2>
+
+  <div class="highlight-box green">
+    <p>Regardless of the search engine decision, smart-search has produced valuable capabilities that the new system needs:</p>
+  </div>
+
+  <table>
+    <tr><td><strong>MarkItDown Integration</strong></td><td>The ability to convert 14 file formats to Markdown text is essential for the compilation layer. The wiki-compile skill needs this. Whether it lives in smart-search or as a standalone Python utility, this code has direct value.</td></tr>
+    <tr><td><strong>File Watching (Watchdog)</strong></td><td>The file change detection system with debouncing and per-folder management is needed to trigger wiki compilation automatically. This can be extracted from smart-search if you migrate to QMD.</td></tr>
+    <tr><td><strong>MCP Server Pattern</strong></td><td>The FastMCP server design (thin proxy to HTTP backend) is a proven pattern that can be reused for new MCP tools (e.g., a wiki-management MCP).</td></tr>
+    <tr><td><strong>Chunking Logic</strong></td><td>The heading-based Markdown chunker, while simpler than QMD's, is well-tested and could be used by the compilation layer for splitting large documents before LLM processing.</td></tr>
+    <tr><td><strong>Research Findings</strong></td><td>The IR research documents (hybrid search impact, cross-encoder benchmarks, Matryoshka dimension analysis) inform design decisions regardless of which search engine you use.</td></tr>
+  </table>
+
+</div>
+</body>
+</html>
