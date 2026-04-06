@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Search - Retrieval Architecture</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent-blue: #58a6ff;
+    --accent-green: #3fb950;
+    --accent-orange: #d29922;
+    --accent-purple: #bc8cff;
+    --accent-red: #f85149;
+    --accent-cyan: #39d2c0;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+  }
+
+  .subtitle {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    margin-bottom: 2.5rem;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    color: var(--text);
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .stage {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    position: relative;
+  }
+
+  .stage-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .stage-number {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--bg);
+    background: var(--accent-blue);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .stage-number.green { background: var(--accent-green); }
+  .stage-number.orange { background: var(--accent-orange); }
+  .stage-number.purple { background: var(--accent-purple); }
+  .stage-number.cyan { background: var(--accent-cyan); }
+
+  .stage-title {
+    font-weight: 600;
+    font-size: 1rem;
+  }
+
+  .stage-desc {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .metrics {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .metric {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .metric-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+  }
+
+  .metric-value {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--accent-blue);
+  }
+
+  .metric-value.green { color: var(--accent-green); }
+  .metric-value.orange { color: var(--accent-orange); }
+  .metric-value.purple { color: var(--accent-purple); }
+  .metric-value.cyan { color: var(--accent-cyan); }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    background: rgba(88, 166, 255, 0.1);
+    color: var(--accent-blue);
+    border: 1px solid rgba(88, 166, 255, 0.2);
+  }
+
+  .tag.green {
+    background: rgba(63, 185, 80, 0.1);
+    color: var(--accent-green);
+    border-color: rgba(63, 185, 80, 0.2);
+  }
+
+  .tag.orange {
+    background: rgba(210, 153, 34, 0.1);
+    color: var(--accent-orange);
+    border-color: rgba(210, 153, 34, 0.2);
+  }
+
+  .tag.purple {
+    background: rgba(188, 140, 255, 0.1);
+    color: var(--accent-purple);
+    border-color: rgba(188, 140, 255, 0.2);
+  }
+
+  .tag.cyan {
+    background: rgba(57, 210, 192, 0.1);
+    color: var(--accent-cyan);
+    border-color: rgba(57, 210, 192, 0.2);
+  }
+
+  .tag.red {
+    background: rgba(248, 81, 73, 0.1);
+    color: var(--accent-red);
+    border-color: rgba(248, 81, 73, 0.2);
+  }
+
+  /* Layer diagram */
+  .layer-diagram {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .connector {
+    display: flex;
+    justify-content: center;
+    padding: 0.15rem 0;
+  }
+
+  .connector svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .connector-wide svg {
+    width: 100%;
+    height: 36px;
+  }
+
+  .layers-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.75rem;
+  }
+
+  .layer-box {
+    border-radius: 8px;
+    padding: 1.25rem 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+
+  .layer-box.blue { border-color: rgba(88, 166, 255, 0.4); }
+  .layer-box.green { border-color: rgba(63, 185, 80, 0.4); }
+  .layer-box.orange { border-color: rgba(210, 153, 34, 0.4); }
+  .layer-box.purple { border-color: rgba(188, 140, 255, 0.4); background: rgba(188, 140, 255, 0.03); }
+  .layer-box.cyan { border-color: rgba(57, 210, 192, 0.4); background: rgba(57, 210, 192, 0.03); }
+
+  .layer-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.25rem;
+  }
+
+  .layer-label.blue { color: var(--accent-blue); }
+  .layer-label.green { color: var(--accent-green); }
+  .layer-label.orange { color: var(--accent-orange); }
+  .layer-label.purple { color: var(--accent-purple); }
+  .layer-label.cyan { color: var(--accent-cyan); }
+
+  .layer-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .layer-job {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-bottom: 0.5rem;
+  }
+
+  .layer-detail {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+  }
+
+  .status-list {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .status-item {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .status-dot.green { background: var(--accent-green); }
+  .status-dot.red { background: var(--accent-red); }
+
+  /* Scenario cards */
+  .scenario-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  details.scenario-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  details.scenario-card[open] {
+    border-color: rgba(88, 166, 255, 0.3);
+  }
+
+  details.scenario-card summary {
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    list-style: none;
+    user-select: none;
+  }
+
+  details.scenario-card summary::-webkit-details-marker { display: none; }
+
+  details.scenario-card summary::before {
+    content: "\25B6";
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+
+  details.scenario-card[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  .scenario-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    flex: 1;
+  }
+
+  .scenario-status {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  .scenario-status.partial {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--accent-orange);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+  }
+
+  .scenario-status.mostly-works {
+    background: rgba(63, 185, 80, 0.1);
+    color: var(--accent-green);
+    border: 1px solid rgba(63, 185, 80, 0.2);
+  }
+
+  .scenario-status.mostly-missing {
+    background: rgba(248, 81, 73, 0.1);
+    color: var(--accent-red);
+    border: 1px solid rgba(248, 81, 73, 0.2);
+  }
+
+  .scenario-body {
+    padding: 0 1.25rem 1.25rem 2.5rem;
+  }
+
+  .scenario-example {
+    font-style: italic;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .scenario-detail {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 0.35rem;
+  }
+
+  .scenario-detail strong {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .layer-badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    margin-right: 0.2rem;
+  }
+
+  .layer-badge.l1 { background: rgba(88, 166, 255, 0.2); color: var(--accent-blue); }
+  .layer-badge.l2 { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+  .layer-badge.l3 { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange); }
+  .layer-badge.l4 { background: rgba(188, 140, 255, 0.2); color: var(--accent-purple); }
+
+  /* Journey steps */
+  .journey-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .journey-step {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+
+  .journey-step-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    width: 60px;
+  }
+
+  .journey-step-num {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--bg);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .journey-step-line {
+    width: 2px;
+    height: 24px;
+    background: var(--border);
+  }
+
+  .journey-step-content {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    flex: 1;
+    margin-bottom: 0.5rem;
+  }
+
+  .journey-step-code {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    margin-top: 0.4rem;
+    border-left: 3px solid var(--border);
+    overflow-x: auto;
+  }
+
+  .journey-step-result {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.35rem;
+    font-style: italic;
+  }
+
+  /* Boundary table */
+  .boundary-table, .gap-table, .tech-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+  }
+
+  .boundary-table th, .gap-table th, .tech-table th {
+    text-align: left;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 2px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .boundary-table td, .gap-table td, .tech-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .boundary-table td:first-child {
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+  }
+
+  .check { color: var(--accent-green); }
+  .cross { color: var(--accent-red); }
+
+  .gap-table td:first-child {
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .gap-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .gap-item {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+  }
+
+  .gap-item.exists {
+    background: rgba(63, 185, 80, 0.1);
+    color: var(--accent-green);
+    border: 1px solid rgba(63, 185, 80, 0.2);
+  }
+
+  .gap-item.missing {
+    background: rgba(248, 81, 73, 0.1);
+    color: var(--accent-red);
+    border: 1px solid rgba(248, 81, 73, 0.2);
+  }
+
+  .tech-table td:first-child {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 768px) {
+    .layers-row {
+      grid-template-columns: 1fr;
+    }
+    body {
+      padding: 1rem;
+    }
+    .journey-step {
+      gap: 0.5rem;
+    }
+    .journey-step-left {
+      width: 40px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<h1>Retrieval Architecture -- Layered Solution Design</h1>
+<p class="subtitle">Smart Search v0.16 -- separating file discovery, document exploration, cross-document intelligence, and synthesis</p>
+
+<!-- ================================================================ -->
+<!-- SECTION 1: Layer Diagram -->
+<!-- ================================================================ -->
+<h2>Layer Diagram</h2>
+
+<div class="layer-diagram">
+
+  <!-- Layer 4: Synthesis (top) -->
+  <div class="layer-box purple">
+    <div class="layer-label purple">Layer 4</div>
+    <div class="layer-title">SYNTHESIS -- Claude Code LLM</div>
+    <div class="layer-job">Orchestrates Layers 1-3, synthesizes final answer</div>
+    <div class="layer-detail"><strong>Tools:</strong> read_note, knowledge_search, knowledge_related</div>
+    <div class="layer-detail"><strong>Guided by:</strong> skill.md / agent.md</div>
+  </div>
+
+  <!-- Arrows down from Layer 4 to Layers 1/2/3 -->
+  <div class="connector-wide" style="display:flex; justify-content:center;">
+    <svg viewBox="0 0 600 36" style="width:100%; max-width:600px; height:36px;">
+      <path d="M300 0 L300 8 L100 28 L100 36" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M300 0 L300 8 L300 28 L300 36" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M300 0 L300 8 L500 28 L500 36" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M95 30 L100 36 L105 30" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M295 30 L300 36 L305 30" stroke="#30363d" stroke-width="2" fill="none"/>
+      <path d="M495 30 L500 36 L505 30" stroke="#30363d" stroke-width="2" fill="none"/>
+    </svg>
+  </div>
+
+  <!-- Layers 1, 2, 3 side by side -->
+  <div class="layers-row">
+
+    <!-- Layer 1 -->
+    <div class="layer-box blue">
+      <div class="layer-label blue">Layer 1</div>
+      <div class="layer-title">FILE DISCOVERY</div>
+      <div class="layer-job">"Find me that file I vaguely remember"</div>
+      <div class="layer-detail"><strong>Returns:</strong> FILES (1 per document, best snippet as preview)</div>
+      <div class="layer-detail"><strong>Needs:</strong> File-level aggregation + path FTS + date awareness</div>
+      <div class="status-list">
+        <div class="status-item"><span class="status-dot green"></span> Chunk search EXISTS</div>
+        <div class="status-item"><span class="status-dot red"></span> File-level mode MISSING</div>
+        <div class="status-item"><span class="status-dot red"></span> Path FTS MISSING</div>
+      </div>
+    </div>
+
+    <!-- Layer 2 -->
+    <div class="layer-box green">
+      <div class="layer-label green">Layer 2</div>
+      <div class="layer-title">DOCUMENT EXPLORATION</div>
+      <div class="layer-job">"Dig deeper into this specific document"</div>
+      <div class="layer-detail"><strong>Returns:</strong> CHUNKS (within a specific doc) + full doc text</div>
+      <div class="layer-detail"><strong>Needs:</strong> source_paths filter param</div>
+      <div class="status-list">
+        <div class="status-item"><span class="status-dot green"></span> read_note EXISTS</div>
+        <div class="status-item"><span class="status-dot red"></span> source_paths filter MISSING</div>
+        <div class="status-item"><span class="status-dot red"></span> Section search MISSING</div>
+      </div>
+    </div>
+
+    <!-- Layer 3 -->
+    <div class="layer-box orange">
+      <div class="layer-label orange">Layer 3</div>
+      <div class="layer-title">CROSS-DOCUMENT INTELLIGENCE</div>
+      <div class="layer-job">"Find connections I didn't ask about"</div>
+      <div class="layer-detail"><strong>Returns:</strong> RELATIONSHIPS (doc A relates to doc B, similarity score)</div>
+      <div class="layer-detail"><strong>Needs:</strong> Pre-computed document graph, entity extraction</div>
+      <div class="status-list">
+        <div class="status-item"><span class="status-dot green"></span> find_related (on-the-fly) EXISTS</div>
+        <div class="status-item"><span class="status-dot red"></span> Document graph MISSING</div>
+        <div class="status-item"><span class="status-dot red"></span> Entity extraction MISSING</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Arrow down to shared foundation -->
+  <div class="connector">
+    <svg viewBox="0 0 24 24"><path d="M12 0 L12 24" stroke="#30363d" stroke-width="2" fill="none"/><path d="M7 18 L12 24 L17 18" stroke="#30363d" stroke-width="2" fill="none"/></svg>
+  </div>
+
+  <!-- Shared Foundation -->
+  <div class="layer-box cyan">
+    <div class="layer-label cyan">Shared Foundation</div>
+    <div class="layer-title">LanceDB (chunk embeddings) + SQLite (metadata + FTS5)</div>
+    <div class="layer-detail"><strong>NEW:</strong> Document embeddings table, Document relationships table, Files FTS5 index</div>
+  </div>
+
+</div>
+
+<!-- ================================================================ -->
+<!-- SECTION 2: Scenario Cards -->
+<!-- ================================================================ -->
+<h2>Scenario Cards</h2>
+<p class="stage-desc" style="margin-bottom:1rem;">Click each card to expand details.</p>
+
+<div class="scenario-grid">
+
+  <!-- Card 1 -->
+  <details class="scenario-card">
+    <summary>
+      <span class="scenario-title">Find a file I vaguely remember</span>
+      <span class="scenario-status partial">PARTIALLY WORKS</span>
+    </summary>
+    <div class="scenario-body">
+      <div class="scenario-example">"That Medtronic polyp-sizing paper"</div>
+      <div class="scenario-detail"><strong>Layers:</strong> <span class="layer-badge l1">L1</span> only</div>
+      <div class="scenario-detail"><strong>What happens:</strong> Filename + path fuzzy search -> file-level result</div>
+      <div class="scenario-detail"><strong>Current state:</strong> Semantic search finds chunks but does not aggregate to file-level results. User sees 10 chunks from 3 files instead of 3 files ranked by best match.</div>
+    </div>
+  </details>
+
+  <!-- Card 2 -->
+  <details class="scenario-card">
+    <summary>
+      <span class="scenario-title">Browse documents by topic</span>
+      <span class="scenario-status partial">PARTIALLY WORKS</span>
+    </summary>
+    <div class="scenario-body">
+      <div class="scenario-example">"User research files from last few months"</div>
+      <div class="scenario-detail"><strong>Layers:</strong> <span class="layer-badge l1">L1</span></div>
+      <div class="scenario-detail"><strong>What happens:</strong> Folder-aware search + date filtering -> file list</div>
+      <div class="scenario-detail"><strong>Current state:</strong> Keyword search works, but no date filtering and no file-level aggregation. Folder filter exists but no PARA awareness.</div>
+    </div>
+  </details>
+
+  <!-- Card 3 -->
+  <details class="scenario-card">
+    <summary>
+      <span class="scenario-title">Deep-dive into a document</span>
+      <span class="scenario-status mostly-works">MOSTLY WORKS</span>
+    </summary>
+    <div class="scenario-body">
+      <div class="scenario-example">"Summarize the Methods section of that polyp study"</div>
+      <div class="scenario-detail"><strong>Layers:</strong> <span class="layer-badge l1">L1</span> -> <span class="layer-badge l2">L2</span> -> <span class="layer-badge l4">L4</span></div>
+      <div class="scenario-detail"><strong>What happens:</strong> Find file -> search within it -> LLM summarizes</div>
+      <div class="scenario-detail"><strong>Current state:</strong> read_note exists, but there is no within-document search to jump to a specific section. LLM must read full document and find the section itself.</div>
+    </div>
+  </details>
+
+  <!-- Card 4 -->
+  <details class="scenario-card">
+    <summary>
+      <span class="scenario-title">Connect papers to meeting notes</span>
+      <span class="scenario-status mostly-missing">MOSTLY MISSING</span>
+    </summary>
+    <div class="scenario-body">
+      <div class="scenario-example">"Were there meetings about this research topic?"</div>
+      <div class="scenario-detail"><strong>Layers:</strong> <span class="layer-badge l1">L1</span> -> <span class="layer-badge l3">L3</span> -> <span class="layer-badge l2">L2</span> -> <span class="layer-badge l4">L4</span></div>
+      <div class="scenario-detail"><strong>What happens:</strong> Find paper -> get related docs -> read meetings -> synthesize</div>
+      <div class="scenario-detail"><strong>Current state:</strong> find_related is on-the-fly only. No pre-built meeting-to-paper graph. LLM must manually orchestrate multiple search calls.</div>
+    </div>
+  </details>
+
+  <!-- Card 5 -->
+  <details class="scenario-card">
+    <summary>
+      <span class="scenario-title">Multi-source synthesis</span>
+      <span class="scenario-status partial">PARTIALLY WORKS</span>
+    </summary>
+    <div class="scenario-body">
+      <div class="scenario-example">"What do we know about X across papers, meetings, notes?"</div>
+      <div class="scenario-detail"><strong>Layers:</strong> <span class="layer-badge l1">L1</span> <span class="layer-badge l2">L2</span> <span class="layer-badge l3">L3</span> <span class="layer-badge l4">L4</span> All 4 layers</div>
+      <div class="scenario-detail"><strong>What happens:</strong> Discover files -> find connections -> read relevant -> synthesize</div>
+      <div class="scenario-detail"><strong>Current state:</strong> Requires manual LLM orchestration across multiple tool calls. No pre-built connections between documents. Works but is slow and may miss related documents.</div>
+    </div>
+  </details>
+
+</div>
+
+<!-- ================================================================ -->
+<!-- SECTION 3: User Journey Flow -->
+<!-- ================================================================ -->
+<h2>User Journey Flow</h2>
+<p class="stage-desc" style="margin-bottom:1rem;">Step-by-step walkthrough: "What do we know from user research?"</p>
+
+<div class="journey-steps">
+
+  <!-- Step 1 -->
+  <div class="journey-step">
+    <div class="journey-step-left">
+      <div class="journey-step-num" style="background:var(--accent-blue);">1</div>
+      <div class="journey-step-line"></div>
+    </div>
+    <div class="journey-step-content">
+      <div style="margin-bottom:0.3rem;"><span class="layer-badge l1">LAYER 1</span> <strong>File Discovery</strong></div>
+      <div class="journey-step-code">knowledge_search(query="user research", result_type="files", limit=10)</div>
+      <div class="journey-step-result">Returns 10 documents: 3 PDFs, 2 DOCX, 5 MD notes</div>
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="journey-step">
+    <div class="journey-step-left">
+      <div class="journey-step-num" style="background:var(--accent-green);">2</div>
+      <div class="journey-step-line"></div>
+    </div>
+    <div class="journey-step-content">
+      <div style="margin-bottom:0.3rem;"><span class="layer-badge l2">LAYER 2</span> <strong>Drill into promising docs</strong></div>
+      <div class="journey-step-code">knowledge_search(query="user research findings", source_paths=[pdf1, pdf2, docx1])</div>
+      <div class="journey-step-result">Returns relevant chunks scoped to the 3 most promising documents</div>
+    </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="journey-step">
+    <div class="journey-step-left">
+      <div class="journey-step-num" style="background:var(--accent-orange);">3</div>
+      <div class="journey-step-line"></div>
+    </div>
+    <div class="journey-step-content">
+      <div style="margin-bottom:0.3rem;"><span class="layer-badge l3">LAYER 3</span> <strong>Check for related meetings</strong></div>
+      <div class="journey-step-code">knowledge_related(note_path=pdf1)</div>
+      <div class="journey-step-result">Returns: meeting_march.md (0.82), meeting_mike_april.md (0.76)</div>
+    </div>
+  </div>
+
+  <!-- Step 4 -->
+  <div class="journey-step">
+    <div class="journey-step-left">
+      <div class="journey-step-num" style="background:var(--accent-green);">4</div>
+      <div class="journey-step-line"></div>
+    </div>
+    <div class="journey-step-content">
+      <div style="margin-bottom:0.3rem;"><span class="layer-badge l2">LAYER 2</span> <strong>Read the meeting notes</strong></div>
+      <div class="journey-step-code">read_note("meeting_march.md"), read_note("meeting_mike_april.md")</div>
+      <div class="journey-step-result">Full text of both meeting documents loaded into context</div>
+    </div>
+  </div>
+
+  <!-- Step 5 -->
+  <div class="journey-step">
+    <div class="journey-step-left">
+      <div class="journey-step-num" style="background:var(--accent-purple);">5</div>
+    </div>
+    <div class="journey-step-content">
+      <div style="margin-bottom:0.3rem;"><span class="layer-badge l4">LAYER 4</span> <strong>Synthesize</strong></div>
+      <div class="journey-step-result">"You had 3 user research files. The March meeting discussed early findings. Mike's April meeting covered follow-up actions."</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ================================================================ -->
+<!-- SECTION 4: Quick Search vs Claude Code Boundary -->
+<!-- ================================================================ -->
+<h2>Quick Search vs Claude Code Boundary</h2>
+
+<table class="boundary-table">
+  <thead>
+    <tr>
+      <th>Dimension</th>
+      <th>Quick Search (UI)</th>
+      <th>Claude Code (MCP)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Interaction</td>
+      <td>Single query -> instant results</td>
+      <td>Multi-turn conversation</td>
+    </tr>
+    <tr>
+      <td>Result type</td>
+      <td>Files (titles, paths)</td>
+      <td>Chunks, full docs, synthesized answers</td>
+    </tr>
+    <tr>
+      <td>Latency</td>
+      <td class="mono">&lt;200ms</td>
+      <td class="mono">1-10s acceptable</td>
+    </tr>
+    <tr>
+      <td>Intelligence</td>
+      <td>Smart ranking, no LLM</td>
+      <td>LLM-driven iterative search</td>
+    </tr>
+    <tr>
+      <td>Diversity</td>
+      <td><span class="tag green">HIGH</span> many different files</td>
+      <td><span class="tag orange">VARIABLE</span> broad then deep</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ -->
+<!-- SECTION 5: Gap Analysis Table -->
+<!-- ================================================================ -->
+<h2>Gap Analysis</h2>
+
+<table class="gap-table">
+  <thead>
+    <tr>
+      <th>Layer</th>
+      <th>EXISTS</th>
+      <th>MISSING</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="layer-badge l1">L1</span> File Discovery</td>
+      <td>
+        <div class="gap-items">
+          <span class="gap-item exists">chunk search</span>
+          <span class="gap-item exists">folder filter</span>
+          <span class="gap-item exists">doc_types filter</span>
+        </div>
+      </td>
+      <td>
+        <div class="gap-items">
+          <span class="gap-item missing">file-level results</span>
+          <span class="gap-item missing">path FTS</span>
+          <span class="gap-item missing">date filtering</span>
+          <span class="gap-item missing">PARA awareness</span>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td><span class="layer-badge l2">L2</span> Doc Exploration</td>
+      <td>
+        <div class="gap-items">
+          <span class="gap-item exists">read_note</span>
+          <span class="gap-item exists">knowledge_search</span>
+        </div>
+      </td>
+      <td>
+        <div class="gap-items">
+          <span class="gap-item missing">source_paths filter</span>
+          <span class="gap-item missing">within-doc section search</span>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td><span class="layer-badge l3">L3</span> Cross-Doc Intel</td>
+      <td>
+        <div class="gap-items">
+          <span class="gap-item exists">find_related (on-the-fly)</span>
+        </div>
+      </td>
+      <td>
+        <div class="gap-items">
+          <span class="gap-item missing">document embeddings table</span>
+          <span class="gap-item missing">relationship graph</span>
+          <span class="gap-item missing">entity extraction</span>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td><span class="layer-badge l4">L4</span> Synthesis</td>
+      <td>
+        <div class="gap-items">
+          <span class="gap-item exists">Claude Code LLM</span>
+          <span class="gap-item exists">MCP tools</span>
+        </div>
+      </td>
+      <td>
+        <div class="gap-items">
+          <span class="gap-item missing">skill.md</span>
+          <span class="gap-item missing">agent.md</span>
+        </div>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ -->
+<!-- SECTION 6: Technology Map -->
+<!-- ================================================================ -->
+<h2>Technology Map</h2>
+
+<table class="tech-table">
+  <thead>
+    <tr>
+      <th>Component</th>
+      <th>Layer(s) Served</th>
+      <th>Role</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>LanceDB</td>
+      <td><span class="layer-badge l1">L1</span> <span class="layer-badge l3">L3</span></td>
+      <td>L1: chunk vectors &nbsp;|&nbsp; L3 (future): doc-level vectors</td>
+    </tr>
+    <tr>
+      <td>SQLite FTS5</td>
+      <td><span class="layer-badge l1">L1</span> <span class="layer-badge l2">L2</span></td>
+      <td>L1: keyword search &nbsp;|&nbsp; L2 (future): path search</td>
+    </tr>
+    <tr>
+      <td>SQLite indexed_files</td>
+      <td><span class="layer-badge l1">L1</span></td>
+      <td>File metadata (path, size, date, doc_type)</td>
+    </tr>
+    <tr>
+      <td>ONNX Embedder</td>
+      <td><span class="layer-badge l1">L1</span> <span class="layer-badge l3">L3</span></td>
+      <td>L1: query embedding &nbsp;|&nbsp; L3 (future): doc embedding</td>
+    </tr>
+    <tr>
+      <td>ONNX Reranker</td>
+      <td><span class="layer-badge l1">L1</span> <span class="layer-badge l2">L2</span></td>
+      <td>L1: chunk reranking &nbsp;|&nbsp; L2: within-doc reranking</td>
+    </tr>
+    <tr>
+      <td>FastMCP</td>
+      <td><span class="layer-badge l1">L1</span> <span class="layer-badge l2">L2</span> <span class="layer-badge l3">L3</span> <span class="layer-badge l4">L4</span></td>
+      <td>MCP tool interface for all layers</td>
+    </tr>
+  </tbody>
+</table>
+
+</body>
+</html>
