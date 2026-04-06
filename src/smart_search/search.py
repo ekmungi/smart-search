@@ -107,6 +107,12 @@ class SearchEngine:
         else:
             results = self._hybrid_search(normalized, limit)
 
+        # Per-source deduplication: cap chunks from any single document
+        # to ensure result diversity across different files.
+        max_per_source = self._config.max_chunks_per_source
+        if max_per_source > 0:
+            results = self._deduplicate_by_source(results, max_per_source)
+
         # Apply doc_types filter if specified
         if doc_types:
             results = [
@@ -236,6 +242,40 @@ class SearchEngine:
         )
         return self._apply_reranking(query, fused)
 
+    @staticmethod
+    def _deduplicate_by_source(
+        results: List[SearchResult], max_per_source: int
+    ) -> List[SearchResult]:
+        """Cap chunks per source document to ensure result diversity.
+
+        Preserves rank order: iterates results top-down and keeps up to
+        max_per_source chunks from each source_path. Remaining slots are
+        filled by chunks from other documents, ensuring users see results
+        from more distinct files.
+
+        Args:
+            results: Ranked search results (already sorted by relevance).
+            max_per_source: Maximum chunks to keep per source_path.
+
+        Returns:
+            Filtered results with sequential ranks reassigned.
+        """
+        source_counts: dict[str, int] = {}
+        kept: List[SearchResult] = []
+
+        for result in results:
+            path = result.chunk.source_path
+            count = source_counts.get(path, 0)
+            if count < max_per_source:
+                source_counts[path] = count + 1
+                kept.append(result)
+
+        # Reassign sequential ranks
+        return [
+            SearchResult(rank=rank, score=r.score, chunk=r.chunk)
+            for rank, r in enumerate(kept, start=1)
+        ]
+
     def _apply_reranking(
         self, query: str, results: List[SearchResult]
     ) -> List[SearchResult]:
@@ -258,6 +298,7 @@ class SearchEngine:
                 results,
                 lambda_param=self._config.mmr_lambda,
                 limit=len(results),
+                source_penalty=self._config.mmr_source_penalty,
             )
 
         return results

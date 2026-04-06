@@ -423,6 +423,72 @@ class TestNormalizeQuery:
         assert _normalize_query("FHIR.") == "FHIR"
 
 
+class TestSourceDeduplication:
+    """Tests for per-source deduplication (max_chunks_per_source)."""
+
+    def test_deduplication_caps_chunks_per_source(self, tmp_config, mock_embedder):
+        """Results from a single source are capped at max_chunks_per_source."""
+        config = tmp_config.model_copy(update={"max_chunks_per_source": 2})
+        mock_store = MagicMock()
+        # 4 chunks from same PDF, 1 from another doc
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.95, source="/docs/big.pdf"),
+            _make_search_result(rank=2, score=0.90, source="/docs/big.pdf"),
+            _make_search_result(rank=3, score=0.85, source="/docs/big.pdf"),
+            _make_search_result(rank=4, score=0.80, source="/docs/big.pdf"),
+            _make_search_result(rank=5, score=0.75, source="/docs/other.md"),
+        ]
+        # Give each chunk a unique id
+        for i, r in enumerate(mock_store.vector_search.return_value):
+            r.chunk.id = f"chunk_{i}"
+
+        engine = SearchEngine(config, mock_embedder, mock_store)
+        results = engine.search_results("test", mode="semantic")
+
+        pdf_chunks = [r for r in results if r.chunk.source_path == "/docs/big.pdf"]
+        assert len(pdf_chunks) == 2, "Should cap at 2 chunks from big.pdf"
+        assert any(r.chunk.source_path == "/docs/other.md" for r in results)
+
+    def test_deduplication_disabled_when_zero(self, tmp_config, mock_embedder):
+        """max_chunks_per_source=0 disables deduplication."""
+        config = tmp_config.model_copy(update={"max_chunks_per_source": 0})
+        mock_store = MagicMock()
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.95, source="/docs/big.pdf"),
+            _make_search_result(rank=2, score=0.90, source="/docs/big.pdf"),
+            _make_search_result(rank=3, score=0.85, source="/docs/big.pdf"),
+        ]
+        for i, r in enumerate(mock_store.vector_search.return_value):
+            r.chunk.id = f"chunk_{i}"
+
+        engine = SearchEngine(config, mock_embedder, mock_store)
+        results = engine.search_results("test", mode="semantic")
+
+        pdf_chunks = [r for r in results if r.chunk.source_path == "/docs/big.pdf"]
+        assert len(pdf_chunks) == 3, "All chunks should pass when dedup disabled"
+
+    def test_deduplication_preserves_rank_order(self, tmp_config, mock_embedder):
+        """Deduplication preserves top-scoring chunks and reassigns ranks."""
+        config = tmp_config.model_copy(update={"max_chunks_per_source": 1})
+        mock_store = MagicMock()
+        mock_store.vector_search.return_value = [
+            _make_search_result(rank=1, score=0.95, source="/docs/a.pdf"),
+            _make_search_result(rank=2, score=0.90, source="/docs/a.pdf"),
+            _make_search_result(rank=3, score=0.85, source="/docs/b.md"),
+        ]
+        for i, r in enumerate(mock_store.vector_search.return_value):
+            r.chunk.id = f"chunk_{i}"
+
+        engine = SearchEngine(config, mock_embedder, mock_store)
+        results = engine.search_results("test", mode="semantic")
+
+        assert len(results) == 2
+        assert results[0].rank == 1
+        assert results[1].rank == 2
+        assert results[0].chunk.source_path == "/docs/a.pdf"
+        assert results[1].chunk.source_path == "/docs/b.md"
+
+
 class TestHybridSearchThreshold:
     """Tests that hybrid search doesn't prematurely filter borderline results."""
 

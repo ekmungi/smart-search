@@ -45,7 +45,41 @@ def _build_fts_query(query: str) -> str:
         safe = terms[0].replace('"', '')
         return f'"{safe}"'
 
-    # Multi-term: OR-join individual terms for broader recall
+    # Multi-term: AND-join for precision (all terms must match).
+    # Falls back to OR-join when AND returns no results (handled at
+    # the caller level via _keyword_search_with_fallback).
+    sanitized = [f'"{t.replace(chr(34), "")}"' for t in terms]
+    return " AND ".join(sanitized)
+
+
+def _build_fts_query_or(query: str) -> str:
+    """Build an OR-joined FTS5 MATCH expression for recall fallback.
+
+    Used when AND-join returns no results. Same logic as _build_fts_query
+    but uses OR instead of AND for multi-term queries.
+
+    Args:
+        query: Raw user search query.
+
+    Returns:
+        FTS5-compatible MATCH string with OR-joined terms.
+    """
+    stripped = query.strip()
+    if not stripped:
+        return ""
+
+    if stripped.startswith('"') and stripped.endswith('"') and len(stripped) > 2:
+        inner = stripped[1:-1].replace('"', '""')
+        return f'"{inner}"'
+
+    terms = stripped.split()
+    if not terms:
+        return ""
+
+    if len(terms) == 1:
+        safe = terms[0].replace('"', '')
+        return f'"{safe}"'
+
     sanitized = [f'"{t.replace(chr(34), "")}"' for t in terms]
     return " OR ".join(sanitized)
 
@@ -72,6 +106,30 @@ def keyword_search(
     if not fts_query:
         return []
 
+    results = _execute_fts_query(conn, fts_query, limit)
+
+    # Fallback: if AND-join returned nothing, try OR-join for recall
+    if not results:
+        or_query = _build_fts_query_or(query)
+        if or_query and or_query != fts_query:
+            results = _execute_fts_query(conn, or_query, limit)
+
+    return results
+
+
+def _execute_fts_query(
+    conn: sqlite3.Connection, fts_query: str, limit: int
+) -> List[dict]:
+    """Execute an FTS5 MATCH query and return results.
+
+    Args:
+        conn: SQLite connection with chunks_fts table.
+        fts_query: FTS5 MATCH expression.
+        limit: Maximum number of results.
+
+    Returns:
+        List of dicts with id, source_path, source_type, text, bm25_score.
+    """
     try:
         cursor = conn.execute(
             """SELECT id, source_path, source_type, text,
@@ -83,7 +141,7 @@ def keyword_search(
             (fts_query, limit),
         )
     except sqlite3.OperationalError:
-        logger.debug("FTS5 keyword search failed for query: %s", query, exc_info=True)
+        logger.debug("FTS5 keyword search failed for query: %s", fts_query, exc_info=True)
         return []
 
     return [

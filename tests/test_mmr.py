@@ -140,3 +140,54 @@ class TestMmrEdgeCases:
         reranked = mmr_rerank(results, lambda_param=0.8, limit=2)
         for r in reranked:
             assert 0.0 <= r.score <= 1.0
+
+
+class TestMmrSourcePenalty:
+    """Tests for source-aware MMR penalty."""
+
+    def test_source_penalty_demotes_same_source_chunks(self):
+        """Chunks from same source are penalized when source_penalty > 0."""
+        # c1 and c2 are from same source with DIFFERENT embeddings
+        # c3 is from a different source with similar relevance to c2
+        results = [
+            _make_result("c1", 1, 0.9, embedding=[1.0, 0.0, 0.0],
+                         source_path="/docs/big.pdf"),
+            _make_result("c2", 2, 0.80, embedding=[0.0, 1.0, 0.0],
+                         source_path="/docs/big.pdf"),
+            _make_result("c3", 3, 0.75, embedding=[0.0, 0.0, 1.0],
+                         source_path="/docs/other.md"),
+        ]
+        # Without source penalty, c2 stays rank 2 (diverse embedding, higher score)
+        no_penalty = mmr_rerank(results, lambda_param=0.8, limit=3, source_penalty=0.0)
+        assert no_penalty[1].chunk.id == "c2", "Without penalty, c2 should be rank 2"
+
+        # With high source penalty, c3 should be promoted above c2
+        with_penalty = mmr_rerank(results, lambda_param=0.5, limit=3, source_penalty=0.8)
+        ids = [r.chunk.id for r in with_penalty]
+        assert ids[0] == "c1", "Top result unchanged"
+        assert ids.index("c3") < ids.index("c2"), (
+            "Different-source c3 should rank above same-source c2 with penalty"
+        )
+
+    def test_source_penalty_zero_is_disabled(self):
+        """source_penalty=0 produces same results as original MMR."""
+        results = [
+            _make_result("c1", 1, 0.9, embedding=[1.0, 0.0],
+                         source_path="/docs/a.pdf"),
+            _make_result("c2", 2, 0.8, embedding=[0.0, 1.0],
+                         source_path="/docs/a.pdf"),
+        ]
+        default = mmr_rerank(results, lambda_param=0.8, limit=2)
+        with_zero = mmr_rerank(results, lambda_param=0.8, limit=2, source_penalty=0.0)
+        assert [r.chunk.id for r in default] == [r.chunk.id for r in with_zero]
+
+    def test_source_penalty_does_not_affect_first_pick(self):
+        """Source penalty doesn't apply to the first selected result."""
+        results = [
+            _make_result("c1", 1, 0.9, embedding=[1.0, 0.0],
+                         source_path="/docs/a.pdf"),
+            _make_result("c2", 2, 0.5, embedding=[0.0, 1.0],
+                         source_path="/docs/b.pdf"),
+        ]
+        reranked = mmr_rerank(results, lambda_param=0.8, limit=2, source_penalty=1.0)
+        assert reranked[0].chunk.id == "c1", "First pick is always highest relevance"

@@ -18,6 +18,7 @@ def mmr_rerank(
     results: List[SearchResult],
     lambda_param: float = 0.8,
     limit: int = 10,
+    source_penalty: float = 0.0,
 ) -> List[SearchResult]:
     """Select results that balance relevance and diversity via MMR.
 
@@ -27,10 +28,15 @@ def mmr_rerank(
     Results with empty embeddings are treated as maximally diverse
     (zero similarity to everything), preserving their relevance rank.
 
+    When source_penalty > 0, chunks from an already-selected source_path
+    receive an additional diversity penalty, preventing one document from
+    dominating results even when its chunks are semantically distinct.
+
     Args:
         results: Pre-ranked search results with embeddings.
         lambda_param: 0-1 trade-off. Higher = more relevance, lower = more diversity.
         limit: Maximum number of results to return.
+        source_penalty: 0-1 penalty for same-source chunks. 0 = disabled.
 
     Returns:
         Reordered SearchResult list with updated ranks and scores.
@@ -66,6 +72,7 @@ def mmr_rerank(
 
     # Greedy MMR selection
     selected_indices: List[int] = []
+    selected_sources: set[str] = set()
     remaining = set(range(len(results)))
     effective_limit = min(limit, len(results))
 
@@ -85,6 +92,10 @@ def mmr_rerank(
                     embeddings[idx], embeddings, selected_indices, has_embedding
                 )
 
+            # Source-aware penalty: treat same-source chunks as more similar
+            if source_penalty > 0 and results[idx].chunk.source_path in selected_sources:
+                max_sim = max(max_sim, source_penalty)
+
             mmr_score = lambda_param * relevance - (1 - lambda_param) * max_sim
 
             if mmr_score > best_mmr:
@@ -95,10 +106,12 @@ def mmr_rerank(
             break
 
         selected_indices.append(best_idx)
+        selected_sources.add(results[best_idx].chunk.source_path)
         remaining.remove(best_idx)
 
     # Build output with sequential ranks and normalized scores
     mmr_scores = []
+    seen_sources: set[str] = set()
     for idx in selected_indices:
         relevance = norm_relevance[idx]
         if not selected_indices or idx == selected_indices[0]:
@@ -111,6 +124,10 @@ def mmr_rerank(
             max_sim = _max_cosine_similarity(
                 embeddings[idx], embeddings, predecessors, has_embedding
             ) if predecessors else 0.0
+        # Apply source penalty in score recompute for consistency
+        if source_penalty > 0 and results[idx].chunk.source_path in seen_sources:
+            max_sim = max(max_sim, source_penalty)
+        seen_sources.add(results[idx].chunk.source_path)
         mmr_scores.append(lambda_param * relevance - (1 - lambda_param) * max_sim)
 
     # Normalize MMR scores to 0-1

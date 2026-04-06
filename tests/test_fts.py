@@ -92,19 +92,35 @@ class TestKeywordSearch:
         assert results[0]["id"] == "c1"
         conn.close()
 
-    def test_multi_term_query_uses_or_join(self, tmp_path):
-        """Multi-term queries match documents containing any term, not exact phrase."""
+    def test_multi_term_query_uses_and_join(self, tmp_path):
+        """Multi-term queries require all terms to match (AND-join)."""
         conn = _create_fts_db(tmp_path)
         _insert_fts_row(conn, "c1", "Machine learning is powerful for classification")
         _insert_fts_row(conn, "c2", "Deep learning algorithms are complex")
         _insert_fts_row(conn, "c3", "Cooking recipes for beginners")
+        _insert_fts_row(conn, "c4", "Machine algorithms for deep learning tasks")
 
-        # "machine algorithms" should match c1 (has "machine") and c2 (has "algorithms")
-        # but NOT require the exact phrase "machine algorithms"
+        # "machine algorithms" should match c4 (has both terms)
+        # but NOT c1 (only "machine") or c2 (only "algorithms")
         results = keyword_search(conn, "machine algorithms", limit=10)
         matched_ids = {r["id"] for r in results}
-        assert "c1" in matched_ids, "Should match doc with 'machine'"
-        assert "c2" in matched_ids, "Should match doc with 'algorithms'"
+        assert "c4" in matched_ids, "Should match doc with both 'machine' and 'algorithms'"
+        assert "c3" not in matched_ids, "Should not match unrelated doc"
+        conn.close()
+
+    def test_multi_term_and_falls_back_to_or(self, tmp_path):
+        """When AND-join returns no results, falls back to OR-join for recall."""
+        conn = _create_fts_db(tmp_path)
+        _insert_fts_row(conn, "c1", "Machine learning is powerful for classification")
+        _insert_fts_row(conn, "c2", "Deep quantum algorithms are complex")
+        _insert_fts_row(conn, "c3", "Cooking recipes for beginners")
+
+        # "machine quantum" -- no doc has both, so AND returns nothing,
+        # then OR fallback matches c1 (machine) and c2 (quantum)
+        results = keyword_search(conn, "machine quantum", limit=10)
+        matched_ids = {r["id"] for r in results}
+        assert "c1" in matched_ids, "OR fallback should match doc with 'machine'"
+        assert "c2" in matched_ids, "OR fallback should match doc with 'quantum'"
         assert "c3" not in matched_ids
         conn.close()
 

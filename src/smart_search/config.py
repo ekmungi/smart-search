@@ -69,6 +69,11 @@ class SmartSearchConfig(BaseSettings):
     relevance_threshold: float = 0.30
     rrf_k: int = 60  # RRF constant; lower values (20-30) boost top-ranked results
 
+    # Per-source diversity: max chunks from any single document in results.
+    # Prevents one large document from dominating all result slots.
+    # 0 = no limit (original behavior).
+    max_chunks_per_source: int = 2
+
     # Cross-encoder reranking settings (Phase 2: search quality improvements)
     reranking_enabled: bool = True
     reranker_model: str = "cross-encoder/ms-marco-TinyBERT-L-2-v2"
@@ -78,6 +83,7 @@ class SmartSearchConfig(BaseSettings):
     # MMR diversity settings (Phase 3: eliminate redundant chunks)
     mmr_enabled: bool = True
     mmr_lambda: float = 0.8  # 0-1: higher = more relevance, lower = more diversity
+    mmr_source_penalty: float = 0.5  # 0-1: penalty for same-source chunks in MMR (0=disabled)
 
     # GPU acceleration settings
     gpu_device_id: int = 0               # CUDA/DirectML device index
