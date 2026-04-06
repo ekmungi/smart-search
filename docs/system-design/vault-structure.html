@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Vault Structure - PARA + Wiki Integration</title>
+<title>Vault Structure - PARA + Knowledge Graph</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -21,212 +21,249 @@
 
 <div class="container">
   <h1>Vault Structure</h1>
-  <p class="subtitle">How the wiki layer integrates with your existing PARA-organized Obsidian vault without disrupting your workflow.</p>
+  <p class="subtitle">How the <code>_knowledge/</code> layer integrates with your PARA-organized Obsidian vault. Focused on the Meetings pilot.</p>
+
+  <div class="highlight-box yellow">
+    <p><strong>Caveat: We haven't seen the actual vault yet.</strong> The structure below is our best understanding based on what Anant has described. Actual folder names, file conventions, and transcription tool output format will be confirmed by the <code>vault-audit</code> skill. The architecture adapts to whatever the audit reveals.</p>
+  </div>
 
   <h2>Design Principle: Respect What Exists</h2>
 
   <div class="highlight-box blue">
-    <p><strong>Your PARA structure stays exactly as-is.</strong> The wiki layer adds two new things: (1) <code>_wiki/</code> subfolders inside existing folders for auto-generated companion MDs, and (2) a vault-level <code>_knowledge/</code> folder for cross-cutting entity and concept pages. Your existing notes, your folder organization, your file locations &mdash; none of these change. The underscore prefix (<code>_wiki/</code>, <code>_knowledge/</code>) visually separates generated content from your own work.</p>
+    <p><strong>Your PARA structure stays exactly as-is.</strong> The system adds one new thing: a vault-level <code>_knowledge/</code> folder for cross-cutting entity and concept pages (Karpathy's "wiki" layer). Your existing notes, folder organization, and file locations don't change. The underscore prefix keeps generated content visually separate from your own work.</p>
   </div>
 
-  <h2>Complete Vault Structure</h2>
+  <h2>Conceptual Vault Structure</h2>
 
   <div class="tree" style="font-size:0.82rem;">
 <span class="folder">Obsidian Vault/</span>
 &boxvr;&boxh;&boxh; <span class="folder">Projects/</span> <span class="comment">&mdash; Active, time-bound work with clear deliverables</span>
-&boxv;   &boxvr;&boxh;&boxh; <span class="folder">FY27-CAMS-Alignment/</span> <span class="comment">&mdash; Example project</span>
+&boxv;   &boxvr;&boxh;&boxh; <span class="folder">FY27-CAMS-Alignment/</span>
 &boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="folder">tasks/</span>
-&boxv;   &boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">sprint-backlog.md</span> <span class="comment">&mdash; your note (not compiled, already MD)</span>
-&boxv;   &boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="file">requirements-tracker.md</span>
 &boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="folder">resources/</span>
-&boxv;   &boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">roadmap-q1-q4.xlsx</span> <span class="comment">&mdash; raw file (no user note exists)</span>
-&boxv;   &boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">competitor-analysis.pdf</span> <span class="comment">&mdash; raw file (no user note exists)</span>
-&boxv;   &boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">regulatory-submission-plan.docx</span> <span class="comment">&mdash; raw file (has user note below)</span>
-&boxv;   &boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="file">regulatory-submission-notes.md</span> <span class="comment">&mdash; YOUR note linking to the docx above</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="auto">_wiki/</span> <span class="comment">&mdash; AUTO-GENERATED companion MDs (only for uncovered files)</span>
-&boxv;   &boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="auto">roadmap-q1-q4.md</span> <span class="comment">&mdash; auto-generated (xlsx had no note)</span>
-&boxv;   &boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="auto">competitor-analysis.md</span> <span class="comment">&mdash; auto-generated (pdf had no note)</span>
-&boxv;   &boxv;   &boxv;       <span class="comment">NOTE: regulatory-submission-plan.docx is NOT here</span>
-&boxv;   &boxv;   &boxv;       <span class="comment">      because it already has regulatory-submission-notes.md</span>
-&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="file">project-overview.md</span> <span class="comment">&mdash; your project note</span>
-&boxv;   &boxvr;&boxh;&boxh; <span class="folder">AI-Colonoscopy-V2/</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; ...
-&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="auto">_wiki/</span>
+&boxv;   &boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">roadmap-q1-q4.xlsx</span>
+&boxv;   &boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="file">competitor-analysis.pdf</span>
+&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="file">project-overview.md</span>
 &boxv;   &boxur;&boxh;&boxh; ...
 &boxv;
-&boxvr;&boxh;&boxh; <span class="folder">Areas/</span> <span class="comment">&mdash; Ongoing responsibilities, long-term focus areas</span>
+&boxvr;&boxh;&boxh; <span class="folder">Areas/</span> <span class="comment">&mdash; Ongoing responsibilities, long-term focus</span>
 &boxv;   &boxvr;&boxh;&boxh; <span class="folder">Product-Roadmaps/</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">FY27-global-roadmap.pptx</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">roadmap-notes.md</span> <span class="comment">&mdash; your note (links to pptx)</span>
-&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="auto">_wiki/</span> <span class="comment">&mdash; empty if all files have notes</span>
 &boxv;   &boxvr;&boxh;&boxh; <span class="folder">My-Writings/</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">ai-in-endoscopy-draft.md</span> <span class="comment">&mdash; your writing (not compiled)</span>
-&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="file">patent-ideas.md</span>
 &boxv;   &boxur;&boxh;&boxh; ...
 &boxv;
-&boxvr;&boxh;&boxh; <span class="folder">Resources/</span> <span class="comment">&mdash; Reference material, the "raw/" equivalent in Karpathy's pattern</span>
-&boxv;   &boxvr;&boxh;&boxh; <span class="folder">Literature/</span> <span class="comment">&mdash; Scientific papers, regulatory guidance, clinical studies</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">smith-2025-ai-colonoscopy-rct.pdf</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">smith-2025-notes.md</span> <span class="comment">&mdash; your literature note</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">fda-guidance-ai-ml-devices-2024.pdf</span> <span class="comment">&mdash; no note exists</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">eu-mdr-annex-xiv-clinical-evaluation.pdf</span> <span class="comment">&mdash; no note exists</span>
-&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="auto">_wiki/</span>
-&boxv;   &boxv;       &boxvr;&boxh;&boxh; <span class="auto">fda-guidance-ai-ml-devices-2024.md</span> <span class="comment">&mdash; auto-generated</span>
-&boxv;   &boxv;       &boxur;&boxh;&boxh; <span class="auto">eu-mdr-annex-xiv-clinical-evaluation.md</span> <span class="comment">&mdash; auto-generated</span>
-&boxv;   &boxvr;&boxh;&boxh; <span class="folder">Meeting-Transcripts/</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">2026-03-15-fda-pre-sub-meeting.docx</span> <span class="comment">&mdash; transcript</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">2026-03-15-fda-pre-sub-notes.md</span> <span class="comment">&mdash; YOUR meeting notes</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">2026-04-01-partner-call-acme.docx</span> <span class="comment">&mdash; transcript (no note)</span>
-&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="auto">_wiki/</span>
-&boxv;   &boxv;       &boxur;&boxh;&boxh; <span class="auto">2026-04-01-partner-call-acme.md</span>
+&boxvr;&boxh;&boxh; <span class="folder">Resources/</span> <span class="comment">&mdash; Reference material (Karpathy's "raw/" equivalent)</span>
+&boxv;   &boxvr;&boxh;&boxh; <span class="folder">Meeting-Notes/</span> <span class="comment">&mdash; YOUR meeting notes (MD), link to transcripts</span>
+&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">2026-03-15-fda-pre-sub.md</span> <span class="comment">&mdash; your notes, links to transcript</span>
+&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">2026-04-01-partner-call.md</span>
+&boxv;   &boxv;   &boxur;&boxh;&boxh; ...
+&boxv;   &boxvr;&boxh;&boxh; <span class="folder">Meeting-Transcripts/</span> <span class="comment">&mdash; Raw transcripts from transcription tool</span>
+&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">2026-03-15-fda-pre-sub-transcript.md</span>
+&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">2026-04-01-partner-call-transcript.md</span>
+&boxv;   &boxv;   &boxur;&boxh;&boxh; ...
+&boxv;   &boxvr;&boxh;&boxh; <span class="folder">Stakeholders/</span> <span class="comment">&mdash; One MD per stakeholder (existing!)</span>
+&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">dr-klaus-muller.md</span> <span class="comment">&mdash; not yet linked to meetings</span>
+&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">dr-anna-weber.md</span>
+&boxv;   &boxv;   &boxur;&boxh;&boxh; ...
+&boxv;   &boxvr;&boxh;&boxh; <span class="folder">Literature/</span>
 &boxv;   &boxvr;&boxh;&boxh; <span class="folder">User-Interviews/</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">interview-dr-mueller-2026-03.docx</span>
-&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="auto">_wiki/</span>
-&boxv;   &boxv;       &boxur;&boxh;&boxh; <span class="auto">interview-dr-mueller-2026-03.md</span>
 &boxv;   &boxvr;&boxh;&boxh; <span class="folder">Congress-Notes/</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">ddf-2026-session-notes.md</span> <span class="comment">&mdash; your congress notes</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="file">ddf-2026-presentations.zip</span>
-&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="auto">_wiki/</span>
-&boxv;   &boxvr;&boxh;&boxh; <span class="folder">Competitor-Info/</span>
-&boxv;   &boxur;&boxh;&boxh; <span class="folder">AI-Deep-Researches/</span>
+&boxv;   &boxur;&boxh;&boxh; <span class="folder">Competitor-Info/</span>
 &boxv;
-&boxvr;&boxh;&boxh; <span class="knowledge">_knowledge/</span> <span class="comment">&mdash; VAULT-LEVEL KNOWLEDGE GRAPH (cross-cutting, LLM-maintained)</span>
-&boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">index.md</span> <span class="comment">&mdash; Master catalog: every entity and concept page listed with one-line summaries</span>
-&boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">log.md</span> <span class="comment">&mdash; Chronological record: "2026-04-06 ingested fda-guidance-2024.pdf &rarr; updated entities/fda-510k.md"</span>
-&boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">SCHEMA.md</span> <span class="comment">&mdash; Conventions: page templates, frontmatter format, cross-link syntax</span>
+&boxvr;&boxh;&boxh; <span class="knowledge">_knowledge/</span> <span class="comment">&mdash; NEW: Vault-level knowledge graph (Karpathy's "wiki" layer)</span>
+&boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">index.md</span> <span class="comment">&mdash; Master catalog: every entity/concept page, one-line summaries</span>
+&boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">log.md</span> <span class="comment">&mdash; Append-only: "2026-04-06 ingest | Meeting: FDA Pre-Sub"</span>
+&boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">SCHEMA.md</span> <span class="comment">&mdash; Conventions: page templates, cross-link syntax</span>
 &boxv;   &boxvr;&boxh;&boxh; <span class="folder">entities/</span> <span class="comment">&mdash; Pages for specific things</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">product-cams.md</span> <span class="comment">&mdash; Everything about CAMS: from meetings, roadmaps, regulatory docs</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">fda-510k.md</span> <span class="comment">&mdash; 510(k) pathway: from guidance docs, meetings, research</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">eu-mdr.md</span> <span class="comment">&mdash; EU MDR: from regulatory docs, compliance plans</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">competitor-acme-ai.md</span> <span class="comment">&mdash; Acme AI: from partner calls, market research</span>
-&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">dr-smith.md</span> <span class="comment">&mdash; Dr. Smith: from meetings, interviews, publications</span>
-&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="knowledge">cleopatra-iii-trial.md</span> <span class="comment">&mdash; Trial data: from papers, clinical evidence</span>
+&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">product-cams.md</span> <span class="comment">&mdash; From meetings, roadmaps, regulatory docs</span>
+&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">fda-510k.md</span> <span class="comment">&mdash; From guidance docs, meetings, research</span>
+&boxv;   &boxv;   &boxvr;&boxh;&boxh; <span class="knowledge">dr-klaus-muller.md</span> <span class="comment">&mdash; Links TO stakeholder file + meeting history</span>
+&boxv;   &boxv;   &boxur;&boxh;&boxh; <span class="knowledge">competitor-acme-ai.md</span>
 &boxv;   &boxur;&boxh;&boxh; <span class="folder">concepts/</span> <span class="comment">&mdash; Pages for abstract topics</span>
-&boxv;       &boxvr;&boxh;&boxh; <span class="knowledge">regulatory-pathways-ai-devices.md</span> <span class="comment">&mdash; Synthesized from FDA, EU MDR, MHRA sources</span>
-&boxv;       &boxvr;&boxh;&boxh; <span class="knowledge">clinical-evidence-requirements.md</span> <span class="comment">&mdash; GRADE, QUADAS-2, evidence hierarchy</span>
-&boxv;       &boxvr;&boxh;&boxh; <span class="knowledge">ai-in-endoscopy-market.md</span> <span class="comment">&mdash; Market dynamics, trends, competitive landscape</span>
-&boxv;       &boxur;&boxh;&boxh; <span class="knowledge">software-as-medical-device.md</span> <span class="comment">&mdash; SaMD classification, IEC 62304, SOUP</span>
+&boxv;       &boxvr;&boxh;&boxh; <span class="knowledge">regulatory-pathways-ai-devices.md</span>
+&boxv;       &boxur;&boxh;&boxh; <span class="knowledge">clinical-evidence-requirements.md</span>
 &boxv;
-&boxvr;&boxh;&boxh; <span class="folder">Archives/</span> <span class="comment">&mdash; Frozen content. No compilation. _wiki/ preserved but not updated.</span>
+&boxvr;&boxh;&boxh; <span class="folder">Archives/</span> <span class="comment">&mdash; Frozen. No compilation. No updates.</span>
 &boxv;   &boxvr;&boxh;&boxh; <span class="folder">Projects-Archive/</span>
-&boxv;   &boxvr;&boxh;&boxh; <span class="folder">Areas-Archive/</span>
 &boxv;   &boxur;&boxh;&boxh; <span class="folder">Resources-Archive/</span>
 &boxv;
 &boxur;&boxh;&boxh; <span class="file">.obsidian/</span> <span class="comment">&mdash; Obsidian config (untouched)</span>
   </div>
 
-  <h2>What the Search Engine Indexes</h2>
+  <h2>The Meetings Pilot: Before and After</h2>
+
+  <div class="grid-2">
+    <div class="card" style="border-color:var(--red);">
+      <h3 style="color:var(--red);margin-top:0;">Before (Today)</h3>
+      <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
+        <li>Meeting notes are free-form, varying formats</li>
+        <li>Transcripts exist but aren't always linked from notes</li>
+        <li>Stakeholder files exist but have no links to meetings</li>
+        <li>No structured frontmatter (date, attendees, projects)</li>
+        <li>No way to ask "all meetings with Dr. Muller about CAMS"</li>
+        <li>No entity pages &mdash; knowledge re-discovered from scratch each query</li>
+        <li>Obsidian graph view shows sparse connections</li>
+      </ul>
+    </div>
+    <div class="card" style="border-color:var(--green);">
+      <h3 style="color:var(--green);margin-top:0;">After (Pilot Complete)</h3>
+      <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
+        <li>Meeting notes have standardized frontmatter (date, attendees, projects, meeting_type, transcript link)</li>
+        <li>Transcripts linked bidirectionally from meeting notes</li>
+        <li>Stakeholder files linked to meeting history (wiki-links)</li>
+        <li>Related meetings discovered and cross-linked automatically</li>
+        <li>Structured queries: "all regulatory meetings in Q1" via frontmatter grep</li>
+        <li>Entity pages in <code>_knowledge/</code> accumulate discussion timelines</li>
+        <li>Obsidian graph view shows rich meeting&harr;stakeholder&harr;project web</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- STAKEHOLDER LINKING -->
+  <h2>Stakeholder &harr; Meeting Linking</h2>
 
   <div class="highlight-box green">
-    <p><strong>Only Markdown files get indexed by the search engine.</strong> The raw binary files (PDF, DOCX, PPTX, XLSX) are <em>not</em> indexed directly. Instead, their knowledge is captured in either your handwritten notes or auto-generated companion MDs. The search engine only needs to index three types of MD files:</p>
+    <p><strong>Stakeholders are the first "entities" in the knowledge graph.</strong> They already exist as MD files in <code>Resources/Stakeholders/</code>. The <code>process-meeting</code> skill creates bidirectional links: meeting notes wiki-link to stakeholder files, and stakeholder files get a "Meeting History" section with wiki-links back to meetings. Obsidian's backlinks feature makes these navigable immediately.</p>
   </div>
+
+  <div class="grid-2">
+    <div class="card" style="border-color:var(--blue);">
+      <h3 style="color:var(--blue);margin-top:0;">In the Meeting Note</h3>
+      <div class="tree" style="font-size:0.85rem;line-height:1.8;">
+---
+date: 2026-03-15
+type: meeting
+meeting_type: regulatory
+attendees:
+  - "[[dr-klaus-muller]]"
+  - "[[dr-anna-weber]]"
+projects:
+  - "[[FY27-CAMS-Alignment]]"
+transcript: "[[2026-03-15-transcript]]"
+tags: [fda, 510k, pre-submission]
+---
+# 2026-03-15: FDA Pre-Submission Meeting
+
+## Related Meetings
+- [[2026-02-28-fda-strategy]] &mdash; Prior 510(k) discussion
+- [[2026-01-10-competitor-review]] &mdash; Competitor regulatory approach
+      </div>
+    </div>
+    <div class="card" style="border-color:var(--blue);">
+      <h3 style="color:var(--blue);margin-top:0;">In the Stakeholder File</h3>
+      <div class="tree" style="font-size:0.85rem;line-height:1.8;">
+---
+type: stakeholder
+name: Dr. Klaus Muller
+title: Head of Radiology Informatics
+organization: University Hospital Zurich
+relationship: academic
+last_interaction: 2026-03-15
+---
+# Dr. Klaus Muller
+
+## Meeting History
+- [[2026-03-15-fda-pre-sub]] &mdash; FDA Pre-Submission
+- [[2026-01-15-pilot-kickoff]] &mdash; Chest X-ray Pilot
+- [[2025-12-10-initial-call]] &mdash; First meeting
+
+## Communication Style
+Prefers data-driven discussions. Detail-oriented.
+      </div>
+    </div>
+  </div>
+
+  <!-- KNOWLEDGE GRAPH -->
+  <h2>The <code>_knowledge/</code> Layer</h2>
+
+  <p>This is Karpathy's "wiki" &mdash; the compounding artifact. Entity pages accumulate knowledge from every meeting, every research session, every project. They grow richer over time without manual maintenance.</p>
 
   <div class="grid-3">
-    <div class="card" style="border-color: var(--green);">
-      <div class="card-header">
-        <div class="icon" style="background:var(--green-bg);color:var(--green);">1</div>
-        <h4>Your Notes</h4>
-      </div>
-      <p style="font-size:0.9rem;">Meeting notes, literature notes, project notes, congress notes, and all other MD files you've written. These are spread across Projects/, Areas/, and Resources/ folders. They are the primary knowledge source and are indexed directly.</p>
+    <div class="card" style="border-color:var(--purple);">
+      <h4 style="color:var(--purple);">Entity Pages</h4>
+      <p style="font-size:0.85rem;">Dedicated pages for specific things: products (<em>CAMS</em>), people (<em>Dr. Muller</em>), companies (<em>Competitor X</em>), regulations (<em>FDA 510(k)</em>). Each aggregates everything your vault knows about that entity. <strong>Updated incrementally</strong> &mdash; each source adds, never replaces.</p>
     </div>
-    <div class="card" style="border-color: var(--orange);">
-      <div class="card-header">
-        <div class="icon" style="background:var(--orange-bg);color:var(--orange);">2</div>
-        <h4>Companion MDs</h4>
-      </div>
-      <p style="font-size:0.9rem;">Auto-generated summaries in <code>_wiki/</code> subfolders for raw files that don't have your handwritten notes. These fill the gaps so every file is represented in the search index as Markdown text.</p>
+    <div class="card" style="border-color:var(--purple);">
+      <h4 style="color:var(--purple);">Concept Pages</h4>
+      <p style="font-size:0.85rem;">Pages for abstract topics: <em>Regulatory Pathways for AI Devices</em>, <em>Clinical Evidence Requirements</em>. Synthesize knowledge across multiple sources. These are the "reference articles" that Karpathy's pattern builds over time.</p>
     </div>
-    <div class="card" style="border-color: var(--purple);">
-      <div class="card-header">
-        <div class="icon" style="background:var(--purple-bg);color:var(--purple);">3</div>
-        <h4>Knowledge Pages</h4>
-      </div>
-      <p style="font-size:0.9rem;">Entity and concept pages in <code>_knowledge/</code>. These are the highest-value search targets because they contain pre-synthesized, cross-linked knowledge from multiple sources. Searching here first (Tier 0) gives the best answers.</p>
+    <div class="card" style="border-color:var(--purple);">
+      <h4 style="color:var(--purple);">Special Files</h4>
+      <p style="font-size:0.85rem;"><code>index.md</code>: Master catalog (read first on every query). <code>log.md</code>: Chronological record of ingestion. <code>SCHEMA.md</code>: Templates and conventions. These three files anchor the entire knowledge graph.</p>
     </div>
   </div>
 
-  <h2>Key Design Rules</h2>
+  <h2>Example Entity Page: Discussion Timeline</h2>
 
-  <table>
-    <tr>
-      <td><strong>Rule 1: Never duplicate user notes</strong></td>
-      <td>If you've written a meeting note that links to a transcript, the system uses your note as the knowledge source for that file. It does NOT create a second summary in <code>_wiki/</code>. Your note is always preferred over auto-generated content.</td>
-    </tr>
-    <tr>
-      <td><strong>Rule 2: _wiki/ is for gaps only</strong></td>
-      <td>Auto-generated companion MDs only appear for raw files that have no associated user note. If you later write a note for a file, the companion MD in <code>_wiki/</code> can be archived or deleted (the <code>wiki-lint</code> skill helps identify these).</td>
-    </tr>
-    <tr>
-      <td><strong>Rule 3: _knowledge/ is cross-cutting</strong></td>
-      <td>Entity and concept pages aggregate knowledge from ALL sources across the entire vault. A single entity page (e.g., <code>fda-510k.md</code>) might draw from regulatory guidance in Resources/, meeting transcripts, project planning docs, and your own notes. This cross-pollination is the primary value of the knowledge graph.</td>
-    </tr>
-    <tr>
-      <td><strong>Rule 4: Archives are frozen</strong></td>
-      <td>When a project or area is archived, its <code>_wiki/</code> subfolder moves with it but is no longer updated. Entity pages in <code>_knowledge/</code> retain their historical references but are flagged as "from archived source" to indicate potential staleness.</td>
-    </tr>
-    <tr>
-      <td><strong>Rule 5: Raw files are immutable</strong></td>
-      <td>The system never modifies your original files. PDFs stay as PDFs. DOCX stays as DOCX. Only new files are created (companion MDs, knowledge pages).</td>
-    </tr>
-    <tr>
-      <td><strong>Rule 6: Provenance is always traceable</strong></td>
-      <td>Every companion MD has <code>source_path:</code> frontmatter pointing to its raw file. Every knowledge page cites specific source notes with Obsidian wiki-links. You can always trace a claim back to the original document.</td>
-    </tr>
-  </table>
-
-  <h2>Example Entity Page: <code>_knowledge/entities/fda-510k.md</code></h2>
+  <div class="highlight-box purple">
+    <p><strong>The key innovation for meetings:</strong> Entity pages accumulate a chronological discussion thread. Instead of searching for related meetings every time, the entity page IS the thread.</p>
+  </div>
 
   <div class="tree" style="font-size: 0.85rem; line-height: 1.8;">
 ---
 type: entity
 category: regulation
 aliases: [510(k), 510k, FDA 510(k) pathway]
-first_seen: 2026-01-15
 last_updated: 2026-04-06
 source_count: 7
 tags: [regulatory, FDA, 510k, medical-device, SaMD]
 ---
 
-# FDA 510(k) Pathway
+# FDA 510(k) &mdash; CAMS
 
 ## Summary
-The 510(k) premarket notification is the most common regulatory pathway for
-medical devices in the US. A 510(k) demonstrates that a new device is
-"substantially equivalent" to a legally marketed predicate device.
+The 510(k) premarket notification is our chosen regulatory pathway
+for the CAMS AI colonoscopy device in the US market.
+
+## Discussion Timeline
+- [[2026-01-10-competitor-review]] &mdash; Noted Competitor X got 510(k) in 6 months
+- [[2026-02-28-fda-strategy]] &mdash; Decided to pursue 510(k) over De Novo
+- [[2026-03-15-fda-pre-sub]] &mdash; Dr. Muller raised IRB timeline concern
+- [[2026-04-01-regulatory-sync]] &mdash; Updated: submission target Q3 2026
+
+<span class="comment"># Each processed meeting appends to this timeline automatically.</span>
+<span class="comment"># Over time: a complete narrative thread per topic.</span>
 
 ## Key Facts
-- **Regulatory body:** FDA (CDRH)
-- **Average review time:** 3-6 months (traditional), 6-12 months (De Novo)
-- **Applicable to our products:** CAMS AI colonoscopy device
-- **Predicate devices:** [[_knowledge/entities/predicate-devices|Predicate Devices]]
-
-## From Our Sources
-
-### Regulatory Guidance
-- The 2024 FDA guidance on AI/ML devices recommends a predetermined change control
-  plan (PCCP) for adaptive algorithms.
-  <span class="comment">Source: [[Resources/Literature/_wiki/fda-guidance-ai-ml-devices-2024|FDA AI/ML Guidance 2024]]</span>
-
-### Meeting Notes
-- In the March 15 pre-submission meeting, FDA indicated they would accept our
-  approach to clinical validation using retrospective data plus a small prospective
-  study.
-  <span class="comment">Source: [[Resources/Meeting-Transcripts/2026-03-15-fda-pre-sub-notes|FDA Pre-Sub Meeting Notes]]</span>
-
-### Project Planning
-- 510(k) submission is scheduled for Q1 FY27 per the CAMS product roadmap.
-  <span class="comment">Source: [[Projects/FY27-CAMS-Alignment/resources/_wiki/roadmap-q1-q4|CAMS Roadmap]]</span>
+- Predicate device: Competitor X's cleared device (K231234)
+- Target submission: Q3 FY27
+- Clinical evidence: retrospective + small prospective study
+- PCCP may be required (per 2024 FDA guidance)
 
 ## Related
 - [[_knowledge/entities/product-cams|Product: CAMS]]
 - [[_knowledge/entities/eu-mdr|EU MDR]] (parallel pathway)
-- [[_knowledge/concepts/regulatory-pathways-ai-devices|Regulatory Pathways for AI Devices]]
-- [[_knowledge/concepts/clinical-evidence-requirements|Clinical Evidence Requirements]]
-
-## Contradictions &amp; Open Questions
-- <span style="color:var(--yellow);">OPEN:</span> The 2024 guidance suggests PCCP may become mandatory, but our current
-  submission plan does not include one. Need to confirm with regulatory team.
+- [[_knowledge/concepts/regulatory-pathways-ai-devices|Regulatory Pathways]]
   </div>
+
+  <!-- KEY RULES -->
+  <h2>Key Design Rules</h2>
+
+  <table>
+    <tr>
+      <td><strong>Rule 1: Raw files are immutable</strong></td>
+      <td>The system never modifies your original files. Transcripts, PDFs, DOCX &mdash; all stay as they are. Only new files are created (knowledge pages) and existing user notes are enhanced (frontmatter, wiki-links).</td>
+    </tr>
+    <tr>
+      <td><strong>Rule 2: _knowledge/ is cross-cutting</strong></td>
+      <td>Entity and concept pages aggregate knowledge from ALL sources across the entire vault. A single entity page might draw from meetings, project docs, research papers, and your own notes.</td>
+    </tr>
+    <tr>
+      <td><strong>Rule 3: Entity pages only append</strong></td>
+      <td>Each new source adds information to existing entity pages. Never replaces. The Discussion Timeline section grows with every meeting. Source attribution traces every claim.</td>
+    </tr>
+    <tr>
+      <td><strong>Rule 4: Archives are frozen</strong></td>
+      <td>When content moves to Archives, it's no longer processed. Entity pages retain historical references but mark them as "from archived source."</td>
+    </tr>
+    <tr>
+      <td><strong>Rule 5: Provenance is traceable</strong></td>
+      <td>Every knowledge page cites specific source notes with Obsidian wiki-links. You can always trace a claim back to the original meeting, document, or session.</td>
+    </tr>
+    <tr>
+      <td><strong>Rule 6: vault-audit discovers, doesn't assume</strong></td>
+      <td>We don't impose templates or conventions without first understanding what exists. The vault-audit skill maps the real structure, and all subsequent skills adapt to it.</td>
+    </tr>
+  </table>
 
 </div>
 </body>

@@ -21,12 +21,16 @@
 
 <div class="container">
   <h1>Smart-search vs QMD</h1>
-  <p class="subtitle">A critical, honest comparison to decide whether to continue developing smart-search or adopt QMD as the search layer.</p>
+  <p class="subtitle">Decision: <strong>keep smart-search</strong>. The 30x RAM advantage and local-first, no-GPU design make it the right engine for this system.</p>
 
-  <h2>The Key Question</h2>
+  <h2>The Deciding Factor</h2>
+
+  <div class="highlight-box green">
+    <p><strong>Local-first, no GPU.</strong> Smart-search runs at ~130 MB RAM with CPU-only inference. QMD pulls in node-llama-cpp with a 0.6B reranker and a 1.7B query-expansion model, landing at ~4&ndash;6 GB RAM and expecting GPU acceleration for acceptable latency. On a standard laptop without a discrete GPU, smart-search is the only option that stays responsive. This is a 30x difference in memory footprint &mdash; and it is the deciding factor.</p>
+  </div>
 
   <div class="highlight-box yellow">
-    <p><strong>In the new architecture where every raw file has a companion MD, and only Markdown files get indexed, smart-search's biggest differentiator (14-format conversion via MarkItDown) becomes irrelevant for the search layer.</strong> The conversion capability moves to the compilation layer (Jeeves wiki-compile skill). Both smart-search and QMD can index Markdown files. So the question becomes: which one does Markdown search better?</p>
+    <p>In the new architecture where every raw file has a companion MD and only Markdown files get indexed, smart-search's biggest differentiator (14-format conversion via MarkItDown) becomes irrelevant for the search layer. The conversion capability moves to the compilation layer (Jeeves wiki-compile skill). Both smart-search and QMD can index Markdown files. So the question was: which one does Markdown search better? QMD has more sophisticated retrieval techniques &mdash; but they come at a resource cost that disqualifies it for a local-first, no-GPU workflow. The right move is to keep smart-search and selectively port the best QMD ideas.</p>
   </div>
 
   <h2>Head-to-Head Comparison</h2>
@@ -37,6 +41,12 @@
         <tr><th style="width:20%;">Dimension</th><th style="width:35%;">Smart-search (v0.15.1)</th><th style="width:35%;">QMD (Tobi Lutke)</th><th style="width:10%;">Edge</th></tr>
       </thead>
       <tbody>
+        <tr>
+          <td><strong>RAM / Memory</strong></td>
+          <td><span class="badge" style="background:var(--green);">~130 MB</span> total runtime. TinyBERT reranker is 15 MB; Snowflake Arctic Embed is ~297 MB on disk but loads partially. Comfortable on any machine.</td>
+          <td><span class="badge" style="background:var(--red);">~4&ndash;6 GB</span> total runtime. Loads a 0.6B reranker (~640 MB) and a 1.7B query-expansion model (~1.2 GB GGUF) via node-llama-cpp, plus embeddings. Needs a beefy machine or GPU offload.</td>
+          <td class="compare-winner"><strong>Smart-search (30x lighter)</strong></td>
+        </tr>
         <tr>
           <td><strong>Search Pipeline</strong></td>
           <td>BM25 full-text + vector semantic search, combined via Reciprocal Rank Fusion (RRF, k=60). Cross-encoder reranking with TinyBERT (15MB model, 30-60ms). Maximum Marginal Relevance for result diversity.</td>
@@ -131,50 +141,45 @@
     </table>
   </div>
 
-  <h2>The Honest Assessment</h2>
+  <h2>Learnings to Port from QMD &rarr; Smart-search</h2>
+
+  <p>QMD is not the right engine for this system, but it contains three innovations worth adopting in smart-search:</p>
 
   <div class="grid-2">
-    <div class="card" style="border-color: var(--green);">
-      <h3 style="color:var(--green);margin-top:0;">Arguments for Keeping Smart-search</h3>
-      <p><strong>1. Already built and integrated.</strong> Smart-search works today. It's deeply integrated with Jeeves (11 MCP tools, dedicated skill). Switching to QMD requires re-integration work: new MCP configuration, updated Jeeves skills, testing.</p>
-      <p><strong>2. Desktop app.</strong> The Tauri desktop app provides a visual interface for managing folders, viewing indexing status, and quick searching. QMD has no GUI. If you value the visual management experience, this matters.</p>
-      <p><strong>3. File watching.</strong> Smart-search automatically detects and re-indexes changed files. QMD requires manual re-indexing (<code>qmd embed</code>). In the new architecture, the file watcher serves double duty: triggering both search re-indexing and wiki compilation.</p>
-      <p><strong>4. You control it.</strong> Full ownership means you can add features, fix bugs, and customize behavior without waiting for upstream changes. Smart-search is exactly what you need because you shaped it.</p>
-      <p><strong>5. MarkItDown integration.</strong> Even though format conversion moves to the compilation layer, having MarkItDown already integrated in smart-search means the <code>wiki-compile</code> skill can leverage smart-search's existing <code>read_note</code> MCP tool for file conversion.</p>
+    <div class="card" style="border-color: var(--accent);">
+      <h3 style="color:var(--accent);margin-top:0;">1. Query Expansion (Lighter Version)</h3>
+      <p>QMD uses a fine-tuned 1.7B model to generate query variants before search. This dramatically improves recall when the user's phrasing doesn't match the document text.</p>
+      <p><strong>Port to smart-search:</strong> Add a lightweight query expansion step that calls an LLM API (e.g., Claude or a local small model) to generate 2&ndash;3 reformulations of the query. Run all variants through the existing BM25 + vector pipeline and merge results. This avoids loading a 1.7B model locally while capturing most of the recall benefit. Could also use a tiny local model (&lt;100 MB) for offline scenarios.</p>
     </div>
 
-    <div class="card" style="border-color: var(--red);">
-      <h3 style="color:var(--red);margin-top:0;">Arguments for Switching to QMD</h3>
-      <p><strong>1. Superior search quality.</strong> QMD has query expansion, LLM reranking (not just a tiny cross-encoder), and position-aware blending. For a knowledge base system where search quality directly impacts the quality of Jeeves agent answers, this matters significantly.</p>
-      <p><strong>2. Context system.</strong> QMD's ability to attach metadata to collections/paths is a natural fit for PARA. Your Jeeves agents would receive search results with context like "this result comes from a regulatory resource" or "this is from an active project document." Smart-search has nothing comparable.</p>
-      <p><strong>3. Maintenance burden.</strong> You are a scientist, not a software developer. Maintaining a complex Python codebase with FastAPI, LanceDB, ONNX, Tauri, and 425 tests is significant overhead. QMD is a dependency you use, not code you maintain. Your time is better spent on the compilation layer (wiki skills) and your actual PM work.</p>
-      <p><strong>4. Purpose-built for this pattern.</strong> QMD was designed to be the search layer for markdown knowledge bases. It's the tool Karpathy recommends. It solves exactly the problem you have, and it's optimized for agentic workflows (LLM agents searching your knowledge base).</p>
-      <p><strong>5. Simpler storage.</strong> Single SQLite file vs. LanceDB + SQLite. Easier to backup, migrate, debug.</p>
+    <div class="card" style="border-color: var(--accent);">
+      <h3 style="color:var(--accent);margin-top:0;">2. Collection / Path Context</h3>
+      <p>QMD attaches folder-path metadata to results, so an LLM agent receiving search results knows whether a document came from Projects/, Resources/, or Archives/ &mdash; and can prioritize accordingly.</p>
+      <p><strong>Port to smart-search:</strong> Smart-search already stores folder info in its metadata. The change is small and high-value: include the folder path and an optional context string in every MCP search result. For PARA, attach labels like "Active project" or "Reference material" at the folder level. This is a metadata-formatting change, not an architecture change.</p>
     </div>
+  </div>
+
+  <div class="card" style="border-color: var(--accent); max-width: 100%;">
+    <h3 style="color:var(--accent);margin-top:0;">3. Position-Aware Blending</h3>
+    <p>QMD weights results based on position in both BM25 and vector rankings: top-ranked results trust the initial RRF score more, while lower-ranked results rely more on the reranker. This adaptive blending outperforms flat RRF.</p>
+    <p><strong>Port to smart-search:</strong> Smart-search currently uses standard RRF with k=60 and a single reranking pass. The improvement would be to tune the RRF constant and blending weights per document type (e.g., short meeting notes vs. long reference documents). Could also add a simple position decay so the reranker has more influence on borderline results where the initial ranking is uncertain.</p>
   </div>
 
   <h2>Recommended Path Forward</h2>
 
   <div class="flow">
     <div class="flow-step" style="border-color:var(--green);">
-      <h4>Phase 1: Keep Smart-search (Now)</h4>
-      <p>Don't change the search layer while building the compilation layer. Smart-search works today. Use it. Focus your development effort on the high-value, novel work: the wiki-crawl, wiki-compile, wiki-ingest, wiki-query, and wiki-lint skills. These are the skills that make the Karpathy pattern work. The search engine underneath is a replaceable commodity &mdash; the compilation layer is the differentiator.</p>
-    </div>
-    <div class="flow-arrow">&darr;</div>
-    <div class="flow-step" style="border-color:var(--yellow);">
-      <h4>Phase 2: Evaluate QMD (After compilation layer works)</h4>
-      <p>Once the wiki skills are working and you have a meaningful set of companion MDs and knowledge pages, install QMD alongside smart-search. Index the same content in both. Run 20-30 representative queries through both engines and compare result quality. Pay special attention to:<br>
-      &bull; Does QMD's query expansion find things smart-search misses?<br>
-      &bull; Does the context system improve Jeeves agent decisions?<br>
-      &bull; Is the LLM reranker noticeably better than TinyBERT?<br>
-      This is an empirical question that should be answered with your actual data, not theoretical analysis.</p>
+      <h4>Phase 1: Keep Smart-search, Focus on Compilation (Now)</h4>
+      <p>The decision is made: smart-search is the search engine. Its ~130 MB footprint, CPU-only inference, and deep Jeeves integration make it the right fit for a local-first, no-GPU system. Focus development effort on the high-value, novel work: the wiki-crawl, wiki-compile, wiki-ingest, wiki-query, and wiki-lint skills. These are the skills that make the Karpathy pattern work. The search engine underneath is a solved problem &mdash; the compilation layer is the differentiator.</p>
     </div>
     <div class="flow-arrow">&darr;</div>
     <div class="flow-step" style="border-color:var(--accent);">
-      <h4>Phase 3: Decision (Based on evidence)</h4>
-      <p><strong>If QMD is clearly better:</strong> Migrate search to QMD. Update Jeeves's smart-search skill to proxy to QMD instead. Keep smart-search's MarkItDown + Watchdog capabilities in a lightweight utility for the compilation layer. Stop maintaining the search engine.<br><br>
-      <strong>If QMD is comparable:</strong> Consider maintenance burden. If smart-search is consuming significant development time, switch to QMD anyway for the time savings. If it's stable and low-maintenance, keep it.<br><br>
-      <strong>If smart-search is better for your use case:</strong> Keep it. Consider adopting specific QMD ideas (context system, query expansion) into smart-search.</p>
+      <h4>Phase 2: Port QMD Innovations as Future Improvements</h4>
+      <p>Once the compilation layer is stable and producing companion MDs at scale, selectively port the three QMD innovations into smart-search:<br>
+      &bull; <strong>Query expansion</strong> via LLM API or small local model (highest expected impact on recall).<br>
+      &bull; <strong>Path context in MCP results</strong> (smallest change, immediate value for Jeeves agents).<br>
+      &bull; <strong>Position-aware blending / RRF tuning</strong> (requires experimentation with real queries).<br><br>
+      These are incremental improvements to an already-working system &mdash; not a rewrite. Prioritize path context first (a few hours of work), then query expansion (a few days), then blending tuning (ongoing experimentation).</p>
     </div>
   </div>
 

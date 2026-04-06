@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Workflow - File Pipeline &amp; Knowledge Compilation</title>
+<title>Workflow - Karpathy's Three Operations Applied to Meetings</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -21,108 +21,153 @@
 
 <div class="container">
   <h1>System Workflow</h1>
-  <p class="subtitle">What happens step-by-step when files are added, changed, or queried. Three core workflows visualized in detail.</p>
+  <p class="subtitle">Karpathy's three operations &mdash; Ingest, Query, Lint &mdash; applied to the Meetings pilot. Each workflow visualized step-by-step.</p>
 
-  <!-- WORKFLOW 1: NEW FILE -->
-  <h2>Workflow 1: A New File Arrives</h2>
-  <p>You save a new PDF (e.g., a research paper) into <code>Resources/Literature/</code>. Here's what happens:</p>
+  <!-- WORKFLOW 1: INGEST -->
+  <h2>Workflow 1: Ingest (<code>process-meeting</code> skill)</h2>
+  <p>A meeting concludes and you have two artifacts: a meeting notes Markdown file and a transcript. The <code>process-meeting</code> skill fires and touches <strong>10&ndash;15 files</strong> across the vault.</p>
 
   <div class="flow">
     <div class="flow-step" style="border-color:var(--orange);">
-      <h4>Step 1: File Watcher Detects Change</h4>
-      <p>The file system watcher (smart-search's Watchdog or a standalone MCP) monitors your vault folders (Projects/, Areas/, Resources/). It detects the new PDF file. It ignores folders starting with <code>_</code> (to avoid processing its own output) and ignores the Archives/ folder entirely. The watcher debounces rapid changes (2-second window) to avoid triggering on partial file saves.</p>
-    </div>
-    <div class="flow-arrow">&darr;</div>
-    <div class="flow-step" style="border-color:var(--blue);">
-      <h4>Step 2: Coverage Check (<code>wiki-crawl</code> logic)</h4>
-      <p>Before doing anything, the system checks: does this file already have an associated Markdown note? It looks for:<br>
-      (a) An MD file in the same folder that contains a wiki-link <code>[[filename.pdf]]</code> or markdown link <code>[text](filename.pdf)</code><br>
-      (b) An MD file with matching name (e.g., <code>paper-name.md</code> next to <code>paper-name.pdf</code>)<br>
-      (c) An MD file with <code>source: filename.pdf</code> in its frontmatter<br><br>
-      <strong>If a user note is found:</strong> Skip companion MD generation (your note IS the companion). Go directly to Step 4 (entity extraction).<br>
-      <strong>If no user note found:</strong> Proceed to Step 3 (auto-generate companion).</p>
+      <h4>Step 1: Read Meeting Notes &amp; Transcript</h4>
+      <p>The skill reads the meeting notes MD file and its companion transcript. These are the raw inputs. Everything downstream is derived from these two artifacts.</p>
     </div>
     <div class="flow-arrow">&darr;</div>
     <div class="flow-step highlight" style="border-color:var(--green);">
-      <h4>Step 3: Companion MD Generation (<code>wiki-compile</code> skill)</h4>
-      <p>Since no user note exists, the system generates one automatically:<br><br>
-      <strong>3a. File Conversion:</strong> The raw PDF is converted to plain text using MarkItDown (the same library smart-search uses today). This handles tables, headers, metadata extraction. For images (PNG/JPEG), a vision model generates a text description.<br><br>
-      <strong>3b. LLM Summarization:</strong> The converted text is sent to an LLM (Sonnet, for cost efficiency) with a structured prompt that produces: YAML frontmatter (source_path, source_hash, file_type, tags), a one-paragraph summary, key takeaways as bullet points, identified entities and concepts, and links to relevant <code>_knowledge/</code> pages if they exist.<br><br>
-      <strong>3c. Write to _wiki/:</strong> The companion MD is saved to <code>Resources/Literature/_wiki/paper-name.md</code> with <code>auto_generated: true</code> in frontmatter. The <code>_wiki/</code> subfolder is created if it doesn't exist.</p>
+      <h4>Step 2: Enhance with Structured Frontmatter</h4>
+      <p>The skill enriches the meeting note with structured YAML frontmatter:<br><br>
+      &bull; <code>date:</code> &mdash; meeting date<br>
+      &bull; <code>attendees:</code> &mdash; list of participants<br>
+      &bull; <code>projects:</code> &mdash; linked project identifiers<br>
+      &bull; <code>meeting_type:</code> &mdash; e.g., standup, design-review, regulatory-sync<br>
+      &bull; <code>transcript:</code> &mdash; relative link to the transcript file<br><br>
+      This structured metadata powers downstream discovery and filtering.</p>
     </div>
     <div class="flow-arrow">&darr;</div>
-    <div class="flow-step" style="border-color:var(--purple);">
-      <h4>Step 4: Entity &amp; Concept Extraction (<code>wiki-ingest</code> skill)</h4>
-      <p>The LLM reads the source note (either your user note from Step 2, or the auto-generated companion from Step 3) and identifies:<br><br>
-      <strong>Entities:</strong> Specific things mentioned &mdash; products (CAMS), people (Dr. Smith), companies (Acme AI), regulations (FDA 510(k)), studies (CLEOPATRA-III), devices, standards.<br><br>
-      <strong>Concepts:</strong> Abstract topics discussed &mdash; regulatory pathways, clinical evidence requirements, AI safety in medical devices, software lifecycle management.<br><br>
-      <strong>For each entity/concept found:</strong><br>
-      &bull; Check if a page already exists in <code>_knowledge/entities/</code> or <code>_knowledge/concepts/</code><br>
-      &bull; If exists: <strong>append</strong> new information with source attribution (never replace, always accumulate)<br>
-      &bull; If new: create a new page using the template from <code>_knowledge/SCHEMA.md</code><br>
-      &bull; Add bidirectional cross-references (the source note links to the entity page, the entity page links back to the source)</p>
-    </div>
-    <div class="flow-arrow">&darr;</div>
-    <div class="flow-step" style="border-color:var(--purple);">
-      <h4>Step 5: Index &amp; Log Update</h4>
-      <p><strong>index.md:</strong> The master catalog is updated with entries for any new entity or concept pages created, and updated entries for modified pages. Each entry has the page title, a one-line summary, category, and last-updated date.<br><br>
-      <strong>log.md:</strong> A new line is appended to the chronological log: <code>## [2026-04-06] ingest | smith-2025-rct.pdf | Created entities: product-cams, fda-510k | Updated concepts: clinical-evidence-requirements</code><br><br>
-      This provides a full audit trail of what was processed, when, and what knowledge pages were affected.</p>
-    </div>
-    <div class="flow-arrow">&darr;</div>
-    <div class="flow-step" style="border-color:var(--accent);">
-      <h4>Step 6: Search Index Auto-Update</h4>
-      <p>The search engine (smart-search or QMD) detects the new MD files that were created or modified in Steps 3-5. It automatically indexes them:<br>
-      &bull; The companion MD (or your user note) gets chunked and embedded for semantic search<br>
-      &bull; The updated entity/concept pages get re-indexed<br>
-      &bull; The raw PDF itself is <strong>not indexed</strong> &mdash; only its MD representation<br><br>
-      Search results now include the new knowledge. The next time you or a Jeeves agent searches for related topics, this content will surface.</p>
-    </div>
-  </div>
-
-  <!-- WORKFLOW 2: QUERYING -->
-  <h2>Workflow 2: Asking a Question</h2>
-  <p>You ask: <em>"What regulatory pathway should we use for CAMS in the US and EU?"</em></p>
-
-  <div class="flow">
-    <div class="flow-step" style="border-color:var(--accent);">
-      <h4>Step 1: Jeeves Routes to Agent</h4>
-      <p>Jeeves analyzes the question and routes it to the <code>regulatory-sme</code> agent (or the <code>wiki-query</code> skill for direct wiki search). The agent is specialized in FDA, EU MDR, and global regulatory pathways.</p>
+    <div class="flow-step" style="border-color:var(--blue);">
+      <h4>Step 3: Add Wiki-Links to Stakeholders &amp; Projects</h4>
+      <p>The skill scans the note body and inserts <code>[[wiki-links]]</code> to:<br><br>
+      &bull; <strong>Stakeholder files</strong> &mdash; e.g., <code>[[Dr. Muller]]</code>, <code>[[Sarah Chen]]</code><br>
+      &bull; <strong>Project files</strong> &mdash; e.g., <code>[[CAMS]]</code>, <code>[[Regulatory Submission]]</code><br><br>
+      These bidirectional links connect the meeting into the broader knowledge graph.</p>
     </div>
     <div class="flow-arrow">&darr;</div>
     <div class="flow-step highlight" style="border-color:var(--purple);">
-      <h4>Step 2: Tier 0 &mdash; Check Knowledge Graph First</h4>
-      <p>Before doing any search, the agent checks <code>_knowledge/</code> directly:<br><br>
-      &bull; Reads <code>_knowledge/entities/fda-510k.md</code> &mdash; contains pre-synthesized 510(k) pathway information from multiple meetings, guidance documents, and project plans<br>
-      &bull; Reads <code>_knowledge/entities/eu-mdr.md</code> &mdash; EU regulatory pathway information<br>
-      &bull; Reads <code>_knowledge/entities/product-cams.md</code> &mdash; product-specific regulatory context<br>
-      &bull; Reads <code>_knowledge/concepts/regulatory-pathways-ai-devices.md</code> &mdash; broader regulatory strategy overview<br><br>
-      <strong>This is often sufficient to answer the question</strong> because entity pages already aggregate knowledge from all sources. No search engine needed. This is the key advantage of the Karpathy pattern: synthesis is pre-computed.</p>
+      <h4>Step 4: Discover Related Meetings</h4>
+      <p>This is the high-value step. The skill finds related meetings using three complementary strategies:<br><br>
+      <strong>4a. Semantic search (smart-search):</strong> Extract key topics from the meeting and query them against all meeting notes. Surfaces meetings that discuss similar concepts even if they use different terminology.<br><br>
+      <strong>4b. Structured overlap:</strong> Match frontmatter fields &mdash; same attendees, same projects, overlapping tags. Fast, precise, and deterministic.<br><br>
+      <strong>4c. Entity co-occurrence:</strong> If two meetings mention the same named entities (stakeholders + topics), they are related. E.g., two meetings both mentioning "Dr. Muller" and "510(k)" are almost certainly connected.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--accent);">
+      <h4>Step 5: Add "Related Meetings" Section</h4>
+      <p>The skill appends a <code>## Related Meetings</code> section to the note with wiki-links to discovered meetings:<br><br>
+      <code>## Related Meetings</code><br>
+      <code>- [[2026-03-15 Regulatory Sync]] &mdash; also discussed 510(k) timeline</code><br>
+      <code>- [[2026-02-28 Strategy Review]] &mdash; initial pathway decision</code><br>
+      <code>- [[2026-01-10 Competitive Intel]] &mdash; Competitor X 510(k) precedent</code></p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--yellow);">
+      <h4>Step 6: Extract Tasks &amp; Action Items</h4>
+      <p>The skill identifies action items and delegates them to the <code>task-creator</code> skill. Each task gets an owner (from attendees), a due date if mentioned, and a backlink to the source meeting. Tasks flow into the project's task tracking.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--purple);">
+      <h4>Step 7: Extract Knowledge &amp; Update Entity Pages</h4>
+      <p>The skill extracts knowledge entries from the meeting and updates the knowledge base:<br><br>
+      &bull; <strong>Entity pages</strong> in <code>_knowledge/</code> are updated &mdash; new facts appended with source attribution and date<br>
+      &bull; <strong>log.md</strong> gets a new chronological entry recording what was processed<br>
+      &bull; <strong>index.md</strong> is updated with any new entity or concept pages created<br><br>
+      Entity pages accumulate a timeline of discussions, building a living history of each topic.</p>
     </div>
     <div class="flow-arrow">&darr;</div>
     <div class="flow-step" style="border-color:var(--green);">
-      <h4>Step 3: Tier 1 &mdash; Semantic Search (if needed)</h4>
-      <p>If the entity pages don't fully answer the question (e.g., the question is about a very specific detail), the agent runs a semantic search via smart-search/QMD MCP:<br><br>
+      <h4>Step 8: File Touch Summary</h4>
+      <p><strong>Target: 10&ndash;15 files touched per meeting.</strong> Typical breakdown:<br>
+      &bull; 1 meeting note (enhanced with frontmatter, wiki-links, related meetings section)<br>
+      &bull; 2&ndash;4 entity pages in <code>_knowledge/</code> (updated with new facts)<br>
+      &bull; 1&ndash;3 stakeholder files (backlink added)<br>
+      &bull; 1&ndash;2 project files (backlink added)<br>
+      &bull; 1 log.md (new entry appended)<br>
+      &bull; 1 index.md (updated if new pages created)<br>
+      &bull; 1&ndash;3 related meeting notes (reciprocal links added)<br>
+      &bull; 0&ndash;2 task files (from extracted action items)</p>
+    </div>
+  </div>
+
+  <h3>Example: Entity Page Timeline</h3>
+  <p>After several meetings, an entity page builds up a rich discussion timeline automatically:</p>
+
+  <div class="card" style="border-color:var(--purple);">
+    <div class="tree" style="font-size:0.85rem;line-height:2.0;">
+<span style="color:var(--purple);font-weight:700;"># FDA 510(k) &mdash; CAMS</span>
+
+<span style="color:var(--accent);font-weight:700;">## Discussion Timeline</span>
+<span style="color:var(--text-muted);">- </span><span style="color:var(--blue);">[[2026-01-10]]</span><span style="color:var(--text-muted);"> &mdash; Noted Competitor X got 510(k) in 6 months</span>
+<span style="color:var(--text-muted);">- </span><span style="color:var(--blue);">[[2026-02-28]]</span><span style="color:var(--text-muted);"> &mdash; Decided to pursue 510(k) over De Novo</span>
+<span style="color:var(--text-muted);">- </span><span style="color:var(--blue);">[[2026-03-15]]</span><span style="color:var(--text-muted);"> &mdash; Dr. Muller raised IRB timeline concern</span>
+<span style="color:var(--text-muted);">- </span><span style="color:var(--blue);">[[2026-04-01]]</span><span style="color:var(--text-muted);"> &mdash; Updated: submission target Q3 2026</span>
+    </div>
+  </div>
+
+  <div class="highlight-box purple">
+    <p><strong>Why this matters:</strong> When someone asks "what's our 510(k) status?" the answer is already compiled on this entity page &mdash; no search needed. This is Karpathy's key insight: synthesis is pre-computed at ingest time, not at query time.</p>
+  </div>
+
+  <!-- WORKFLOW 2: QUERY -->
+  <h2>Workflow 2: Query (read <code>index.md</code> first)</h2>
+  <p>You ask: <em>"What regulatory pathway should we use for CAMS in the US and EU?"</em> &mdash; The system follows Karpathy's pattern: <strong>read the index first</strong> to know what exists, then drill down.</p>
+
+  <div class="flow">
+    <div class="flow-step highlight" style="border-color:var(--purple);">
+      <h4>Step 1: Read <code>_knowledge/index.md</code> FIRST</h4>
+      <p><strong>This is the critical step that makes everything else efficient.</strong> Before any search, the agent reads <code>_knowledge/index.md</code> to learn what entity and concept pages exist. This is Karpathy's pattern: the index is a table of contents for the entire knowledge base. The agent now knows:<br><br>
+      &bull; Which entities have pages (e.g., <code>fda-510k.md</code>, <code>eu-mdr.md</code>, <code>product-cams.md</code>)<br>
+      &bull; Which concepts are tracked (e.g., <code>regulatory-pathways-ai-devices.md</code>)<br>
+      &bull; What categories and topics the vault covers<br><br>
+      This is fast, deterministic, and costs almost nothing. No embeddings, no vector search &mdash; just reading a file.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--purple);">
+      <h4>Step 2: Read Relevant Entity &amp; Concept Pages</h4>
+      <p>Based on the index, the agent reads the specific pages that match the query:<br><br>
+      &bull; <code>_knowledge/entities/fda-510k.md</code> &mdash; pre-synthesized 510(k) pathway info from multiple meetings<br>
+      &bull; <code>_knowledge/entities/eu-mdr.md</code> &mdash; EU regulatory pathway information<br>
+      &bull; <code>_knowledge/entities/product-cams.md</code> &mdash; product-specific regulatory context<br>
+      &bull; <code>_knowledge/concepts/regulatory-pathways-ai-devices.md</code> &mdash; broader strategy overview<br><br>
+      <strong>This is often sufficient to answer the question</strong> because entity pages already aggregate knowledge from all sources. The synthesis was pre-computed during ingest (Workflow 1).</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--green);">
+      <h4>Step 3: Semantic Search via smart-search (if needed)</h4>
+      <p>If the entity pages don't fully answer the question (e.g., the question is about a very specific detail not yet captured on an entity page), the agent runs a semantic search:<br><br>
       &bull; Query: "CAMS regulatory pathway US EU 510k MDR"<br>
-      &bull; Searches across: all user notes + companion MDs in _wiki/ + knowledge pages in _knowledge/<br>
+      &bull; Searches across: all meeting notes, user notes, companion MDs, and knowledge pages<br>
       &bull; Returns: ranked results with relevance scores, source file paths, and text snippets<br>
       &bull; The agent reads the top results and incorporates them into its answer</p>
     </div>
     <div class="flow-arrow">&darr;</div>
     <div class="flow-step" style="border-color:var(--text-muted);">
-      <h4>Step 4: Tier 2 &mdash; Grep/Glob Fallback (if search unavailable)</h4>
+      <h4>Step 4: Grep/Glob Fallback (if search unavailable)</h4>
       <p>If the search engine is down or unreachable, Jeeves falls back to pattern-based file search using Grep and Glob across the vault. This is slower and less precise but ensures the system degrades gracefully.</p>
     </div>
     <div class="flow-arrow">&darr;</div>
     <div class="flow-step" style="border-color:var(--accent);">
-      <h4>Step 5: Synthesize Answer</h4>
-      <p>The agent synthesizes information from all tiers into a cohesive answer. Every claim includes source attribution &mdash; links back to specific notes, companion MDs, and ultimately the original raw documents. If the query reveals new knowledge worth preserving, the agent can optionally trigger <code>wiki-ingest</code> to update the knowledge graph with its findings.</p>
+      <h4>Step 5: Synthesize Answer &amp; Close the Loop</h4>
+      <p>The agent synthesizes information from all tiers into a cohesive answer. Every claim includes source attribution &mdash; links back to specific meeting notes and original documents.<br><br>
+      <strong>Query &rarr; Knowledge loop:</strong> If the query reveals a gap &mdash; information that should be on an entity page but isn't &mdash; the answer itself can become a new wiki page or trigger an update to existing entity pages. The query operation feeds back into the knowledge graph, closing the loop.</p>
     </div>
   </div>
 
+  <div class="highlight-box blue">
+    <p><strong>Karpathy's hierarchy:</strong> index.md &rarr; entity/concept pages &rarr; smart-search &rarr; Grep/Glob. Each tier is cheaper and faster than the next. Most questions are answered by Tier 1-2 alone. The index is the routing table for the entire knowledge base.</p>
+  </div>
+
   <!-- WORKFLOW 3: LINT -->
-  <h2>Workflow 3: Periodic Health Check (Lint)</h2>
-  <p>Run weekly or on-demand via <code>/jeeves:wiki-lint</code>. Ensures the knowledge base stays healthy.</p>
+  <h2>Workflow 3: Periodic Health Check (Lint) <span class="badge badge-yellow">Future</span></h2>
+  <p>Run weekly or on-demand via <code>/jeeves:wiki-lint</code>. Ensures the knowledge base stays healthy. <strong>Not built in the pilot</strong> &mdash; this is a planned future capability.</p>
 
   <div class="grid-2">
     <div class="card" style="border-color:var(--yellow);">
