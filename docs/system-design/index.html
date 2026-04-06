@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Base System Design - Overview</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav>
+  <div class="nav-inner">
+    <span class="brand">KB System Design</span>
+    <a href="index.html" class="active">Overview</a>
+    <a href="current-state.html">Current State</a>
+    <a href="vault-structure.html">Vault Structure</a>
+    <a href="workflow.html">Workflow</a>
+    <a href="smart-search-vs-qmd.html">Smart-search vs QMD</a>
+    <a href="skills.html">Jeeves Skills</a>
+  </div>
+</nav>
+
+<div class="container">
+  <h1>Personal Knowledge Base System</h1>
+  <p class="subtitle">Inspired by Karpathy's LLM Wiki pattern, adapted for PARA-organized Obsidian vault, powered by Jeeves + Smart-search</p>
+
+  <!-- THE BIG PICTURE -->
+  <h2>The Big Picture: What This System Does</h2>
+
+  <div class="highlight-box blue">
+    <p><strong>The Core Problem:</strong> You have hundreds of files across your Obsidian vault &mdash; PDFs, DOCX, PPTX, XLSX, meeting transcripts, research papers, product roadmaps, interview recordings. Each contains valuable knowledge, but it's locked inside opaque file formats. Finding connections across files requires remembering what's in each one. There's no way to ask "What do we know about FDA 510(k) pathways across all our meetings, research, and regulatory documents?" and get a synthesized answer.</p>
+  </div>
+
+  <div class="highlight-box green">
+    <p><strong>The Solution:</strong> Build a system where every important file in your vault has an associated Markdown note (you already write many of these manually!). For files you haven't written notes for, an LLM automatically generates companion summaries. Then, across ALL these notes, the system extracts entities (products, people, regulations, companies) and concepts (regulatory strategies, clinical evidence frameworks) into cross-linked knowledge pages. The result is a living knowledge graph that grows smarter with every file you add.</p>
+  </div>
+
+  <div class="highlight-box purple">
+    <p><strong>Karpathy's Key Insight:</strong> Instead of using RAG (searching raw documents every time you ask a question), have an LLM do the hard work of synthesis, cross-referencing, and contradiction detection <em>at ingest time</em>. The wiki becomes a "persistent, compounding artifact" where the intellectual work has already been done. When you query it, the answers are fast and high-quality because the connections are pre-computed.</p>
+  </div>
+
+  <!-- 4-LAYER ARCHITECTURE -->
+  <h2>System Architecture: Four Layers</h2>
+
+  <p>The system has four distinct layers, each with a clear responsibility. They work together but can evolve independently.</p>
+
+  <div class="arch-layer" style="border-color: var(--orange);">
+    <span class="layer-label" style="color: var(--orange);">Layer 0 &mdash; Raw Sources</span>
+    <h3>Your Files (Immutable)</h3>
+    <p>These are the original files that live in your PARA-organized Obsidian vault. PDFs, DOCX, PPTX, XLSX, images, meeting transcripts, research papers. The system <strong>never modifies these</strong>. They are the source of truth. They live where they've always lived &mdash; inside your Projects, Areas, and Resources folders.</p>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.8rem;">
+      <span class="badge badge-blue">PDF</span>
+      <span class="badge badge-blue">DOCX</span>
+      <span class="badge badge-blue">PPTX</span>
+      <span class="badge badge-blue">XLSX</span>
+      <span class="badge badge-blue">PNG/JPEG</span>
+      <span class="badge badge-blue">MSG</span>
+      <span class="badge badge-blue">HTML</span>
+      <span class="badge badge-blue">CSV</span>
+    </div>
+  </div>
+
+  <div class="arch-connector">&darr;</div>
+
+  <div class="arch-layer" style="border-color: var(--green);">
+    <span class="layer-label" style="color: var(--green);">Layer 1 &mdash; Source Notes</span>
+    <h3>Markdown Notes for Every File (User-authored or Auto-generated)</h3>
+    <p>This is the bridge between opaque files and searchable knowledge. Every raw file should have an associated Markdown note that captures its key content in a text-searchable, LLM-readable format.</p>
+    <div class="grid-2" style="margin-top:1rem;">
+      <div class="card" style="margin:0;border-color:var(--green);">
+        <h4 style="color:var(--green);">Your Existing Notes (Majority)</h4>
+        <p style="font-size:0.9rem;">You already write meeting notes that link to transcripts, literature notes that reference PDFs, project notes that reference roadmaps. <strong>These are not duplicated.</strong> The system recognizes these as the companion note for the linked file and uses them as-is.</p>
+      </div>
+      <div class="card" style="margin:0;border-color:var(--orange);">
+        <h4 style="color:var(--orange);">Auto-generated Companions (Gap-filling)</h4>
+        <p style="font-size:0.9rem;">For raw files that <em>don't</em> have a note you wrote, the system auto-generates a companion MD in a <code>_wiki/</code> subfolder. These are marked with <code>auto_generated: true</code> in their frontmatter so you always know what was human-written vs machine-generated.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="arch-connector">&darr;</div>
+
+  <div class="arch-layer" style="border-color: var(--purple);">
+    <span class="layer-label" style="color: var(--purple);">Layer 2 &mdash; Knowledge Graph</span>
+    <h3>Cross-cutting Entity &amp; Concept Pages (<code>_knowledge/</code>)</h3>
+    <p>This is the <strong>compounding artifact</strong> &mdash; the layer that makes the system more than just a collection of notes. The LLM reads all your source notes (Layer 1) and extracts entities and concepts into dedicated pages that live in a vault-level <code>_knowledge/</code> folder.</p>
+    <div class="grid-3" style="margin-top:1rem;">
+      <div class="card" style="margin:0;">
+        <h4 style="color:var(--purple);">Entity Pages</h4>
+        <p style="font-size:0.85rem;">Dedicated pages for specific things: products (<em>CAMS AI Device</em>), people (<em>Dr. Smith</em>), companies (<em>Competitor X</em>), regulations (<em>FDA 510(k)</em>), studies (<em>CLEOPATRA-III Trial</em>). Each page aggregates everything your vault knows about that entity, with source attribution.</p>
+      </div>
+      <div class="card" style="margin:0;">
+        <h4 style="color:var(--purple);">Concept Pages</h4>
+        <p style="font-size:0.85rem;">Pages for abstract topics: <em>Regulatory Pathways for AI Medical Devices</em>, <em>Clinical Evidence Requirements</em>, <em>Market Dynamics in Digital Health</em>. These synthesize knowledge across multiple sources into coherent reference articles.</p>
+      </div>
+      <div class="card" style="margin:0;">
+        <h4 style="color:var(--purple);">Index &amp; Log</h4>
+        <p style="font-size:0.85rem;"><code>index.md</code>: Master catalog of all knowledge pages with one-line summaries. <code>log.md</code>: Chronological record of every ingestion event. Both are machine-maintained, human-readable.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="arch-connector">&darr;</div>
+
+  <div class="arch-layer" style="border-color: var(--accent);">
+    <span class="layer-label" style="color: var(--accent);">Layer 3 &mdash; Query &amp; Search</span>
+    <h3>Jeeves Agents + Search Engine</h3>
+    <p>The interface layer where you (and Jeeves agents) ask questions and get answers. This layer searches across Layer 1 (source notes) and Layer 2 (knowledge graph) using semantic search (smart-search or QMD) and direct file reads. Jeeves agents like <code>regulatory-sme</code>, <code>clinical-sme</code>, and <code>research-analyst</code> become dramatically more effective because they can tap into pre-synthesized knowledge instead of raw documents.</p>
+    <p><strong>Three-tier search:</strong></p>
+    <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.5rem;">
+      <li><strong>Tier 0:</strong> Check <code>_knowledge/</code> entity and concept pages first (fastest, highest quality &mdash; knowledge is already synthesized)</li>
+      <li><strong>Tier 1:</strong> Semantic search via smart-search/QMD across all MD files (source notes + knowledge pages)</li>
+      <li><strong>Tier 2:</strong> Grep/Glob fallback if search engine unavailable</li>
+    </ul>
+  </div>
+
+  <!-- NAVIGATION -->
+  <h2>Explore the Design</h2>
+  <div class="grid-3">
+    <a href="current-state.html" style="text-decoration:none;">
+      <div class="card" style="cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <h3>Current State</h3>
+        <p>Where smart-search and Jeeves stand today. What's working, what's missing, and what needs to change.</p>
+      </div>
+    </a>
+    <a href="vault-structure.html" style="text-decoration:none;">
+      <div class="card" style="cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <h3>Vault Structure</h3>
+        <p>How <code>_wiki/</code> and <code>_knowledge/</code> folders integrate with your existing PARA organization.</p>
+      </div>
+    </a>
+    <a href="workflow.html" style="text-decoration:none;">
+      <div class="card" style="cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <h3>Workflow</h3>
+        <p>Step-by-step: what happens when a file is added, changed, or queried. The full pipeline visualized.</p>
+      </div>
+    </a>
+    <a href="smart-search-vs-qmd.html" style="text-decoration:none;">
+      <div class="card" style="cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <h3>Smart-search vs QMD</h3>
+        <p>Critical comparison: should you continue developing smart-search or adopt QMD? Detailed analysis.</p>
+      </div>
+    </a>
+    <a href="skills.html" style="text-decoration:none;">
+      <div class="card" style="cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <h3>Jeeves Skills</h3>
+        <p>New and updated skills needed: wiki-crawl, wiki-compile, wiki-ingest, wiki-query, wiki-lint.</p>
+      </div>
+    </a>
+  </div>
+
+</div>
+</body>
+</html>

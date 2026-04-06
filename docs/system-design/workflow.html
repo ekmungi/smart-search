@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workflow - File Pipeline &amp; Knowledge Compilation</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav>
+  <div class="nav-inner">
+    <span class="brand">KB System Design</span>
+    <a href="index.html">Overview</a>
+    <a href="current-state.html">Current State</a>
+    <a href="vault-structure.html">Vault Structure</a>
+    <a href="workflow.html" class="active">Workflow</a>
+    <a href="smart-search-vs-qmd.html">Smart-search vs QMD</a>
+    <a href="skills.html">Jeeves Skills</a>
+  </div>
+</nav>
+
+<div class="container">
+  <h1>System Workflow</h1>
+  <p class="subtitle">What happens step-by-step when files are added, changed, or queried. Three core workflows visualized in detail.</p>
+
+  <!-- WORKFLOW 1: NEW FILE -->
+  <h2>Workflow 1: A New File Arrives</h2>
+  <p>You save a new PDF (e.g., a research paper) into <code>Resources/Literature/</code>. Here's what happens:</p>
+
+  <div class="flow">
+    <div class="flow-step" style="border-color:var(--orange);">
+      <h4>Step 1: File Watcher Detects Change</h4>
+      <p>The file system watcher (smart-search's Watchdog or a standalone MCP) monitors your vault folders (Projects/, Areas/, Resources/). It detects the new PDF file. It ignores folders starting with <code>_</code> (to avoid processing its own output) and ignores the Archives/ folder entirely. The watcher debounces rapid changes (2-second window) to avoid triggering on partial file saves.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--blue);">
+      <h4>Step 2: Coverage Check (<code>wiki-crawl</code> logic)</h4>
+      <p>Before doing anything, the system checks: does this file already have an associated Markdown note? It looks for:<br>
+      (a) An MD file in the same folder that contains a wiki-link <code>[[filename.pdf]]</code> or markdown link <code>[text](filename.pdf)</code><br>
+      (b) An MD file with matching name (e.g., <code>paper-name.md</code> next to <code>paper-name.pdf</code>)<br>
+      (c) An MD file with <code>source: filename.pdf</code> in its frontmatter<br><br>
+      <strong>If a user note is found:</strong> Skip companion MD generation (your note IS the companion). Go directly to Step 4 (entity extraction).<br>
+      <strong>If no user note found:</strong> Proceed to Step 3 (auto-generate companion).</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step highlight" style="border-color:var(--green);">
+      <h4>Step 3: Companion MD Generation (<code>wiki-compile</code> skill)</h4>
+      <p>Since no user note exists, the system generates one automatically:<br><br>
+      <strong>3a. File Conversion:</strong> The raw PDF is converted to plain text using MarkItDown (the same library smart-search uses today). This handles tables, headers, metadata extraction. For images (PNG/JPEG), a vision model generates a text description.<br><br>
+      <strong>3b. LLM Summarization:</strong> The converted text is sent to an LLM (Sonnet, for cost efficiency) with a structured prompt that produces: YAML frontmatter (source_path, source_hash, file_type, tags), a one-paragraph summary, key takeaways as bullet points, identified entities and concepts, and links to relevant <code>_knowledge/</code> pages if they exist.<br><br>
+      <strong>3c. Write to _wiki/:</strong> The companion MD is saved to <code>Resources/Literature/_wiki/paper-name.md</code> with <code>auto_generated: true</code> in frontmatter. The <code>_wiki/</code> subfolder is created if it doesn't exist.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--purple);">
+      <h4>Step 4: Entity &amp; Concept Extraction (<code>wiki-ingest</code> skill)</h4>
+      <p>The LLM reads the source note (either your user note from Step 2, or the auto-generated companion from Step 3) and identifies:<br><br>
+      <strong>Entities:</strong> Specific things mentioned &mdash; products (CAMS), people (Dr. Smith), companies (Acme AI), regulations (FDA 510(k)), studies (CLEOPATRA-III), devices, standards.<br><br>
+      <strong>Concepts:</strong> Abstract topics discussed &mdash; regulatory pathways, clinical evidence requirements, AI safety in medical devices, software lifecycle management.<br><br>
+      <strong>For each entity/concept found:</strong><br>
+      &bull; Check if a page already exists in <code>_knowledge/entities/</code> or <code>_knowledge/concepts/</code><br>
+      &bull; If exists: <strong>append</strong> new information with source attribution (never replace, always accumulate)<br>
+      &bull; If new: create a new page using the template from <code>_knowledge/SCHEMA.md</code><br>
+      &bull; Add bidirectional cross-references (the source note links to the entity page, the entity page links back to the source)</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--purple);">
+      <h4>Step 5: Index &amp; Log Update</h4>
+      <p><strong>index.md:</strong> The master catalog is updated with entries for any new entity or concept pages created, and updated entries for modified pages. Each entry has the page title, a one-line summary, category, and last-updated date.<br><br>
+      <strong>log.md:</strong> A new line is appended to the chronological log: <code>## [2026-04-06] ingest | smith-2025-rct.pdf | Created entities: product-cams, fda-510k | Updated concepts: clinical-evidence-requirements</code><br><br>
+      This provides a full audit trail of what was processed, when, and what knowledge pages were affected.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--accent);">
+      <h4>Step 6: Search Index Auto-Update</h4>
+      <p>The search engine (smart-search or QMD) detects the new MD files that were created or modified in Steps 3-5. It automatically indexes them:<br>
+      &bull; The companion MD (or your user note) gets chunked and embedded for semantic search<br>
+      &bull; The updated entity/concept pages get re-indexed<br>
+      &bull; The raw PDF itself is <strong>not indexed</strong> &mdash; only its MD representation<br><br>
+      Search results now include the new knowledge. The next time you or a Jeeves agent searches for related topics, this content will surface.</p>
+    </div>
+  </div>
+
+  <!-- WORKFLOW 2: QUERYING -->
+  <h2>Workflow 2: Asking a Question</h2>
+  <p>You ask: <em>"What regulatory pathway should we use for CAMS in the US and EU?"</em></p>
+
+  <div class="flow">
+    <div class="flow-step" style="border-color:var(--accent);">
+      <h4>Step 1: Jeeves Routes to Agent</h4>
+      <p>Jeeves analyzes the question and routes it to the <code>regulatory-sme</code> agent (or the <code>wiki-query</code> skill for direct wiki search). The agent is specialized in FDA, EU MDR, and global regulatory pathways.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step highlight" style="border-color:var(--purple);">
+      <h4>Step 2: Tier 0 &mdash; Check Knowledge Graph First</h4>
+      <p>Before doing any search, the agent checks <code>_knowledge/</code> directly:<br><br>
+      &bull; Reads <code>_knowledge/entities/fda-510k.md</code> &mdash; contains pre-synthesized 510(k) pathway information from multiple meetings, guidance documents, and project plans<br>
+      &bull; Reads <code>_knowledge/entities/eu-mdr.md</code> &mdash; EU regulatory pathway information<br>
+      &bull; Reads <code>_knowledge/entities/product-cams.md</code> &mdash; product-specific regulatory context<br>
+      &bull; Reads <code>_knowledge/concepts/regulatory-pathways-ai-devices.md</code> &mdash; broader regulatory strategy overview<br><br>
+      <strong>This is often sufficient to answer the question</strong> because entity pages already aggregate knowledge from all sources. No search engine needed. This is the key advantage of the Karpathy pattern: synthesis is pre-computed.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--green);">
+      <h4>Step 3: Tier 1 &mdash; Semantic Search (if needed)</h4>
+      <p>If the entity pages don't fully answer the question (e.g., the question is about a very specific detail), the agent runs a semantic search via smart-search/QMD MCP:<br><br>
+      &bull; Query: "CAMS regulatory pathway US EU 510k MDR"<br>
+      &bull; Searches across: all user notes + companion MDs in _wiki/ + knowledge pages in _knowledge/<br>
+      &bull; Returns: ranked results with relevance scores, source file paths, and text snippets<br>
+      &bull; The agent reads the top results and incorporates them into its answer</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--text-muted);">
+      <h4>Step 4: Tier 2 &mdash; Grep/Glob Fallback (if search unavailable)</h4>
+      <p>If the search engine is down or unreachable, Jeeves falls back to pattern-based file search using Grep and Glob across the vault. This is slower and less precise but ensures the system degrades gracefully.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--accent);">
+      <h4>Step 5: Synthesize Answer</h4>
+      <p>The agent synthesizes information from all tiers into a cohesive answer. Every claim includes source attribution &mdash; links back to specific notes, companion MDs, and ultimately the original raw documents. If the query reveals new knowledge worth preserving, the agent can optionally trigger <code>wiki-ingest</code> to update the knowledge graph with its findings.</p>
+    </div>
+  </div>
+
+  <!-- WORKFLOW 3: LINT -->
+  <h2>Workflow 3: Periodic Health Check (Lint)</h2>
+  <p>Run weekly or on-demand via <code>/jeeves:wiki-lint</code>. Ensures the knowledge base stays healthy.</p>
+
+  <div class="grid-2">
+    <div class="card" style="border-color:var(--yellow);">
+      <h3 style="color:var(--yellow);margin-top:0;">Checks Performed</h3>
+      <table>
+        <tr>
+          <td><strong>Orphaned Companions</strong></td>
+          <td>A companion MD exists in <code>_wiki/</code> but its source file has been deleted or moved. Action: flag for removal or archival.</td>
+        </tr>
+        <tr>
+          <td><strong>Stale Companions</strong></td>
+          <td>The source file has been modified since the companion MD was generated (source_hash mismatch). Action: flag for re-compilation.</td>
+        </tr>
+        <tr>
+          <td><strong>Uncovered Files</strong></td>
+          <td>Raw files that have neither a user note nor a companion MD. Action: flag for compilation.</td>
+        </tr>
+        <tr>
+          <td><strong>Redundant Companions</strong></td>
+          <td>You wrote a note for a file that already has an auto-generated companion. The companion is now redundant. Action: flag companion for removal.</td>
+        </tr>
+        <tr>
+          <td><strong>Missing Cross-references</strong></td>
+          <td>An entity is mentioned in a source note but not linked to its entity page. Action: suggest adding the link.</td>
+        </tr>
+        <tr>
+          <td><strong>Stale Entity Pages</strong></td>
+          <td>An entity page hasn't been updated in a long time, but related sources have changed. Action: flag for re-ingestion.</td>
+        </tr>
+        <tr>
+          <td><strong>Contradictions</strong></td>
+          <td>Two source notes make conflicting claims about the same entity or concept. Action: flag with both sources for human review.</td>
+        </tr>
+        <tr>
+          <td><strong>Index Completeness</strong></td>
+          <td>Not all entity/concept pages are listed in <code>_knowledge/index.md</code>. Action: add missing entries.</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="card" style="border-color:var(--green);">
+      <h3 style="color:var(--green);margin-top:0;">Example Lint Output</h3>
+      <div class="tree" style="font-size:0.82rem;line-height:1.9;">
+<span style="color:var(--green);font-weight:700;">Knowledge Base Health Report</span>
+<span style="color:var(--green);font-weight:700;">========================</span>
+Date: 2026-04-06
+Vault: ~/Obsidian/MyVault
+
+<span style="color:var(--green);">COVERAGE</span>
+  Total raw files: 247
+  With user notes: 183 (74%)
+  With auto companions: 51 (21%)
+  Uncovered: 13 (5%) <span style="color:var(--yellow);">&larr; action needed</span>
+
+<span style="color:var(--yellow);">STALE CONTENT</span>
+  Companions needing refresh: 4
+  &bull; Resources/Literature/_wiki/fda-guidance-2024.md
+    (source modified 2026-04-02, companion from 2026-02-15)
+  &bull; ...
+
+<span style="color:var(--red);">ORPHANED COMPANIONS</span>
+  &bull; Projects/Old-Project/_wiki/spec-v2.md
+    (source file spec-v2.docx was deleted)
+
+<span style="color:var(--purple);">KNOWLEDGE GRAPH</span>
+  Entity pages: 34
+  Concept pages: 12
+  Total cross-references: 189
+  Missing from index.md: 2
+
+<span style="color:var(--yellow);">CONTRADICTIONS DETECTED</span>
+  &bull; FDA submission timeline:
+    Meeting notes (2026-03-15) say "Q1 FY27"
+    Roadmap (2026-04-01) says "Q2 FY27"
+    <span class="comment">&rarr; Review and resolve</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- WORKFLOW 4: SESSION END -->
+  <h2>Workflow 4: End of Session</h2>
+  <p>When you finish a work session with Jeeves, the session-notes skill can trigger knowledge base updates.</p>
+
+  <div class="flow">
+    <div class="flow-step" style="border-color:var(--accent);">
+      <h4>You invoke <code>/jeeves:session-notes</code></h4>
+      <p>Jeeves summarizes what was discussed, decisions made, research findings, and open items into a session note MD file in your vault (existing behavior).</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--purple);">
+      <h4><code>wiki-ingest</code> is triggered automatically</h4>
+      <p>The session note is treated like any other user note. The LLM extracts entities and concepts mentioned during the session, updates existing knowledge pages with new information, and creates new entity/concept pages if needed. Your session's work is now part of the permanent knowledge graph.</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step" style="border-color:var(--green);">
+      <h4>Knowledge compounds over time</h4>
+      <p>Each session adds to the knowledge graph. Over weeks and months, entity pages become rich, cross-referenced resources. A page like <code>product-cams.md</code> accumulates information from dozens of meetings, research sessions, and planning activities &mdash; automatically. This is the "compounding artifact" Karpathy describes.</p>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
