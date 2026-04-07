@@ -213,18 +213,22 @@ Prefers data-driven discussions. Detail-oriented.
 
   <p>This is Karpathy's "wiki" &mdash; the compounding artifact. Entity pages accumulate knowledge from every meeting, every research session, every project. They grow richer over time without manual maintenance.</p>
 
-  <div class="grid-3">
+  <div class="grid-3" style="grid-template-columns: repeat(2, 1fr);">
     <div class="card" style="border-color:var(--purple);">
       <h4 style="color:var(--purple);">Entity Pages</h4>
-      <p style="font-size:0.85rem;">Dedicated pages for specific things: products (<em>CAMS</em>), people (<em>Dr. Muller</em>), companies (<em>Competitor X</em>), regulations (<em>FDA 510(k)</em>). Each aggregates everything your vault knows about that entity. <strong>Updated incrementally</strong> &mdash; each source adds, never replaces.</p>
+      <p style="font-size:0.85rem;">Dedicated pages for specific things, organized into typed subdirectories: <code>products/</code>, <code>people/</code>, <code>companies/</code>, <code>regulations/</code>, <code>studies/</code>. Each aggregates everything your vault knows about that entity. <strong>Updated incrementally</strong> &mdash; each source adds, never replaces.</p>
     </div>
     <div class="card" style="border-color:var(--purple);">
       <h4 style="color:var(--purple);">Concept Pages</h4>
       <p style="font-size:0.85rem;">Pages for abstract topics: <em>Regulatory Pathways for AI Devices</em>, <em>Clinical Evidence Requirements</em>. Synthesize knowledge across multiple sources. These are the "reference articles" that Karpathy's pattern builds over time.</p>
     </div>
     <div class="card" style="border-color:var(--purple);">
+      <h4 style="color:var(--purple);">Sources &amp; Analysis</h4>
+      <p style="font-size:0.85rem;"><code>sources/</code> holds per-source ingestion records (<code>meetings/</code>, <code>literature/</code>, <code>interviews/</code>) &mdash; "what did the wiki learn from this source?" <code>analysis/</code> stores filed query results, comparisons, and explorations. These create the "explorations add up" feedback loop.</p>
+    </div>
+    <div class="card" style="border-color:var(--purple);">
       <h4 style="color:var(--purple);">Special Files</h4>
-      <p style="font-size:0.85rem;"><code>index.md</code>: Master catalog (read first on every query). <code>log.md</code>: Chronological record of ingestion. <code>SCHEMA.md</code>: Templates and conventions. These three files anchor the entire knowledge graph.</p>
+      <p style="font-size:0.85rem;"><code>index.md</code>: Master catalog (read first on every query). <code>log.md</code>: Chronological record of ingestion. <code>SCHEMA.md</code>: Templates and conventions. <code>hot.md</code>: Rolling ~500-word context cache of "what's happening now." These files anchor the entire knowledge graph.</p>
     </div>
   </div>
 
