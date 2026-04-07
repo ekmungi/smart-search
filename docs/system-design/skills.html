@@ -33,13 +33,14 @@
   &boxvr;&boxh;&boxh; Walks directory tree (top 3 levels), counts files by type per folder
   &boxvr;&boxh;&boxh; Samples 3-5 MD files per major folder for structure/headings
   &boxvr;&boxh;&boxh; Deep dives: Meetings folders, Stakeholders folder
+  &boxvr;&boxh;&boxh; Discovers Products/Versions/Features hierarchy
   &boxur;&boxh;&boxh; Produces structured report &rarr; conventions discovered
           &boxv;
 <span style="color:var(--green);font-weight:700;">process-meeting</span> &mdash; "Ingest a meeting into the knowledge graph"
   &boxvr;&boxh;&boxh; Takes meeting note MD + linked transcript
   &boxvr;&boxh;&boxh; Output 1: Enhanced meeting note (frontmatter, wiki-links, related meetings)
   &boxvr;&boxh;&boxh; Output 2: Tasks/action items (via task-creator)
-  &boxvr;&boxh;&boxh; Output 3: Knowledge entries (_knowledge/log.md, entities/, index.md)
+  &boxvr;&boxh;&boxh; Output 3: Knowledge entries (_knowledge/log.md, entities/, sources/meetings/, hot.md, index.md)
   &boxur;&boxh;&boxh; Touches 10-15 files per meeting
           &boxv;
 <span style="color:var(--purple);font-weight:700;">task-creator</span> &mdash; "Extract and link action items"
@@ -87,7 +88,8 @@
       </ul>
       <p><strong>Step 4: Deep dive into Meetings.</strong> Samples transcription tool output format: notes MD + linked transcript files. Reports frontmatter fields, linking patterns between notes and transcripts, naming conventions.</p>
       <p><strong>Step 5: Deep dive into Stakeholders.</strong> Samples stakeholder files, reports their structure, fields, and how they link to meetings and projects.</p>
-      <p><strong>Step 6: Produce structured report.</strong> Outputs actual folder names, existing conventions, file type distributions, cross-linking state, and any gaps or inconsistencies discovered.</p>
+      <p><strong>Step 6: Discover Products/Versions/Features hierarchy.</strong> Identifies product-oriented folder structures and how products, versions, and features relate to each other. This hierarchy informs how entity pages are organized in <code>_knowledge/</code>.</p>
+      <p><strong>Step 7: Produce structured report.</strong> Outputs actual folder names, existing conventions, file type distributions, cross-linking state, and any gaps or inconsistencies discovered.</p>
     </div>
   </div>
 
@@ -124,6 +126,8 @@
       <ul style="color:var(--text-muted);font-size:0.9rem;padding-left:1.2rem;">
         <li>Appends to <code>_knowledge/log.md</code> with timestamped entry</li>
         <li>Updates or creates entity pages in <code>_knowledge/entities/</code></li>
+        <li>Creates a source page in <code>_knowledge/sources/meetings/</code> per processed meeting &mdash; documents what entities were found, concepts discussed, and pages updated</li>
+        <li>Updates <code>_knowledge/hot.md</code> with latest meeting context</li>
         <li>Updates <code>_knowledge/index.md</code> with new references</li>
         <li>Related meetings discovery adds chronological discussion timelines to entity pages</li>
       </ul>
@@ -228,6 +232,11 @@
         <td><strong>session-notes &rarr; _knowledge/ ingestion</strong></td>
         <td>When a session ends, session-notes writes a summary, then triggers knowledge ingestion to update entity pages with session findings.</td>
         <td>Research sessions, decisions, and analysis don't evaporate when the session ends.</td>
+      </tr>
+      <tr>
+        <td><strong>query results &rarr; analysis/ &rarr; future queries</strong></td>
+        <td>Valuable answers from obsidian-knowledge queries are filed as wiki pages in <code>_knowledge/analysis/</code>. These analysis pages are indexed and available to future queries.</td>
+        <td>Knowledge compounds: each valuable answer enriches the wiki, so future queries on similar topics get richer, pre-synthesized results instead of re-deriving from raw sources.</td>
       </tr>
       <tr>
         <td><strong>PARA structure &rarr; QMD contexts &rarr; search results</strong></td>

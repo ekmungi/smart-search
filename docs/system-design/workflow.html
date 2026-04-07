@@ -78,6 +78,9 @@
       <h4>Step 7: Extract Knowledge &amp; Update Entity Pages</h4>
       <p>The skill extracts knowledge entries from the meeting and updates the knowledge base:<br><br>
       &bull; <strong>Entity pages</strong> in <code>_knowledge/</code> are updated &mdash; new facts appended with source attribution and date<br>
+      &bull; <strong>Source page</strong> created in <code>_knowledge/sources/meetings/</code> documenting what the wiki learned from this meeting &mdash; what entities were found, what concepts were discussed, and what pages were updated<br>
+      &bull; The source page creates the <strong>cross-reference graph</strong>: source page &rarr; entity pages &rarr; other source pages mentioning the same entity<br>
+      &bull; <strong>hot.md</strong> is updated with the latest context from this meeting<br>
       &bull; <strong>log.md</strong> gets a new chronological entry recording what was processed<br>
       &bull; <strong>index.md</strong> is updated with any new entity or concept pages created<br><br>
       Entity pages accumulate a timeline of discussions, building a living history of each topic.</p>
@@ -88,6 +91,8 @@
       <p><strong>Target: 10&ndash;15 files touched per meeting.</strong> Typical breakdown:<br>
       &bull; 1 meeting note (enhanced with frontmatter, wiki-links, related meetings section)<br>
       &bull; 2&ndash;4 entity pages in <code>_knowledge/</code> (updated with new facts)<br>
+      &bull; 1 source page in <code>_knowledge/sources/meetings/</code> (cross-reference record)<br>
+      &bull; 1 hot.md (updated with latest context)<br>
       &bull; 1&ndash;3 stakeholder files (backlink added)<br>
       &bull; 1&ndash;2 project files (backlink added)<br>
       &bull; 1 log.md (new entry appended)<br>
@@ -157,7 +162,8 @@
     <div class="flow-step" style="border-color:var(--accent);">
       <h4>Step 5: Synthesize Answer &amp; Close the Loop</h4>
       <p>The agent synthesizes information from all tiers into a cohesive answer. Every claim includes source attribution &mdash; links back to specific meeting notes and original documents.<br><br>
-      <strong>Query &rarr; Knowledge loop:</strong> If the query reveals a gap &mdash; information that should be on an entity page but isn't &mdash; the answer itself can become a new wiki page or trigger an update to existing entity pages. The query operation feeds back into the knowledge graph, closing the loop.</p>
+      <strong>Query &rarr; Knowledge loop:</strong> If the query reveals a gap &mdash; information that should be on an entity page but isn't &mdash; the answer itself can become a new wiki page or trigger an update to existing entity pages. The query operation feeds back into the knowledge graph, closing the loop.<br><br>
+      <strong>Filing valuable answers:</strong> Particularly valuable answers can be filed to <code>_knowledge/analysis/</code> as new wiki pages. These analysis pages compound into the knowledge base, making future queries richer and reducing repeated synthesis work.</p>
     </div>
   </div>
 
