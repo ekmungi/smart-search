@@ -5,13 +5,18 @@ EmbedderProtocol implementation. For the cloud backend it aligns
 config.embedding_dimensions to the chosen model so the LanceDB vector column
 is created at the correct width."""
 
+import logging
+
 from smart_search.config import SmartSearchConfig
 from smart_search.constants import CLOUD_MODEL_DIMS
 from smart_search.embedder import Embedder
 from smart_search.cloud_embedder import CloudEmbedder
+from smart_search.protocols import EmbedderProtocol
+
+logger = logging.getLogger(__name__)
 
 
-def make_embedder(config: SmartSearchConfig):
+def make_embedder(config: SmartSearchConfig) -> EmbedderProtocol:
     """Return the configured embedder backend.
 
     Args:
@@ -33,6 +38,17 @@ def make_embedder(config: SmartSearchConfig):
             except Exception:
                 # pydantic-settings may be frozen; bypass the validator.
                 object.__setattr__(config, "embedding_dimensions", dim)
+        else:
+            # Unknown cloud model: cannot size the vector column from the
+            # registry. Warn loudly so a wrong-dimension index is observable
+            # rather than silent; the configured embedding_dimensions is used.
+            logger.warning(
+                "Cloud embedding model %r not in CLOUD_MODEL_DIMS; using "
+                "configured embedding_dimensions=%d. Verify it matches the "
+                "model's true output dimension to avoid index corruption.",
+                config.embedding_cloud_model,
+                config.embedding_dimensions,
+            )
         return CloudEmbedder(config)
     if backend == "none":
         raise ValueError(

@@ -40,3 +40,19 @@ class TestMakeEmbedder:
         cfg = SmartSearchConfig(embedding_backend="none")
         with pytest.raises(ValueError):
             make_embedder(cfg)
+
+    def test_cloud_unknown_model_preserves_dims_and_warns(self, caplog):
+        """An unknown cloud model leaves dims unchanged and logs a warning."""
+        import logging as _logging
+
+        cfg = SmartSearchConfig(
+            embedding_backend="cloud",
+            embedding_api_key="k",
+            embedding_cloud_model="acme/mystery-embed",
+            embedding_dimensions=512,
+        )
+        with caplog.at_level(_logging.WARNING):
+            emb = make_embedder(cfg)
+        assert isinstance(emb, CloudEmbedder)
+        assert cfg.embedding_dimensions == 512  # not aligned (model unknown)
+        assert "not in CLOUD_MODEL_DIMS" in caplog.text
