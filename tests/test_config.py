@@ -12,9 +12,9 @@ class TestConfigDefaults:
     """Tests for default configuration values."""
 
     def test_default_embedding_model(self):
-        """Default model is Snowflake/snowflake-arctic-embed-m-v2.0."""
+        """No model configured by default (no-auto-download; user selects)."""
         config = SmartSearchConfig()
-        assert config.embedding_model == "Snowflake/snowflake-arctic-embed-m-v2.0"
+        assert config.embedding_model == ""
 
     def test_default_dimensions(self):
         """Default embedding dimensions is 256 (Matryoshka truncation)."""
