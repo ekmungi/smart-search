@@ -55,6 +55,21 @@ class TestConfigDefaults:
             monkeypatch.setenv("SMART_SEARCH_EMBEDDING_BACKEND", value)
             assert SmartSearchConfig().embedding_backend == value
 
+    def test_cloud_dimensions_aligned_at_construction(self):
+        """Cloud backend sizes embedding_dimensions to the model at construction."""
+        cfg = SmartSearchConfig(
+            embedding_backend="cloud",
+            embedding_api_key="k",
+            embedding_cloud_model="openai/text-embedding-3-small",
+            embedding_dimensions=256,  # wrong on purpose
+        )
+        assert cfg.embedding_dimensions == 1536  # aligned by validator, no factory call
+
+    def test_local_dimensions_not_touched(self):
+        """Local backend keeps the configured dimension."""
+        cfg = SmartSearchConfig(embedding_backend="local", embedding_dimensions=256)
+        assert cfg.embedding_dimensions == 256
+
 
 class TestConfigOverrides:
     """Tests for environment variable overrides."""

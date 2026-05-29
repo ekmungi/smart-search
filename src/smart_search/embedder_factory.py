@@ -1,9 +1,9 @@
 # Factory that selects the embedder backend (local ONNX vs cloud API) from config.
 
 """make_embedder reads config.embedding_backend and returns the matching
-EmbedderProtocol implementation. For the cloud backend it aligns
-config.embedding_dimensions to the chosen model so the LanceDB vector column
-is created at the correct width."""
+EmbedderProtocol implementation. Cloud dimension alignment is handled at
+config construction time (SmartSearchConfig.align_cloud_dimensions) so the
+LanceDB vector column is always sized correctly regardless of call order."""
 
 import logging
 from typing import Optional
@@ -31,18 +31,10 @@ def make_embedder(config: SmartSearchConfig) -> EmbedderProtocol:
     """
     backend = (config.embedding_backend or "local").lower()
     if backend == "cloud":
-        # Size the store's vector column to the cloud model before init.
-        dim = CLOUD_MODEL_DIMS.get(config.embedding_cloud_model)
-        if dim:
-            try:
-                config.embedding_dimensions = dim
-            except Exception:
-                # pydantic-settings may be frozen; bypass the validator.
-                object.__setattr__(config, "embedding_dimensions", dim)
-        else:
-            # Unknown cloud model: cannot size the vector column from the
-            # registry. Warn loudly so a wrong-dimension index is observable
-            # rather than silent; the configured embedding_dimensions is used.
+        # Dimension alignment happens at config construction
+        # (SmartSearchConfig.align_cloud_dimensions). Here we only warn when
+        # the model is unknown, so the dimension could not be auto-aligned.
+        if config.embedding_cloud_model not in CLOUD_MODEL_DIMS:
             logger.warning(
                 "Cloud embedding model %r not in CLOUD_MODEL_DIMS; using "
                 "configured embedding_dimensions=%d. Verify it matches the "

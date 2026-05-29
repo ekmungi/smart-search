@@ -6,6 +6,7 @@ from typing import List, Optional
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from smart_search.constants import CLOUD_MODEL_DIMS
 from smart_search.data_dir import get_data_dir
 
 
@@ -127,6 +128,21 @@ class SmartSearchConfig(BaseSettings):
             "watch_directories",
             [str(Path(d).resolve()) for d in self.watch_directories],
         )
+        return self
+
+    @model_validator(mode="after")
+    def align_cloud_dimensions(self) -> "SmartSearchConfig":
+        """Size embedding_dimensions to the chosen cloud model.
+
+        Runs at construction so the value is correct before any consumer
+        (e.g. the LanceDB store) reads it, independent of call order. Only
+        applies to the cloud backend with a model known to CLOUD_MODEL_DIMS;
+        unknown models keep the configured dimension (the factory warns).
+        """
+        if self.embedding_backend == "cloud":
+            dim = CLOUD_MODEL_DIMS.get(self.embedding_cloud_model)
+            if dim:
+                object.__setattr__(self, "embedding_dimensions", dim)
         return self
 
 
