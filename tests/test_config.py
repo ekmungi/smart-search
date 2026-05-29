@@ -42,6 +42,19 @@ class TestConfigDefaults:
         assert "smart-search" in config.sqlite_path
         assert "metadata.db" in config.sqlite_path
 
+    def test_cloud_embedding_defaults(self):
+        """Cloud embedding fields exist with safe defaults."""
+        config = SmartSearchConfig()
+        assert config.embedding_api_key == ""
+        assert config.embedding_api_base_url == "https://openrouter.ai/api/v1"
+        assert config.embedding_cloud_model == ""
+
+    def test_embedding_backend_accepts_explicit_values(self, monkeypatch):
+        """embedding_backend accepts local | cloud | none (and legacy auto)."""
+        for value in ("local", "cloud", "none", "auto"):
+            monkeypatch.setenv("SMART_SEARCH_EMBEDDING_BACKEND", value)
+            assert SmartSearchConfig().embedding_backend == value
+
 
 class TestConfigOverrides:
     """Tests for environment variable overrides."""

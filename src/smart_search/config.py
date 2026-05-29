@@ -22,8 +22,14 @@ class SmartSearchConfig(BaseSettings):
     # Embedding settings
     embedding_model: str = ""
     embedding_dimensions: int = 256
+    # Backend selection: "local" (ONNX), "cloud" (OpenAI-compatible API),
+    # "none" (keyword-only). "auto" is accepted as a legacy alias for "local".
     embedding_backend: str = "auto"
     embedder_idle_timeout: float = 60.0
+    # Cloud embedding (OpenAI-compatible /v1/embeddings; OpenRouter by default).
+    embedding_api_key: str = ""  # env: SMART_SEARCH_EMBEDDING_API_KEY
+    embedding_api_base_url: str = "https://openrouter.ai/api/v1"
+    embedding_cloud_model: str = ""  # e.g. "openai/text-embedding-3-small"
     model_download_timeout: int = 900  # seconds; 0 = no timeout
 
     # Chunking settings -- word-based limits for size-enforced splitting
