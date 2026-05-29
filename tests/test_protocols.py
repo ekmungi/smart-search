@@ -32,11 +32,12 @@ def test_retriever_protocol_has_required_methods():
 
 
 def test_existing_embedder_satisfies_protocol():
-    """Current Embedder class structurally matches EmbedderProtocol."""
+    """Current Embedder instance structurally matches EmbedderProtocol."""
+    from smart_search.config import SmartSearchConfig
     from smart_search.embedder import Embedder
 
-    assert hasattr(Embedder, "embed_documents")
-    assert hasattr(Embedder, "embed_query")
+    embedder = Embedder(SmartSearchConfig())
+    assert isinstance(embedder, EmbedderProtocol)
 
 
 class TestEmbedderProtocolShape:
