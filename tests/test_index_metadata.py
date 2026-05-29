@@ -80,3 +80,36 @@ def test_clear_removes_all(metadata):
     metadata.set("key1", "val1")
     metadata.clear()
     assert metadata.get_all() == {}
+
+
+class TestBackendTracking:
+    """Tests that embedding_backend is tracked and mismatch is detected."""
+
+    def test_backend_mismatch_detected(self, tmp_path: "Path") -> None:
+        """check_mismatch returns embedding_backend and embedding_dimensions when both change.
+
+        Args:
+            tmp_path: Pytest-provided temporary directory.
+        """
+        meta = IndexMetadata(str(tmp_path / "meta.db"))
+        meta.initialize()
+        meta.set("embedding_backend", "local")
+        meta.set("embedding_dimensions", "256")
+
+        mismatches = meta.check_mismatch(
+            {"embedding_backend": "cloud", "embedding_dimensions": "1536"}
+        )
+        assert "embedding_backend" in mismatches
+        assert "embedding_dimensions" in mismatches
+
+    def test_no_mismatch_when_same(self, tmp_path: "Path") -> None:
+        """check_mismatch returns empty dict when embedding_backend is unchanged.
+
+        Args:
+            tmp_path: Pytest-provided temporary directory.
+        """
+        meta = IndexMetadata(str(tmp_path / "meta.db"))
+        meta.initialize()
+        meta.set("embedding_backend", "cloud")
+        mismatches = meta.check_mismatch({"embedding_backend": "cloud"})
+        assert "embedding_backend" not in mismatches

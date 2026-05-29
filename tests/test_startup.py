@@ -205,6 +205,54 @@ class TestBackfillMtime:
         assert result["backfilled"] == 0
 
 
+class TestBackendTrackedInCompatibilityCheck:
+    """Tests that embedding_backend is included in the tracked index metadata."""
+
+    def test_backend_change_detected_as_incompatible(self, tmp_config: SmartSearchConfig) -> None:
+        """Storing a different embedding_backend causes incompatibility.
+
+        Pre-populates metadata with a backend that differs from the config's
+        current value, then asserts the compatibility check reports incompatible
+        and names embedding_backend in the mismatches.
+
+        Args:
+            tmp_config: SmartSearchConfig backed by a temporary directory.
+        """
+        meta = IndexMetadata(tmp_config.sqlite_path)
+        meta.initialize()
+        # Store a backend that differs from whatever tmp_config.embedding_backend is
+        old_backend = "cloud" if tmp_config.embedding_backend != "cloud" else "local"
+        meta.set("embedding_backend", old_backend)
+        meta.set("embedding_model", tmp_config.embedding_model)
+        meta.set("embedding_dimensions", str(tmp_config.embedding_dimensions))
+
+        result = check_index_compatibility(tmp_config, tmp_config.sqlite_path)
+
+        assert result["compatible"] is False
+        assert "embedding_backend" in result["mismatches"]
+        stored_val, current_val = result["mismatches"]["embedding_backend"]
+        assert stored_val == old_backend
+        assert current_val == tmp_config.embedding_backend
+
+    def test_backend_written_to_metadata_after_check(self, tmp_config: SmartSearchConfig) -> None:
+        """check_index_compatibility writes embedding_backend to metadata.
+
+        After a fresh check with no prior metadata, the backend value
+        from config should be persisted for future comparisons.
+
+        Args:
+            tmp_config: SmartSearchConfig backed by a temporary directory.
+        """
+        result = check_index_compatibility(tmp_config, tmp_config.sqlite_path)
+
+        assert result["compatible"] is True
+
+        meta = IndexMetadata(tmp_config.sqlite_path)
+        meta.initialize()
+        stored = meta.get("embedding_backend")
+        assert stored == tmp_config.embedding_backend
+
+
 class TestReconcileOrphansWrapper:
     """Tests for the reconcile_orphans convenience function."""
 
