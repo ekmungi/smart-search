@@ -35,3 +35,46 @@ def test_existing_embedder_satisfies_protocol():
 
     assert hasattr(Embedder, "embed_documents")
     assert hasattr(Embedder, "embed_query")
+
+
+class TestEmbedderProtocolShape:
+    """EmbedderProtocol exposes dimensions and backend_type."""
+
+    def test_protocol_requires_dimensions_and_backend_type(self):
+        """A complete implementation with dimensions and backend_type satisfies the protocol."""
+
+        class Dummy:
+            @property
+            def dimensions(self) -> int:
+                return 256
+
+            @property
+            def backend_type(self) -> str:
+                return "local"
+
+            def embed_documents(self, texts):
+                return [[0.0] * 256 for _ in texts]
+
+            def embed_query(self, query):
+                return [0.0] * 256
+
+            def embed_image(self, image_path):
+                raise NotImplementedError
+
+        assert isinstance(Dummy(), EmbedderProtocol)
+
+    def test_missing_new_members_fails_isinstance(self):
+        """Missing dimensions/backend_type means the class does not satisfy the protocol."""
+
+        class Incomplete:
+            def embed_documents(self, texts):
+                return []
+
+            def embed_query(self, query):
+                return []
+
+            def embed_image(self, image_path):
+                raise NotImplementedError
+
+        # No dimensions/backend_type -> not a structural match.
+        assert not isinstance(Incomplete(), EmbedderProtocol)
