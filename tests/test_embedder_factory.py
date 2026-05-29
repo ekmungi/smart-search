@@ -56,3 +56,34 @@ class TestMakeEmbedder:
         assert isinstance(emb, CloudEmbedder)
         assert cfg.embedding_dimensions == 512  # not aligned (model unknown)
         assert "not in CLOUD_MODEL_DIMS" in caplog.text
+
+
+import inspect
+
+
+class TestCallSitesUseFactory:
+    """Embedder-constructing entry points route through make_embedder."""
+
+    def test_cli_index_uses_factory(self):
+        import smart_search.cli_index as m
+        src = inspect.getsource(m)
+        assert "make_embedder" in src
+        assert "Embedder(cfg)" not in src and "Embedder(config)" not in src
+
+    def test_cli_search_uses_factory(self):
+        import smart_search.cli_search as m
+        src = inspect.getsource(m)
+        assert "make_embedder" in src
+        assert "Embedder(cfg)" not in src and "Embedder(config)" not in src
+
+    def test_ephemeral_store_uses_factory(self):
+        import smart_search.ephemeral_store as m
+        src = inspect.getsource(m)
+        assert "make_embedder" in src
+        assert "Embedder(config)" not in src
+
+    def test_http_uses_factory(self):
+        import smart_search.http as m
+        src = inspect.getsource(m)
+        assert "make_embedder" in src
+        assert "Embedder(config)" not in src
