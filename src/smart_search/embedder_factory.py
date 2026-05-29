@@ -6,9 +6,10 @@ config.embedding_dimensions to the chosen model so the LanceDB vector column
 is created at the correct width."""
 
 import logging
+from typing import Optional
 
 from smart_search.config import SmartSearchConfig
-from smart_search.constants import CLOUD_MODEL_DIMS
+from smart_search.constants import CLOUD_MODEL_DIMS, CLOUD_MODEL_PRICE_PER_1M
 from smart_search.embedder import Embedder
 from smart_search.cloud_embedder import CloudEmbedder
 from smart_search.protocols import EmbedderProtocol
@@ -57,3 +58,19 @@ def make_embedder(config: SmartSearchConfig) -> EmbedderProtocol:
         )
     # "local" or legacy "auto"
     return Embedder(config)
+
+
+def estimate_cloud_cost(num_tokens: int, model: str) -> Optional[float]:
+    """Estimate USD cost to embed num_tokens with a cloud model.
+
+    Args:
+        num_tokens: Total input tokens to embed.
+        model: Cloud model id (must be in CLOUD_MODEL_PRICE_PER_1M).
+
+    Returns:
+        Estimated USD cost, or None if the model price is unknown.
+    """
+    price = CLOUD_MODEL_PRICE_PER_1M.get(model)
+    if price is None:
+        return None
+    return (num_tokens / 1_000_000) * price

@@ -7,7 +7,7 @@ import pytest
 from smart_search.config import SmartSearchConfig
 from smart_search.embedder import Embedder
 from smart_search.cloud_embedder import CloudEmbedder
-from smart_search.embedder_factory import make_embedder
+from smart_search.embedder_factory import estimate_cloud_cost, make_embedder
 
 
 class TestMakeEmbedder:
@@ -86,3 +86,13 @@ class TestCallSitesUseFactory:
         src = inspect.getsource(m)
         assert "make_embedder" in src
         assert "Embedder(config)" not in src
+
+
+class TestCostEstimate:
+    def test_known_model_cost(self):
+        # 5,000,000 tokens at $0.02 / 1M = $0.10
+        cost = estimate_cloud_cost(5_000_000, "openai/text-embedding-3-small")
+        assert round(cost, 2) == 0.10
+
+    def test_unknown_model_returns_none(self):
+        assert estimate_cloud_cost(1000, "unknown/model") is None
