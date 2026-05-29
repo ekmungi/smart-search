@@ -7,7 +7,11 @@ import pytest
 from smart_search.config import SmartSearchConfig
 from smart_search.embedder import Embedder
 from smart_search.cloud_embedder import CloudEmbedder
-from smart_search.embedder_factory import estimate_cloud_cost, make_embedder
+from smart_search.embedder_factory import (
+    embedder_is_ready,
+    estimate_cloud_cost,
+    make_embedder,
+)
 
 
 class TestMakeEmbedder:
@@ -86,6 +90,65 @@ class TestCallSitesUseFactory:
         src = inspect.getsource(m)
         assert "make_embedder" in src
         assert "Embedder(config)" not in src
+
+
+class TestEmbedderIsReady:
+    """Unit tests for embedder_is_ready backend-aware readiness helper."""
+
+    def test_cloud_with_key_and_model_is_ready(self) -> None:
+        """Cloud backend with both api key and model configured returns True."""
+        cfg = SmartSearchConfig(
+            embedding_backend="cloud",
+            embedding_api_key="sk-test",
+            embedding_cloud_model="openai/text-embedding-3-small",
+        )
+        assert embedder_is_ready(cfg) is True
+
+    def test_cloud_without_key_is_not_ready(self) -> None:
+        """Cloud backend with no api key returns False."""
+        cfg = SmartSearchConfig(
+            embedding_backend="cloud",
+            embedding_api_key="",
+            embedding_cloud_model="openai/text-embedding-3-small",
+        )
+        assert embedder_is_ready(cfg) is False
+
+    def test_cloud_without_model_is_not_ready(self) -> None:
+        """Cloud backend with no cloud model configured returns False."""
+        cfg = SmartSearchConfig(
+            embedding_backend="cloud",
+            embedding_api_key="sk-test",
+            embedding_cloud_model="",
+        )
+        assert embedder_is_ready(cfg) is False
+
+    def test_none_backend_is_never_ready(self) -> None:
+        """backend='none' always returns False (keyword-only mode)."""
+        cfg = SmartSearchConfig(embedding_backend="none")
+        assert embedder_is_ready(cfg) is False
+
+    def test_local_without_model_is_not_ready(self) -> None:
+        """Local backend with no embedding_model configured returns False."""
+        cfg = SmartSearchConfig(embedding_backend="local", embedding_model="")
+        assert embedder_is_ready(cfg) is False
+
+    def test_local_with_cached_model_is_ready(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Local backend with model configured and cached on disk returns True."""
+        monkeypatch.setattr(Embedder, "is_model_cached", staticmethod(lambda _: True))
+        cfg = SmartSearchConfig(
+            embedding_backend="local",
+            embedding_model="snowflake/snowflake-arctic-embed-m-v2.0",
+        )
+        assert embedder_is_ready(cfg) is True
+
+    def test_auto_with_cached_model_is_ready(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Auto backend (treated as local) with cached model returns True."""
+        monkeypatch.setattr(Embedder, "is_model_cached", staticmethod(lambda _: True))
+        cfg = SmartSearchConfig(
+            embedding_backend="auto",
+            embedding_model="snowflake/snowflake-arctic-embed-m-v2.0",
+        )
+        assert embedder_is_ready(cfg) is True
 
 
 class TestCostEstimate:

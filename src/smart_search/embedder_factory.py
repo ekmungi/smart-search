@@ -52,6 +52,29 @@ def make_embedder(config: SmartSearchConfig) -> EmbedderProtocol:
     return Embedder(config)
 
 
+def embedder_is_ready(config: SmartSearchConfig) -> bool:
+    """Whether a vector embedder can currently produce embeddings.
+
+    Cloud: ready when api key and model are configured (no local model needed).
+    Local/auto: ready when a model is configured AND cached on disk.
+    None: never ready (keyword-only).
+
+    Args:
+        config: SmartSearchConfig to inspect.
+
+    Returns:
+        True if the configured backend can embed immediately, False otherwise.
+    """
+    backend = (config.embedding_backend or "local").lower()
+    if backend == "cloud":
+        return bool(config.embedding_api_key and config.embedding_cloud_model)
+    if backend == "none":
+        return False
+    if not config.embedding_model:
+        return False
+    return Embedder.is_model_cached(config.embedding_model)
+
+
 def estimate_cloud_cost(num_tokens: int, model: str) -> Optional[float]:
     """Estimate USD cost to embed num_tokens with a cloud model.
 
