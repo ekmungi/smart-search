@@ -1,5 +1,7 @@
 # Tests for make_embedder: backend selection and cloud dimension alignment.
 
+import inspect
+
 import pytest
 
 from smart_search.config import SmartSearchConfig
@@ -56,9 +58,6 @@ class TestMakeEmbedder:
         assert isinstance(emb, CloudEmbedder)
         assert cfg.embedding_dimensions == 512  # not aligned (model unknown)
         assert "not in CLOUD_MODEL_DIMS" in caplog.text
-
-
-import inspect
 
 
 class TestCallSitesUseFactory:
