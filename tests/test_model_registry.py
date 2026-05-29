@@ -132,3 +132,16 @@ class TestModelInfoGpuRequired:
         """At least one GPU-required model exists in the registry."""
         gpu_models = [m for m in list_models() if m.gpu_required]
         assert len(gpu_models) >= 1
+
+
+from smart_search.constants import CLOUD_MODEL_DIMS, CLOUD_MODEL_PRICE_PER_1M
+
+
+class TestCloudModelConstants:
+    def test_known_cloud_dims(self):
+        assert CLOUD_MODEL_DIMS["openai/text-embedding-3-small"] == 1536
+        assert CLOUD_MODEL_DIMS["openai/text-embedding-3-large"] == 3072
+
+    def test_price_map_covers_dim_map(self):
+        for model in CLOUD_MODEL_DIMS:
+            assert model in CLOUD_MODEL_PRICE_PER_1M

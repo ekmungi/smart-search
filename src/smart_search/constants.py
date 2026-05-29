@@ -32,3 +32,22 @@ DEFAULT_MODEL_DOWNLOAD_TIMEOUT = 900  # 15 minutes
 
 # Application metadata
 APP_VERSION = "0.15.1"
+
+# Cloud embedding model dimensions (OpenAI-compatible model ids via OpenRouter).
+# Used to size the LanceDB vector column before the first embedding call.
+CLOUD_MODEL_DIMS = {
+    "openai/text-embedding-3-small": 1536,
+    "openai/text-embedding-3-large": 3072,
+    "cohere/embed-english-v3.0": 1024,
+    "voyageai/voyage-3": 1024,
+    "google/gemini-embedding-001": 3072,
+}
+
+# Approximate USD price per 1M input tokens, for pre-indexing cost estimates.
+CLOUD_MODEL_PRICE_PER_1M = {
+    "openai/text-embedding-3-small": 0.02,
+    "openai/text-embedding-3-large": 0.13,
+    "cohere/embed-english-v3.0": 0.10,
+    "voyageai/voyage-3": 0.06,
+    "google/gemini-embedding-001": 0.20,
+}
