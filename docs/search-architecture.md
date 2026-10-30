@@ -9,21 +9,27 @@ Query
   |
   v
 [Query Preprocessor] ── stopword removal (FTS5), whitespace normalization (embedding)
-  |                |
-  v                v
-[FTS5 BM25]    [Vector Search]
-  |                |
-  v                v
-  └──── [RRF Fusion (k=60)] ────┘
-              |
-              v
-     [Cross-Encoder Reranker] ── TinyBERT-L-2, ~30-60ms on CPU
-              |
-              v
-     [MMR Diversity Selection] ── lambda=0.8, <1ms
-              |
-              v
-         Final Results
+  |
+  v
+[Vector Search] ── runs first, fetches 5x limit
+  |
+  v
+[FTS5 BM25] ── runs second, fetches 5x limit
+  |
+  v
+[RRF Fusion (k=60)] ── keeps the top `limit` results
+  |
+  v
+[Cross-Encoder Reranker] ── TinyBERT-L-2, ~30-60ms on CPU
+  |
+  v
+[MMR Diversity Selection] ── lambda=0.8, <1ms
+  |
+  v
+[Per-document cap + folder/type filters] ── max 2 chunks per file
+  |
+  v
+Final Results
 ```
 
 ## Stage Details
@@ -40,7 +46,7 @@ Splits the query into two paths optimized for each retrieval method:
 
 ### 2. Dual Retrieval
 
-Two independent retrieval methods run in parallel, each over-fetching 5x the requested limit to ensure the fusion stage has enough candidates:
+Two independent retrieval methods run one after the other (vector search first, then keyword search), each over-fetching 5x the requested limit to ensure the fusion stage has enough candidates. If keyword search finds nothing, the semantic results are filtered by `relevance_threshold` and passed straight to reranking; if vector search finds nothing, the keyword results are used alone.
 
 #### Vector Search (Semantic)
 
@@ -49,6 +55,8 @@ Dense retrieval using snowflake-arctic-embed-m-v2.0 embeddings (256-dim, int8 ON
 **Module**: `embedder.py`, `store.py`
 **Distance metric**: Cosine similarity (1 - distance)
 **Model**: snowflake-arctic-embed-m-v2.0 (137M params, 297MB)
+
+With the optional cloud backend (`embedding_backend = "cloud"`, off by default), `cloud_embedder.py` embeds the query through an OpenAI-compatible API instead, so the query text leaves the machine.
 
 #### Keyword Search (BM25)
 
@@ -68,6 +76,8 @@ RRF_score(d) = sum over lists L: 1 / (k + rank_L(d))
 
 Documents appearing in both lists receive scores from both, naturally boosting consensus results. The constant k=60 (from the original RRF paper) controls how much top-ranked results are favored.
 
+Fusion returns only the top `limit` results (10 by default). Everything after this stage works on that short list.
+
 **Module**: `fusion.py`
 **Config**: `rrf_k` (default: 60)
 
@@ -76,6 +86,8 @@ Documents appearing in both lists receive scores from both, naturally boosting c
 The highest-impact quality improvement. After fusion produces a candidate set, each (query, document) pair is scored jointly by a cross-encoder that sees both texts together -- unlike the bi-encoder which encodes them independently.
 
 Cross-encoders attend across the query-document boundary, catching subtle relevance signals that independent embeddings miss. The trade-off is speed: cross-encoders are ~100x slower than bi-encoders per document, making them impractical for first-stage retrieval but ideal for reranking a small candidate set.
+
+The reranker scores up to `rerank_top_n` results. In hybrid mode it receives only the top `limit` fused results, so with the default `limit` of 10 it reorders those 10 and cannot bring in a result that fusion ranked lower.
 
 **Module**: `reranker.py`
 **Model**: cross-encoder/ms-marco-TinyBERT-L-2-v2 (14M params, ~15MB ONNX)
@@ -91,13 +103,20 @@ Maximum Marginal Relevance eliminates redundant results by penalizing candidates
 MMR(d) = lambda * relevance(d) - (1 - lambda) * max_sim(d, selected)
 ```
 
-Greedy selection iteratively picks the candidate with the highest MMR score. With lambda=0.8, relevance dominates (80% weight) but near-duplicate chunks from the same document are pushed down in favor of diverse information.
+Greedy selection iteratively picks the candidate with the highest MMR score. With lambda=0.8, relevance dominates (80% weight) but near-duplicate chunks from the same document are pushed down in favor of diverse information. A further penalty (`mmr_source_penalty`, default 0.5) applies to chunks from a file that is already selected. MMR reorders the list it receives; it does not shorten it.
 
 This is particularly important for LLM consumption: 10 diverse chunks from 8 documents provide far more context than 10 overlapping chunks from 2 documents.
 
 **Module**: `mmr.py`
-**Config**: `mmr_enabled` (default: true), `mmr_lambda` (default: 0.8)
+**Config**: `mmr_enabled` (default: true), `mmr_lambda` (default: 0.8), `mmr_source_penalty` (default: 0.5)
 **Latency**: <1ms (190 cosine ops on 256-dim vectors for top-20)
+
+### 6. Per-Document Cap and Filters
+
+After the pipeline above, `search.py` keeps at most `max_chunks_per_source` chunks (default 2) from any one file, then applies the optional file-type and folder filters. Because these steps run on the final short list, a filtered search can return fewer than `limit` results, or none, even when the folder holds relevant documents further down the ranking.
+
+**Module**: `search.py`
+**Config**: `max_chunks_per_source` (default: 2)
 
 ## Resource Budget
 
@@ -123,9 +142,11 @@ This is particularly important for LLM consumption: 10 diverse chunks from 8 doc
 | `reranking_enabled` | `true` | Enable cross-encoder reranking |
 | `reranker_model` | `cross-encoder/ms-marco-TinyBERT-L-2-v2` | Cross-encoder model |
 | `reranker_idle_timeout` | `60.0` | Seconds before reranker unloads from memory |
-| `rerank_top_n` | `20` | Number of fusion results to rerank |
+| `rerank_top_n` | `20` | Maximum number of results to rerank (hybrid mode passes only the top `limit` fused results) |
 | `mmr_enabled` | `true` | Enable MMR diversity selection |
 | `mmr_lambda` | `0.8` | Relevance vs diversity trade-off (0-1) |
+| `mmr_source_penalty` | `0.5` | Extra MMR penalty for chunks from an already-selected file (0 = off) |
+| `max_chunks_per_source` | `2` | Maximum chunks from one file in the final results (0 = no cap) |
 
 ## References
 
