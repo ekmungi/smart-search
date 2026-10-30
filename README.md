@@ -101,7 +101,7 @@ Your index and your searches stay on your machine. Smart Search uses the network
 
 - **First use.** The embedding model (snowflake-arctic-embed-m-v2.0, about 297 MB) and the reranking model (TinyBERT, about 15 MB) are downloaded from Hugging Face into the local Hugging Face cache. After that, both work offline. While a network is available, Hugging Face's download library also checks for a newer version of a model each time that model loads.
 - **Models you choose to download.** Picking a different model in the desktop Settings, or calling `POST /api/model/download`, downloads it from Hugging Face. On a machine without internet access, model files can instead be copied in from a local folder with `POST /api/model/import`.
-- **Optional cloud embedding (off by default).** If you set `SMART_SEARCH_EMBEDDING_BACKEND=cloud` together with `SMART_SEARCH_EMBEDDING_API_KEY` and `SMART_SEARCH_EMBEDDING_CLOUD_MODEL`, the text of every chunk is sent to an OpenAI-compatible embeddings service when it is indexed, and every search query is sent when you search. The default service is OpenRouter (`https://openrouter.ai/api/v1`). The desktop app does not offer this mode yet.
+- **Optional cloud embedding (off by default).** If you set `SMART_SEARCH_EMBEDDING_BACKEND=cloud` together with `SMART_SEARCH_EMBEDDING_API_KEY` and `SMART_SEARCH_EMBEDDING_CLOUD_MODEL`, the text of every chunk is sent to an OpenAI-compatible embeddings service when it is indexed, and every search query is sent when you search. The default service is OpenRouter (`https://openrouter.ai/api/v1`). A different service can be set with `SMART_SEARCH_EMBEDDING_API_BASE_URL`; it must use https, except for a server on your own machine (`localhost` or `127.0.0.1`). The desktop app does not offer this mode yet.
 
 ---
 
@@ -295,7 +295,7 @@ smart-search temp cleanup /path              # Remove an ephemeral index
 
 ## REST API
 
-The HTTP server runs on `localhost:9742` with 26 endpoints:
+The HTTP server runs on `localhost:9742` with 26 endpoints. It has no login, so it limits who can call it: browsers may call it only from the desktop app (and the Vite dev server), other web pages cannot send it requests that change anything, and when it is bound to `127.0.0.1` or `localhost` it rejects requests addressed to any other host name. Scripts, the MCP server and the CLI are not affected.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -342,7 +342,7 @@ Override with: `SMART_SEARCH_DATA_DIR=/custom/path`
 
 ### config.json
 
-Persistent configuration stored in the data directory. Managed via CLI, REST API, or desktop Settings panel.
+Persistent configuration stored in the data directory. Managed via CLI, REST API, or desktop Settings panel. The cloud embedding settings are the exception: the API key, base URL and cloud model are read only from environment variables, `PUT /api/config` refuses them and refuses to switch the backend to `cloud`, and `GET /api/config` never returns a stored key.
 
 ### Environment Variables
 

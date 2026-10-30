@@ -11,6 +11,25 @@ BYTES_PER_MB = 1024 * 1024
 DEFAULT_HTTP_PORT = 9742
 DEFAULT_HOST = "127.0.0.1"
 
+# Browser origins allowed to call the API: the Tauri webview on macOS/Linux
+# (tauri://) and Windows (http/https://tauri.localhost), plus the Vite dev server.
+ALLOWED_ORIGINS = (
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "http://localhost:5173",
+)
+# Loopback bind addresses; also the only Host header values accepted when
+# bound to one (blocks DNS rebinding).
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
+# Cloud embedding settings read only from SMART_SEARCH_ env vars, never from
+# config.json or the HTTP API, so no web page can redirect the API key.
+ENV_ONLY_CONFIG_KEYS = frozenset({
+    "embedding_api_key",
+    "embedding_api_base_url",
+    "embedding_cloud_model",
+})
+
 # Search retrieval settings
 OVERFETCH_MULTIPLIER = 5  # Fetch limit*N from each source before fusion
 

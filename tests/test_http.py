@@ -471,3 +471,165 @@ class TestModelSwitch:
         assert resp.json()["requires_reindex"] is True
         mock_store.rebuild_table.assert_called_once()
         mock_task_manager.submit.assert_not_called()
+
+
+class TestApiSecurity:
+    """Only the desktop app may use the API; cloud settings stay env-only."""
+
+    _SECRET = "sk-or-v1-not-a-real-key"
+
+    def test_cors_preflight_refused_for_foreign_origin(self, client):
+        resp = client.options(
+            "/api/config",
+            headers={
+                "Origin": "https://evil.example",
+                "Access-Control-Request-Method": "PUT",
+            },
+        )
+        assert "access-control-allow-origin" not in resp.headers
+
+    def test_cors_preflight_allowed_for_desktop_origin(self, client):
+        resp = client.options(
+            "/api/config",
+            headers={
+                "Origin": "http://tauri.localhost",
+                "Access-Control-Request-Method": "PUT",
+            },
+        )
+        assert resp.headers["access-control-allow-origin"] == "http://tauri.localhost"
+
+    def test_simple_request_from_foreign_origin_not_readable(self, client):
+        resp = client.get("/api/health", headers={"Origin": "https://evil.example"})
+        assert "access-control-allow-origin" not in resp.headers
+
+    @pytest.mark.parametrize("key", [
+        "embedding_api_key", "embedding_api_base_url", "embedding_cloud_model",
+    ])
+    def test_put_config_refuses_env_only_keys(self, client, mock_config_manager, key):
+        resp = client.put("/api/config", json={"config": {key: "https://evil.example"}})
+        assert resp.status_code == 400
+        mock_config_manager.save.assert_not_called()
+
+    @pytest.mark.parametrize("value", ["cloud", "Cloud", "CLOUD", "anything-else"])
+    def test_put_config_refuses_switching_on_cloud(self, client, mock_config_manager, value):
+        resp = client.put("/api/config", json={"config": {"embedding_backend": value}})
+        assert resp.status_code == 400
+        mock_config_manager.save.assert_not_called()
+
+    def test_put_config_still_accepts_local_backend(self, client, mock_config_manager):
+        resp = client.put("/api/config", json={"config": {"embedding_backend": "local"}})
+        assert resp.status_code == 200
+        mock_config_manager.save.assert_called_once()
+
+    def test_get_config_masks_stored_api_key(self, client, mock_config_manager):
+        mock_config_manager.load.return_value = {"embedding_api_key": self._SECRET}
+        resp = client.get("/api/config")
+        assert resp.status_code == 200
+        assert self._SECRET not in resp.text
+        assert resp.json()["config"]["embedding_api_key"]
+
+    def test_put_config_response_masks_stored_api_key(self, client, mock_config_manager):
+        mock_config_manager.load.return_value = {"embedding_api_key": self._SECRET}
+        resp = client.put("/api/config", json={"config": {"search_default_limit": 20}})
+        assert resp.status_code == 200
+        assert self._SECRET not in resp.text
+
+    def test_startup_ignores_env_only_keys_in_config_json(self, monkeypatch):
+        from smart_search.http import runtime_config_from_persisted
+
+        monkeypatch.delenv("SMART_SEARCH_EMBEDDING_API_BASE_URL", raising=False)
+        monkeypatch.delenv("SMART_SEARCH_EMBEDDING_CLOUD_MODEL", raising=False)
+        cfg = runtime_config_from_persisted({
+            "embedding_api_base_url": "https://evil.example/v1",
+            "embedding_cloud_model": "evil/model",
+            "relevance_threshold": 0.4,
+        })
+        assert cfg.embedding_api_base_url == "https://openrouter.ai/api/v1"
+        assert cfg.embedding_cloud_model == ""
+        assert cfg.relevance_threshold == 0.4
+
+
+    def test_startup_ignores_cloud_backend_in_config_json(self, monkeypatch):
+        from smart_search.http import runtime_config_from_persisted
+
+        monkeypatch.delenv("SMART_SEARCH_EMBEDDING_BACKEND", raising=False)
+        cfg = runtime_config_from_persisted(
+            {"embedding_backend": "Cloud", "relevance_threshold": 0.4},
+        )
+        assert cfg.embedding_backend.lower() != "cloud"
+
+    def test_startup_keeps_cloud_backend_from_env(self, monkeypatch):
+        from smart_search.http import runtime_config_from_persisted
+
+        monkeypatch.setenv("SMART_SEARCH_EMBEDDING_BACKEND", "cloud")
+        cfg = runtime_config_from_persisted(
+            {"embedding_backend": "cloud", "relevance_threshold": 0.4},
+        )
+        assert cfg.embedding_backend == "cloud"
+
+    def test_bodyless_post_from_foreign_origin_refused(self, client, mock_store):
+        """A no-cors POST needs no preflight; the server must still refuse it."""
+        resp = client.post("/api/rebuild", headers={"Origin": "https://evil.example"})
+        assert resp.status_code == 403
+        mock_store.rebuild_table.assert_not_called()
+
+    def test_post_from_desktop_origin_allowed(self, client, mock_store):
+        mock_store.clear_all_file_hashes.return_value = 0
+        resp = client.post("/api/rebuild", headers={"Origin": "http://tauri.localhost"})
+        assert resp.status_code == 200
+
+    def test_post_without_origin_allowed(self, client, mock_store):
+        """Scripts, the CLI and the MCP client send no Origin header."""
+        mock_store.clear_all_file_hashes.return_value = 0
+        resp = client.post("/api/rebuild")
+        assert resp.status_code == 200
+
+
+class TestHostCheck:
+    """A loopback-bound server rejects foreign Host headers (DNS rebinding)."""
+
+    @pytest.fixture
+    def app(
+        self, mock_store, mock_engine, mock_indexer,
+        mock_config_manager, mock_watcher, mock_task_manager,
+    ):
+        return create_app(
+            search_engine=mock_engine,
+            store=mock_store,
+            config=_make_config(),
+            indexer=mock_indexer,
+            config_manager=mock_config_manager,
+            watcher=mock_watcher,
+            task_manager=mock_task_manager,
+        )
+
+    def test_foreign_host_rejected_on_loopback_bind(self, app):
+        from smart_search.http import apply_host_check
+
+        apply_host_check(app, "127.0.0.1")
+        resp = TestClient(app).get("/api/health", headers={"host": "evil.example"})
+        assert resp.status_code == 400
+
+    def test_loopback_host_accepted_on_loopback_bind(self, app):
+        from smart_search.http import apply_host_check
+
+        apply_host_check(app, "127.0.0.1")
+        client = TestClient(app)
+        assert client.get("/api/health", headers={"host": "127.0.0.1:9742"}).status_code == 200
+        assert client.get("/api/health", headers={"host": "localhost:9742"}).status_code == 200
+
+    def test_no_host_check_on_non_loopback_bind(self, app):
+        from smart_search.http import apply_host_check
+
+        apply_host_check(app, "0.0.0.0")
+        resp = TestClient(app).get("/api/health", headers={"host": "192.168.1.20:9742"})
+        assert resp.status_code == 200
+
+    def test_main_applies_host_check(self, app, monkeypatch):
+        import smart_search.http as http_mod
+
+        monkeypatch.setattr(http_mod, "create_app", lambda: app)
+        monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+        http_mod.main(host="127.0.0.1", port=9742)
+        resp = TestClient(app).get("/api/health", headers={"host": "evil.example"})
+        assert resp.status_code == 400

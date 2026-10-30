@@ -8,11 +8,32 @@ HTTP dependency to the build."""
 import json
 import urllib.request
 from typing import List
+from urllib.parse import urlsplit
 
 from smart_search.config import SmartSearchConfig
+from smart_search.constants import LOOPBACK_HOSTS
 
 # Request timeout for a single embeddings call (seconds).
 _REQUEST_TIMEOUT = 60
+
+
+def _check_base_url(url: str) -> None:
+    """Allow https to any host, plain http only to a loopback host.
+
+    The API key travels in a header, so it must never go out unencrypted.
+
+    Raises:
+        ValueError: If the URL would send the key in clear text or is not http(s).
+    """
+    parts = urlsplit(url)
+    if parts.scheme == "https" and parts.hostname:
+        return
+    if parts.scheme == "http" and parts.hostname in LOOPBACK_HOSTS:
+        return
+    raise ValueError(
+        "embedding_api_base_url must use https (plain http only for "
+        f"localhost): {url!r}"
+    )
 
 
 class CloudEmbedder:
@@ -25,8 +46,10 @@ class CloudEmbedder:
             config: Must provide embedding_api_key and embedding_cloud_model.
 
         Raises:
-            ValueError: If api key or model is missing.
+            ValueError: If api key or model is missing, or the base URL is
+                not https (plain http is allowed only for localhost).
         """
+        _check_base_url(config.embedding_api_base_url)
         self._base_url = config.embedding_api_base_url.rstrip("/")
         self._api_key = config.embedding_api_key
         self._model = config.embedding_cloud_model
@@ -52,12 +75,12 @@ class CloudEmbedder:
         req = urllib.request.Request(
             f"{self._base_url}/embeddings",
             data=payload,
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
+        # Unredirected: urllib would otherwise copy the key onto a redirect,
+        # including one to another host or to plain http.
+        req.add_unredirected_header("Authorization", f"Bearer {self._api_key}")
         with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
             body = json.loads(resp.read().decode("utf-8"))
         # OpenAI format: {"data": [{"index": i, "embedding": [...]}, ...]}

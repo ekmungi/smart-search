@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 from starlette.responses import JSONResponse
 
 from smart_search.config import SmartSearchConfig
-from smart_search.constants import APP_VERSION, BYTES_PER_MB
+from smart_search.constants import APP_VERSION, BYTES_PER_MB, ENV_ONLY_CONFIG_KEYS
 from smart_search.http_models import (
     AddFolderRequest,
     AddFolderResponse,
@@ -41,6 +41,19 @@ from smart_search.http_models import (
 )
 from smart_search.http_routes_ephemeral import create_ephemeral_router
 from smart_search.http_routes_model import create_model_router
+
+# Shown in place of a stored API key in config responses.
+SECRET_MASK = "********"
+# Backends PUT /config may select; "cloud" is env-only (compared lowercased,
+# as embedder_factory does).
+_API_BACKENDS = frozenset({"auto", "local", "none"})
+
+
+def _mask_secrets(config: dict) -> dict:
+    """Return config with a stored API key replaced by SECRET_MASK."""
+    if not config.get("embedding_api_key"):
+        return config
+    return {**config, "embedding_api_key": SECRET_MASK}
 
 
 def create_router(
@@ -421,15 +434,32 @@ def create_router(
     def get_config():
         """Get current configuration as a dictionary."""
         mgr = get_config_mgr()
-        return ConfigResponse(config=mgr.load())
+        return ConfigResponse(config=_mask_secrets(mgr.load()))
 
     @router.put("/config", response_model=ConfigUpdateResponse)
     def update_config(req: ConfigUpdateRequest):
         """Merge provided keys into the current configuration.
 
         If embedding_model or embedding_dimensions changed, triggers
-        a table rebuild (drops and recreates LanceDB table).
+        a table rebuild (drops and recreates LanceDB table). Cloud
+        credentials and switching on the cloud backend are refused: they
+        come only from SMART_SEARCH_ environment variables.
         """
+        refused = sorted(ENV_ONLY_CONFIG_KEYS & req.config.keys())
+        if refused:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{', '.join(refused)} can only be set through "
+                "SMART_SEARCH_ environment variables",
+            )
+        backend = req.config.get("embedding_backend")
+        if backend is not None and str(backend).lower() not in _API_BACKENDS:
+            raise HTTPException(
+                status_code=400,
+                detail="embedding_backend must be auto, local or none; the "
+                "cloud backend can only be enabled through "
+                "SMART_SEARCH_EMBEDDING_BACKEND",
+            )
         mgr = get_config_mgr()
         current = mgr.load()
         old_model = current.get("embedding_model")
@@ -454,7 +484,7 @@ def create_router(
                 get_task_mgr().submit(folder, get_indexer())
 
         return ConfigUpdateResponse(
-            config=merged, requires_reindex=requires_reindex,
+            config=_mask_secrets(merged), requires_reindex=requires_reindex,
         )
 
     @router.post("/rebuild")
