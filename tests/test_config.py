@@ -12,9 +12,9 @@ class TestConfigDefaults:
     """Tests for default configuration values."""
 
     def test_default_embedding_model(self):
-        """Default model is Snowflake/snowflake-arctic-embed-m-v2.0."""
+        """No model configured by default (no-auto-download; user selects)."""
         config = SmartSearchConfig()
-        assert config.embedding_model == "Snowflake/snowflake-arctic-embed-m-v2.0"
+        assert config.embedding_model == ""
 
     def test_default_dimensions(self):
         """Default embedding dimensions is 256 (Matryoshka truncation)."""
@@ -41,6 +41,34 @@ class TestConfigDefaults:
         assert "vectors" in config.lancedb_path
         assert "smart-search" in config.sqlite_path
         assert "metadata.db" in config.sqlite_path
+
+    def test_cloud_embedding_defaults(self):
+        """Cloud embedding fields exist with safe defaults."""
+        config = SmartSearchConfig()
+        assert config.embedding_api_key == ""
+        assert config.embedding_api_base_url == "https://openrouter.ai/api/v1"
+        assert config.embedding_cloud_model == ""
+
+    def test_embedding_backend_accepts_explicit_values(self, monkeypatch):
+        """embedding_backend accepts local | cloud | none (and legacy auto)."""
+        for value in ("local", "cloud", "none", "auto"):
+            monkeypatch.setenv("SMART_SEARCH_EMBEDDING_BACKEND", value)
+            assert SmartSearchConfig().embedding_backend == value
+
+    def test_cloud_dimensions_aligned_at_construction(self):
+        """Cloud backend sizes embedding_dimensions to the model at construction."""
+        cfg = SmartSearchConfig(
+            embedding_backend="cloud",
+            embedding_api_key="k",
+            embedding_cloud_model="openai/text-embedding-3-small",
+            embedding_dimensions=256,  # wrong on purpose
+        )
+        assert cfg.embedding_dimensions == 1536  # aligned by validator, no factory call
+
+    def test_local_dimensions_not_touched(self):
+        """Local backend keeps the configured dimension."""
+        cfg = SmartSearchConfig(embedding_backend="local", embedding_dimensions=256)
+        assert cfg.embedding_dimensions == 256
 
 
 class TestConfigOverrides:

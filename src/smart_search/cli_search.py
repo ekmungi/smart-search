@@ -10,7 +10,7 @@ def _cmd_search(args, data_dir):
         args: Parsed CLI arguments.
         data_dir: Path to the data directory.
     """
-    from smart_search.embedder import Embedder
+    from smart_search.embedder_factory import make_embedder
     from smart_search.search import SearchEngine
     from smart_search.store import ChunkStore
 
@@ -38,7 +38,7 @@ def _cmd_search(args, data_dir):
     )
     store = ChunkStore(cfg)
     store.initialize()
-    embedder = Embedder(cfg)
+    embedder = make_embedder(cfg)
     from smart_search.reranker import Reranker
     reranker = Reranker(cfg) if cfg.reranking_enabled else None
     engine = SearchEngine(cfg, embedder, store, reranker=reranker)

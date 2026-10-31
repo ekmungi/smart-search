@@ -85,13 +85,13 @@ def _build_indexer(cfg, store):
     Returns:
         Configured DocumentIndexer.
     """
-    from smart_search.embedder import Embedder
+    from smart_search.embedder_factory import make_embedder
     from smart_search.indexer import DocumentIndexer
     from smart_search.markdown_chunker import MarkdownChunker
 
     return DocumentIndexer(
         config=cfg,
-        embedder=Embedder(cfg),
+        embedder=make_embedder(cfg),
         store=store,
         markdown_chunker=MarkdownChunker(cfg),
     )

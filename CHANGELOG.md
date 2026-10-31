@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- Optional cloud embedding backend: an OpenAI-compatible embeddings API (OpenRouter by default) can replace the local model. It is switched on with `SMART_SEARCH_EMBEDDING_*` environment variables only.
+
+### Security
+- The HTTP API sends CORS permission only to the desktop app's origins and the Vite dev server, instead of every origin, so other web pages can no longer read its responses or change settings.
+- When bound to `127.0.0.1` or `localhost`, the server rejects requests whose `Host` header names another host, which blocks DNS-rebinding pages.
+- `PUT /api/config` refuses `embedding_api_key`, `embedding_api_base_url` and `embedding_cloud_model`, and accepts only `auto`, `local` or `none` for `embedding_backend`; server startup ignores those three keys in `config.json`. The cloud key, endpoint and model now come only from environment variables.
+- Requests that change state (anything other than GET, HEAD and OPTIONS) are refused when their `Origin` header names any other page, so a page can no longer trigger `/api/rebuild` or `/api/shutdown` with a request whose response it never reads. Clients that send no `Origin` (scripts, the CLI, the MCP client) are unaffected.
+- A `cloud` backend stored in `config.json` is ignored at startup; cloud mode is switched on only by `SMART_SEARCH_EMBEDDING_BACKEND`.
+- `GET /api/config` and the `PUT /api/config` response mask a stored API key.
+- The cloud embedder accepts only an https base URL, or plain http to a loopback host, and no longer forwards the API key when the service redirects.
+
+---
+
 ## [0.15.1] - 2026-03-29
 
 Memory optimization for image-heavy PDF indexing. Fixes B72: process RSS climbing to 5GB+ when indexing PDFs with embedded images.

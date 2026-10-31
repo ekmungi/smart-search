@@ -100,6 +100,16 @@ class Embedder:
         """Whether the ONNX model is currently loaded in memory."""
         return self._loaded
 
+    @property
+    def dimensions(self) -> int:
+        """Output embedding dimension (Matryoshka-truncated width)."""
+        return self._dimensions
+
+    @property
+    def backend_type(self) -> str:
+        """Local ONNX backend. (CPU/GPU subtyping is a later refinement.)"""
+        return "local"
+
     def _ensure_loaded(self) -> None:
         """Load tokenizer and ONNX session if not already loaded. Thread-safe.
 
@@ -425,3 +435,7 @@ class Embedder:
             Model name string.
         """
         return self._config.embedding_model
+
+
+# Clarity alias: the ONNX Embedder is the "local" EmbedderBackend.
+OnnxEmbedder = Embedder

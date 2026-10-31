@@ -62,6 +62,7 @@ def check_index_compatibility(config: SmartSearchConfig, db_path: str) -> Dict:
 
     current = {
         "embedding_model": config.embedding_model,
+        "embedding_backend": config.embedding_backend,
         "embedding_dimensions": str(config.embedding_dimensions),
         "chunk_max_words": str(config.chunk_max_words),
         "chunk_min_words": str(config.chunk_min_words),

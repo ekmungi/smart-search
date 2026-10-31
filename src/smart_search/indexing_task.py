@@ -94,6 +94,7 @@ def _compute_max_concurrent() -> int:
         return 1  # Safe fallback
 
 if TYPE_CHECKING:
+    from smart_search.config import SmartSearchConfig
     from smart_search.indexer import DocumentIndexer
 
 
@@ -295,6 +296,7 @@ class IndexingTaskManager:
         config_mgr,
         indexer: "DocumentIndexer",
         check_interval: float = 30.0,
+        config: "Optional[SmartSearchConfig]" = None,
     ) -> None:
         """Start watching for model availability to auto-retry failed files.
 
@@ -302,14 +304,27 @@ class IndexingTaskManager:
         thread that periodically checks is_model_cached(). When model becomes
         available, clears all failed files and resubmits indexing.
 
+        For a cloud backend, readiness does not depend on a local model file;
+        the watcher is a no-op when config.embedding_backend is "cloud".
+
         Args:
             model_name: HuggingFace model identifier.
             store: ChunkStore for clearing failed status.
             config_mgr: ConfigManager for listing watch directories.
             indexer: DocumentIndexer for resubmission.
             check_interval: Seconds between availability checks.
+            config: Optional SmartSearchConfig; when provided and backend is
+                cloud, the watcher is skipped (cloud readiness is not tied
+                to a local model cache).
         """
         from smart_search.embedder import Embedder
+
+        # Cloud readiness is not gated on a local model file -- skip watcher.
+        if config is not None:
+            backend = (config.embedding_backend or "local").lower()
+            if backend == "cloud":
+                self._model_watcher_active = False
+                return
 
         if Embedder.is_model_cached(model_name):
             self._model_watcher_active = False
@@ -506,15 +521,12 @@ class IndexingTaskManager:
             finally:
                 prescan_conn.close()
 
-            # Model readiness gate: check if embedding model is cached.
-            # If not, filter out files that need vector embeddings and only
-            # process keyword-only files (CSV, XLSX, JSON, etc.).
-            from smart_search.embedder import Embedder
-            model_name = config.embedding_model
-            if not model_name:
-                model_ready = False
-            else:
-                model_ready = Embedder.is_model_cached(model_name)
+            # Embedder readiness gate (backend-aware). If the embedder cannot
+            # produce vectors yet, only keyword-only files (CSV, XLSX, JSON)
+            # are processed. Cloud is ready when api key + model are set;
+            # local is ready when the model is cached on disk.
+            from smart_search.embedder_factory import embedder_is_ready
+            model_ready = embedder_is_ready(config)
 
             if not model_ready:
                 keyword_only_files = [

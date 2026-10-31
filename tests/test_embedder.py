@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from smart_search.config import SmartSearchConfig
-from smart_search.embedder import Embedder, _mean_pool, _l2_normalize, _truncate
+from smart_search.embedder import Embedder, OnnxEmbedder, _mean_pool, _l2_normalize, _truncate
 
 
 @pytest.fixture
@@ -466,3 +466,22 @@ class TestEmbedderSlow:
     def test_is_model_cached_after_load(self):
         """After loading the model, is_model_cached should return True."""
         assert Embedder.is_model_cached() is True
+
+
+class TestEmbedderBackendMembers:
+    """Embedder satisfies the extended EmbedderProtocol without loading ONNX."""
+
+    def test_dimensions_reflects_config(self):
+        """dimensions property returns the configured embedding_dimensions value."""
+        cfg = SmartSearchConfig(embedding_dimensions=256)
+        emb = Embedder(cfg)
+        assert emb.dimensions == 256
+
+    def test_backend_type_is_local(self):
+        """backend_type property returns 'local' for the ONNX embedder."""
+        emb = Embedder(SmartSearchConfig())
+        assert emb.backend_type == "local"
+
+    def test_onnx_embedder_is_alias(self):
+        """OnnxEmbedder is the same object as Embedder (clarity alias)."""
+        assert OnnxEmbedder is Embedder

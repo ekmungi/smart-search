@@ -1,8 +1,8 @@
 # Smart Search
 
-A personal, local-first knowledge management system. Index your documents, notes, spreadsheets, and more into a searchable knowledge base that connects with everything running locally -- Claude Code (MCP), a desktop app, REST API, or CLI. Runs entirely on your machine: no cloud, no GPU, no subscriptions.
+A personal, local-first knowledge management system. Index your documents, notes, spreadsheets, and more into a searchable knowledge base that connects with everything running locally -- Claude Code (MCP), a desktop app, REST API, or CLI. Indexing and search run on your machine with no GPU and no subscription. The network is used to download the AI models once, and for an optional cloud embedding mode that is off by default (see [Network access](#network-access)).
 
-**Version:** 0.13.1 | **License:** MIT
+**Version:** 0.15.1 | **License:** MIT
 
 ---
 
@@ -13,7 +13,7 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 - **Search everything locally.** 14 document formats indexed into one knowledge base with hybrid search (semantic + keyword + reranking). Find what you need whether you remember the exact phrase or just the concept.
 - **Connect with your tools.** MCP server for Claude Code, REST API for scripts and automation, CLI for power users, desktop app for visual management. One index, many interfaces.
 - **Stay responsive.** All heavy lifting runs in an out-of-process Python server. Your editor, your Obsidian vault, your desktop -- nothing freezes during indexing.
-- **Own your data.** Everything stays on disk -- LanceDB vectors and SQLite metadata in a local directory. No cloud sync, no telemetry, no accounts. MIT licensed.
+- **Own your data.** Your index stays on disk -- LanceDB vectors and SQLite metadata in a local directory. No cloud sync, no telemetry, no accounts. MIT licensed. The one exception is the optional cloud embedding mode, which sends text to an embeddings service when you switch it on.
 - **Keep it lightweight.** ONNX embeddings with lazy loading and automatic GPU acceleration. The model loads when you search, unloads after 60 seconds idle on CPU (stays resident on GPU). Steady-state RAM under 200MB.
 
 ---
@@ -24,10 +24,10 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 
 - **Hybrid search** (default): combines vector similarity with FTS5 keyword matching via Reciprocal Rank Fusion, cross-encoder reranking, and MMR diversity selection
 - **Cross-encoder reranking**: jointly scores (query, document) pairs with TinyBERT-L-2 for higher precision than bi-encoder similarity alone (+5-15 nDCG@10 in benchmarks)
-- **MMR diversity**: eliminates redundant chunks from the same document, ensuring results cover distinct information
+- **MMR diversity**: reorders results so that near-duplicate chunks move down the list; a separate per-document cap (2 chunks by default) then drops further chunks from the same file
 - **Semantic mode**: pure vector search with configurable relevance threshold
 - **Keyword mode**: BM25 ranking via SQLite FTS5 with porter stemming and stopword removal
-- **Folder filtering**: restrict results to specific directories
+- **Folder filtering**: restrict results to specific directories. Known issue: the folder and file-type filters are applied after the top results have been chosen, so a filtered search returns only those of the overall top results that match, and can return fewer results than asked for
 - **Find related**: discover similar documents by averaging chunk embeddings
 - **[Search pipeline architecture](https://ekmungi.github.io/smart-search/search-pipeline.html)**: interactive visual diagram of the full retrieval pipeline
 
@@ -46,8 +46,9 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 
 ### Indexing
 
-- **14 formats**: all non-Markdown files converted via MarkItDown, then chunked by headings
-- **Keyword-only indexing**: structured files (CSV, XLSX, JSON) indexed in FTS5 for keyword search without vector embeddings
+- **14 formats**: Markdown files are chunked directly; PDF, DOCX, EPUB, PPTX, MSG, HTML, TXT and IPYNB files are converted to Markdown with MarkItDown first
+- **Word-based chunking**: chunks follow the document's headings and are split at 200 words with a 40-word overlap; chunks under 50 words are merged
+- **Keyword-only indexing**: CSV, XLSX, XLS, JSON and JSONL files skip MarkItDown and the embedder. Each file is read as raw text and stored whole as one entry in the FTS5 keyword index, so it is found by keyword search only. Known issue: XLSX and XLS are binary formats, so reading them as text does not recover their cell contents, and they are not usefully searchable at present
 - **Persistent conversion worker**: long-lived subprocess for binary file conversion -- eliminates per-file process creation overhead on Windows
 - **Background indexing**: non-blocking with per-folder progress, cancellation, and auto-resume on restart
 - **Hash-based dedup**: unchanged files are skipped automatically
@@ -74,12 +75,13 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 - **Lazy loading**: model loads on demand, unloads after 60s idle to free RAM
 - **Curated registry**: switchable models with quality/size metadata
 - **GPU auto-detection**: CUDA and DirectML acceleration used automatically when available, CPU fallback otherwise
+- **Optional cloud embedding** (off by default): an OpenAI-compatible embeddings API (OpenRouter by default) can replace the local model. It is switched on with environment variables only; the desktop app lists it as "coming soon". See [Network access](#network-access)
 
 ### Architecture
 
 - **Out-of-process**: all heavy lifting in Python, Obsidian/desktop stays responsive
 - **MCP server**: 11 tools for Claude Code integration
-- **REST API**: 20 endpoints on `localhost:9742`
+- **REST API**: 26 endpoints on `localhost:9742`
 - **CLI**: `smart-search` command with subcommands for all operations
 - **File-based storage**: LanceDB (vectors) + SQLite (metadata + FTS5), no database server
 
@@ -91,7 +93,15 @@ Your knowledge is scattered across notes, PDFs, slide decks, and spreadsheets. S
 | RAM | 2 GB minimum (~200 MB idle) |
 | Storage | ~300 MB (with AI model) |
 | Runtime | Python 3.11+ (bundled in desktop installer) |
-| Network | Not required |
+| Network | Needed on first use to download the AI models; not needed after that |
+
+### Network access
+
+Your index and your searches stay on your machine. Smart Search uses the network in three cases:
+
+- **First use.** The embedding model (snowflake-arctic-embed-m-v2.0, about 297 MB) and the reranking model (TinyBERT, about 15 MB) are downloaded from Hugging Face into the local Hugging Face cache. After that, both work offline. While a network is available, Hugging Face's download library also checks for a newer version of a model each time that model loads.
+- **Models you choose to download.** Picking a different model in the desktop Settings, or calling `POST /api/model/download`, downloads it from Hugging Face. On a machine without internet access, model files can instead be copied in from a local folder with `POST /api/model/import`.
+- **Optional cloud embedding (off by default).** If you set `SMART_SEARCH_EMBEDDING_BACKEND=cloud` together with `SMART_SEARCH_EMBEDDING_API_KEY` and `SMART_SEARCH_EMBEDDING_CLOUD_MODEL`, the text of every chunk is sent to an OpenAI-compatible embeddings service when it is indexed, and every search query is sent when you search. The default service is OpenRouter (`https://openrouter.ai/api/v1`). A different service can be set with `SMART_SEARCH_EMBEDDING_API_BASE_URL`; it must use https, except for a server on your own machine (`localhost` or `127.0.0.1`). The desktop app does not offer this mode yet.
 
 ---
 
@@ -285,7 +295,7 @@ smart-search temp cleanup /path              # Remove an ephemeral index
 
 ## REST API
 
-The HTTP server runs on `localhost:9742` with 23 endpoints:
+The HTTP server runs on `localhost:9742` with 26 endpoints. It has no login, so it limits who can call it: browsers may call it only from the desktop app (and the Vite dev server), other web pages cannot send it requests that change anything, and when it is bound to `127.0.0.1` or `localhost` it rejects requests addressed to any other host name. Scripts, the MCP server and the CLI are not affected.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -298,12 +308,17 @@ The HTTP server runs on `localhost:9742` with 23 endpoints:
 | GET | `/api/files` | List indexed files |
 | POST | `/api/ingest` | Index file (sync) or folder (202 async) |
 | GET | `/api/indexing/status` | Background indexing progress |
+| POST | `/api/indexing/pause` | Pause active indexing tasks |
+| POST | `/api/indexing/resume` | Resume paused indexing tasks |
 | GET | `/api/config` | Current configuration |
 | PUT | `/api/config` | Update configuration |
 | GET | `/api/models` | Available embedding models |
 | GET | `/api/model/status` | Model cache status |
 | GET | `/api/model/loaded` | Model memory status |
+| POST | `/api/model/download` | Download a model from Hugging Face by ID or URL |
+| POST | `/api/model/import` | Import model files from a local folder into the Hugging Face cache |
 | GET | `/api/find-related?note_path=...` | Find related documents |
+| POST | `/api/rebuild` | Clear file hashes and re-index every watched folder |
 | POST | `/api/repair` | Run index maintenance (orphans, FTS5, compaction) |
 | POST | `/api/ephemeral/index` | Create ephemeral index |
 | GET | `/api/ephemeral` | List ephemeral indexes |
@@ -327,7 +342,7 @@ Override with: `SMART_SEARCH_DATA_DIR=/custom/path`
 
 ### config.json
 
-Persistent configuration stored in the data directory. Managed via CLI, REST API, or desktop Settings panel.
+Persistent configuration stored in the data directory. Managed via CLI, REST API, or desktop Settings panel. The cloud embedding settings are the exception: the API key, base URL and cloud model are read only from environment variables, `PUT /api/config` refuses them and refuses to switch the backend to `cloud`, and `GET /api/config` never returns a stored key.
 
 ### Environment Variables
 
@@ -337,10 +352,16 @@ All settings can be overridden with `SMART_SEARCH_` prefixed variables:
 |----------|---------|-------------|
 | `SMART_SEARCH_EMBEDDING_MODEL` | `Snowflake/snowflake-arctic-embed-m-v2.0` | Embedding model |
 | `SMART_SEARCH_EMBEDDING_DIMENSIONS` | `256` | Vector dimensions (Matryoshka) |
+| `SMART_SEARCH_EMBEDDING_BACKEND` | `auto` | `auto` or `local` (on-device ONNX model), `cloud` (embeddings API), or `none` (keyword search only) |
+| `SMART_SEARCH_EMBEDDING_API_KEY` | (empty) | API key for the cloud backend |
+| `SMART_SEARCH_EMBEDDING_CLOUD_MODEL` | (empty) | Cloud model, e.g. `openai/text-embedding-3-small` |
+| `SMART_SEARCH_EMBEDDING_API_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible embeddings endpoint for the cloud backend |
 | `SMART_SEARCH_WATCH_DIRECTORIES` | `[]` | Directories to watch |
 | `SMART_SEARCH_SEARCH_DEFAULT_MODE` | `hybrid` | Default search mode |
 | `SMART_SEARCH_RELEVANCE_THRESHOLD` | `0.30` | Minimum similarity score (semantic mode) |
-| `SMART_SEARCH_CHUNK_MAX_TOKENS` | `512` | Maximum tokens per chunk |
+| `SMART_SEARCH_CHUNK_MAX_WORDS` | `200` | Maximum words per chunk |
+| `SMART_SEARCH_CHUNK_OVERLAP_WORDS` | `40` | Words of overlap between consecutive pieces of a split section |
+| `SMART_SEARCH_CHUNK_MIN_WORDS` | `50` | Chunks shorter than this are merged with a neighbour |
 | `SMART_SEARCH_SUPPORTED_EXTENSIONS` | `[".md", ".txt", ".pdf", ".docx", ".epub", ".xlsx", ".xls", ".csv", ".pptx", ".html", ".htm", ".json", ".jsonl", ".msg", ".ipynb"]` | File types to index |
 | `SMART_SEARCH_EXCLUDE_PATTERNS` | `[".git", ".obsidian", "node_modules", ...]` | Excluded directories |
 | `SMART_SEARCH_WATCHER_DEBOUNCE_SECONDS` | `2.0` | File watcher debounce |
@@ -356,7 +377,7 @@ All clients connect to the **same HTTP server** on port 9742. The server is the 
                          ┌─────────────────────────┐
                          │   HTTP Server (:9742)    │
                          │   smart-search serve     │
-                         │   (FastAPI, 20 endpoints)│
+                         │   (FastAPI, 26 endpoints)│
                          └──────┬──┬──┬────────────┘
                                 │  │  │
                  ┌──────────────┘  │  └──────────────┐
@@ -381,7 +402,7 @@ All clients connect to the **same HTTP server** on port 9742. The server is the 
 
 ```
 Backend (Python, all share the HTTP server)
-  http.py / http_routes.py       FastAPI app, 20 endpoints
+  http.py / http_routes*.py      FastAPI app, 26 endpoints
   server.py / mcp_client.py      MCP server, proxies to HTTP
   search.py                      Hybrid search: vector + FTS5 + RRF + rerank + MMR
   fts.py                         FTS5 keyword search, BM25 ranking
@@ -392,8 +413,11 @@ Backend (Python, all share the HTTP server)
   indexer.py                     Document ingestion pipeline
   conversion_worker.py           Persistent subprocess for binary file conversion
   markitdown_parser.py           File -> Markdown conversion
-  markdown_chunker.py            Heading-based section splitting
+  markdown_chunker.py            Heading-based sections, 200-word limit, 40-word overlap
+  embedder_factory.py            Picks the local or cloud embedder from config
   embedder.py                    ONNX embedding with lazy load/unload
+  cloud_embedder.py              Optional OpenAI-compatible embeddings API client
+  model_download.py              Hugging Face model download with timeout
   store.py                       LanceDB vectors + SQLite metadata + FTS5
   startup.py                     Orphan reconciliation, FTS5 backfill, repair
   watcher.py                     Watchdog file watcher with debounce
@@ -412,19 +436,22 @@ Desktop (Tauri v2)
 ### Data Flow
 
 ```
-File -> MarkItDown (non-.md) -> Markdown -> MarkdownChunker -> Chunks
-     -> Embedder -> LanceDB + SQLite FTS5
+.md file                  -> MarkdownChunker -> Chunks -> Embedder -> LanceDB + SQLite FTS5
+PDF/DOCX/EPUB/PPTX/MSG/
+HTML/TXT/IPYNB            -> MarkItDown -> Markdown -> MarkdownChunker -> (same as above)
+CSV/XLSX/XLS/JSON/JSONL   -> raw text, whole file -> SQLite FTS5 only (no embedding)
 ```
 
 ### Search Flow (hybrid mode)
 
 ```
 Query -> Preprocess (stopwords / normalization)
-      -> Vector search (LanceDB)    ─┐
-      -> Keyword search (FTS5 BM25) ─┼─> RRF Fusion
-                                          -> Cross-Encoder Rerank (TinyBERT, 30-60ms)
-                                              -> MMR Diversity (lambda=0.8, <1ms)
-                                                  -> Final Results
+      -> Vector search (LanceDB), then keyword search (FTS5 BM25), 5x limit each
+          -> RRF Fusion (keeps the top `limit` results)
+              -> Cross-Encoder Rerank (TinyBERT, 30-60ms)
+                  -> MMR Diversity (lambda=0.8, <1ms)
+                      -> Per-document cap (2 chunks), folder and file-type filters
+                          -> Final Results
 ```
 
 For the full pipeline architecture with resource budgets and configuration reference, see [docs/search-architecture.md](docs/search-architecture.md) or the [interactive visual diagram](https://ekmungi.github.io/smart-search/search-pipeline.html).
@@ -444,7 +471,7 @@ pytest -m ""
 pytest --cov=smart_search --cov-report=term-missing
 ```
 
-425+ tests covering all modules. Slow tests (marked `@pytest.mark.slow`) require ML models to be downloaded.
+674 tests: 666 fast tests run by default, plus 8 slow tests (marked `@pytest.mark.slow`) that require the ML models to be downloaded.
 
 ---
 
@@ -454,9 +481,9 @@ pytest --cov=smart_search --cov-report=term-missing
 |-----------|-----------|
 | MCP server | FastMCP |
 | HTTP server | FastAPI + Uvicorn |
-| Document parsing | MarkItDown (14 formats: PDF, DOCX, XLSX, PPTX, EPUB, CSV, MSG, HTML, TXT, JSON, IPYNB) |
-| Markdown parsing | Custom heading-based splitter |
-| Embeddings | snowflake-arctic-embed-m-v2.0 via ONNX Runtime |
+| Document parsing | MarkItDown (PDF, DOCX, EPUB, PPTX, MSG, HTML, TXT, IPYNB); CSV, XLSX, XLS, JSON and JSONL are read as raw text |
+| Markdown parsing | Custom heading-based splitter with word-based size limits |
+| Embeddings | snowflake-arctic-embed-m-v2.0 via ONNX Runtime (default); optional OpenAI-compatible embeddings API |
 | Vector store | LanceDB (file-based, columnar) |
 | Metadata + FTS | SQLite (FTS5 with porter stemming) |
 | Search fusion | Reciprocal Rank Fusion (RRF, k=60) |

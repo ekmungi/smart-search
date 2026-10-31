@@ -14,6 +14,16 @@ from smart_search.models import Chunk, SearchResult
 class EmbedderProtocol(Protocol):
     """Interface for text embedding generators."""
 
+    @property
+    def dimensions(self) -> int:
+        """Output embedding dimension (drives the LanceDB vector column width)."""
+        ...
+
+    @property
+    def backend_type(self) -> str:
+        """Backend identifier: 'local', 'local-cpu', 'local-gpu', or 'cloud'."""
+        ...
+
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for document chunks.
 

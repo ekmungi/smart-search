@@ -13,10 +13,19 @@ from typing import TYPE_CHECKING, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 
 from smart_search.config import SmartSearchConfig, get_config
 from smart_search.config_manager import ConfigManager
-from smart_search.constants import APP_VERSION, DEFAULT_HOST, DEFAULT_HTTP_PORT
+from smart_search.constants import (
+    ALLOWED_ORIGINS,
+    APP_VERSION,
+    DEFAULT_HOST,
+    DEFAULT_HTTP_PORT,
+    ENV_ONLY_CONFIG_KEYS,
+    LOOPBACK_HOSTS,
+)
 from smart_search.conversion_worker import create_conversion_worker
 from smart_search.data_dir import get_data_dir
 from smart_search.http_routes import create_router
@@ -28,6 +37,51 @@ if TYPE_CHECKING:
     from smart_search.search import SearchEngine
     from smart_search.store import ChunkStore
     from smart_search.watcher import FileWatcher
+
+# Methods that never change state; other methods need an allowed Origin
+# (or none, for non-browser clients).
+_SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def runtime_config_from_persisted(persisted: dict) -> SmartSearchConfig:
+    """Build the runtime config from config.json values.
+
+    Keeps only known fields and drops ENV_ONLY_CONFIG_KEYS, so the cloud
+    API key, endpoint and model come from environment variables alone.
+
+    Args:
+        persisted: Merged config dict from ConfigManager.load().
+
+    Returns:
+        SmartSearchConfig with the persisted overrides applied.
+    """
+    base = get_config()
+    overrides = {
+        key: value for key, value in persisted.items()
+        if hasattr(base, key) and key not in ENV_ONLY_CONFIG_KEYS
+    }
+    # A stored "cloud" backend is dropped; SmartSearchConfig still reads it
+    # from SMART_SEARCH_EMBEDDING_BACKEND, the only way to switch cloud on.
+    if str(overrides.get("embedding_backend", "")).lower() == "cloud":
+        del overrides["embedding_backend"]
+    return SmartSearchConfig(**overrides) if overrides else base
+
+
+def apply_host_check(app: FastAPI, bind_host: str) -> None:
+    """Reject foreign Host headers when the server binds to loopback.
+
+    A DNS-rebinding page reaches 127.0.0.1 under its own domain name and
+    passes the CORS origin check; checking Host closes that route. Other
+    bind addresses (LAN use) are left unchanged.
+
+    Args:
+        app: The FastAPI application, before it starts serving.
+        bind_host: Address the server will bind to.
+    """
+    if bind_host in LOOPBACK_HOSTS:
+        app.add_middleware(
+            TrustedHostMiddleware, allowed_hosts=list(LOOPBACK_HOSTS),
+        )
 
 
 def create_app(
@@ -67,21 +121,8 @@ def create_app(
 
     if config is None:
         # Merge persisted config.json values into runtime config
-        base = get_config()
         mgr = ConfigManager(get_data_dir())
-        persisted = mgr.load()
-        if persisted:
-            # Build override dict from config.json, keeping only known fields
-            overrides = {}
-            for key, value in persisted.items():
-                if hasattr(base, key):
-                    overrides[key] = value
-            if overrides:
-                config = SmartSearchConfig(**overrides)
-            else:
-                config = base
-        else:
-            config = base
+        config = runtime_config_from_persisted(mgr.load())
 
     # Mutable dict avoids nonlocal for start_time assignment in lifespan
     state = {"start_time": 0.0}
@@ -183,10 +224,27 @@ def create_app(
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=list(ALLOWED_ORIGINS),
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def refuse_foreign_origin_writes(request, call_next):
+        """Refuse state-changing requests sent by other web pages.
+
+        CORS only hides responses: a no-cors POST from any page still runs
+        (e.g. /api/rebuild). Browsers send Origin on every such request,
+        while scripts, the CLI and the MCP client send none.
+        """
+        origin = request.headers.get("origin")
+        if (
+            request.method not in _SAFE_METHODS
+            and origin is not None
+            and origin not in ALLOWED_ORIGINS
+        ):
+            return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
+        return await call_next(request)
 
     def get_store():
         """Get or create the ChunkStore singleton (thread-safe)."""
@@ -205,11 +263,11 @@ def create_app(
         if _engine is None:
             # Build heavy deps outside lock so model loading doesn't block
             # other getters (get_store, get_config_mgr) on other threads.
-            from smart_search.embedder import Embedder
+            from smart_search.embedder_factory import make_embedder
             from smart_search.reranker import Reranker
             from smart_search.search import SearchEngine as _SE
             store = get_store()
-            embedder = Embedder(config)
+            embedder = make_embedder(config)
             reranker = Reranker(config) if config.reranking_enabled else None
             with _singleton_lock:
                 if _engine is None:
@@ -222,11 +280,11 @@ def create_app(
         if _indexer is None:
             # Build heavy deps outside lock so model loading doesn't block
             # other getters (get_store, get_config_mgr) on other threads.
-            from smart_search.embedder import Embedder
+            from smart_search.embedder_factory import make_embedder
             from smart_search.indexer import DocumentIndexer as _DI
             from smart_search.markdown_chunker import MarkdownChunker
             store = get_store()
-            embedder = Embedder(config)
+            embedder = make_embedder(config)
             chunker = MarkdownChunker(config)
             with _singleton_lock:
                 if _indexer is None:
@@ -325,6 +383,7 @@ def main(host: str = DEFAULT_HOST, port: int = DEFAULT_HTTP_PORT):
     import uvicorn
 
     app = create_app()
+    apply_host_check(app, host)
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
